@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+/* ===== 设计变量（从 Pencil 设计稿提取） ===== */
+:root {
+  /* 主色系 */
+  --color-primary: #FF8400;
+  --color-primary-light: #FFF5EB;
+  --color-primary-foreground: #FFFFFF;
+
+  /* 文字颜色 */
+  --color-foreground: #1A1A1A;
+  --color-muted: #888888;
+  --color-muted-light: #999999;
+
+  /* 背景 */
+  --color-background: #FFFFFF;
+  --color-background-secondary: #F5F5F7;
+  --color-card: #FFFFFF;
+
+  /* 边框 & 分割线 */
+  --color-border: #F0F0F0;
+  --color-border-dark: #E0E0E0;
+
+  /* 语义色 */
+  --color-success: #22C55E;
+  --color-info: #3B82F6;
+  --color-error: #EF4444;
+  --color-warning: #FF8400;
+  --color-purple: #8B5CF6;
+
+  /* 圆角 */
+  --radius-lg: 18px;
+  --radius-md: 16px;
+  --radius-sm: 12px;
+  --radius-xs: 8px;
+
+  /* 阴影 */
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.06);
+  --shadow-nav: 0 -2px 10px rgba(0, 0, 0, 0.05);
+}
+
+/* ===== 字体定义 ===== */
+@layer base {
+  /* 确保整个页面可撑满高度 */
+  html, body {
+    height: 100%;
+  }
+
+  /* 英文/数字字体 */
+  .font-primary {
+    font-family: "Inter", "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+
+  /* 中文字体 */
+  .font-secondary {
+    font-family: "PingFang SC", "Noto Sans SC", "Inter", sans-serif;
+  }
+}

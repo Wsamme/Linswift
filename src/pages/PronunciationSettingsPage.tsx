@@ -1,0 +1,234 @@
+/**
+ * 发音设置页 —— 使用 HTML5 SpeechSynthesis API
+ *
+ * 功能：
+ * 1. 口音选择（美式 🇺🇸 / 英式 🇬🇧 / 澳式 🇦🇺）
+ * 2. 朗读速度调节（0.5x ~ 2.0x）
+ * 3. 开关：自动播放发音、单词发音、例句发音、循环播放
+ * 4. 音量滑块调节
+ * 5. 一键试听当前设置效果
+ *
+ * 所有设置实时保存到 localStorage，全局生效
+ */
+
+import { useNavigate } from 'react-router-dom'
+import { ChevronLeft, Play } from 'lucide-react'
+import { useTTSSettings } from '../hooks/useTTSSettings'
+import {
+  type AccentType,
+  ACCENT_LABELS,
+  ACCENT_FLAGS,
+  SPEED_OPTIONS,
+} from '../lib/tts'
+
+// 所有可选的口音
+const accentOptions: AccentType[] = ['en-US', 'en-GB', 'en-AU']
+
+export default function PronunciationSettingsPage() {
+  const navigate = useNavigate()
+  const {
+    settings,
+    setAccent,
+    setRate,
+    setVolume,
+    toggleSetting,
+    previewVoice,
+  } = useTTSSettings()
+
+  return (
+    <div className="h-full flex justify-center bg-[var(--color-background-secondary)]">
+      <div className="w-full max-w-[390px] flex flex-col">
+        {/* ===== 顶部导航 ===== */}
+        <div className="flex items-center gap-3 px-5 py-4">
+          <button
+            onClick={() => navigate(-1)}
+            className="w-9 h-9 rounded-full bg-[var(--color-card)] flex items-center justify-center active:scale-95 transition-transform"
+          >
+            <ChevronLeft size={20} className="text-[var(--color-foreground)]" />
+          </button>
+          <h1 className="text-[18px] font-bold text-[var(--color-foreground)] font-secondary">
+            发音设置
+          </h1>
+
+          {/* 试听按钮（右侧） */}
+          <button
+            onClick={() => previewVoice()}
+            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-[var(--color-primary)] rounded-full active:scale-95 transition-transform"
+          >
+            <Play size={14} className="text-white fill-white" />
+            <span className="text-[13px] text-white font-medium">试听</span>
+          </button>
+        </div>
+
+        {/* ===== 可滚动内容区 ===== */}
+        <div className="flex-1 overflow-y-auto px-5 pb-8 space-y-4">
+
+          {/* ----- 口音选择 ----- */}
+          <div className="bg-[var(--color-card)] rounded-[var(--radius-lg)] p-5 space-y-3" style={{ boxShadow: 'var(--shadow-card)' }}>
+            <h2 className="text-[16px] font-semibold text-[var(--color-foreground)]">发音类型</h2>
+            <p className="text-[12px] text-[var(--color-muted-light)]">选择你偏好的英语发音口音</p>
+
+            <div className="space-y-2.5">
+              {accentOptions.map(accent => {
+                const isActive = settings.accent === accent
+                return (
+                  <button
+                    key={accent}
+                    onClick={() => {
+                      setAccent(accent)
+                      // 切换后自动试听
+                      setTimeout(() => previewVoice('Hello, how are you?'), 100)
+                    }}
+                    className={`w-full flex items-center justify-between px-4 py-3 rounded-[var(--radius-sm)] border transition-colors ${
+                      isActive
+                        ? 'bg-[var(--color-primary-light)] border-[var(--color-primary)]'
+                        : 'bg-white border-[var(--color-border)]'
+                    }`}
+                  >
+                    {/* 左侧：国旗 + 标签 */}
+                    <div className="flex items-center gap-3">
+                      <span className="text-[20px]">{ACCENT_FLAGS[accent]}</span>
+                      <span className={`text-[14px] font-medium ${isActive ? 'text-[var(--color-foreground)]' : 'text-[var(--color-foreground)]'}`}>
+                        {ACCENT_LABELS[accent]}
+                      </span>
+                    </div>
+
+                    {/* 右侧：选中标记（圆形 radio） */}
+                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
+                      isActive ? 'border-[var(--color-primary)] bg-[var(--color-primary)]' : 'border-[var(--color-border-dark)]'
+                    }`}>
+                      {isActive && <div className="w-2 h-2 rounded-full bg-white" />}
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* ----- 朗读速度 ----- */}
+          <div className="bg-[var(--color-card)] rounded-[var(--radius-lg)] p-5 space-y-3" style={{ boxShadow: 'var(--shadow-card)' }}>
+            <h2 className="text-[16px] font-semibold text-[var(--color-foreground)]">朗读速度</h2>
+            <p className="text-[12px] text-[var(--color-muted-light)]">调节单词和例句的朗读语速</p>
+
+            <div className="flex gap-2">
+              {SPEED_OPTIONS.map(opt => {
+                const isActive = settings.rate === opt.value
+                return (
+                  <button
+                    key={opt.value}
+                    onClick={() => {
+                      setRate(opt.value)
+                      // 切换后自动试听
+                      setTimeout(() => previewVoice('Linswift'), 100)
+                    }}
+                    className={`flex-1 py-1.5 rounded-full text-[13px] font-medium transition-colors ${
+                      isActive
+                        ? 'bg-[var(--color-primary)] text-white'
+                        : 'bg-[var(--color-primary-light)] text-[var(--color-primary)]'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* ----- 功能开关 ----- */}
+          <div className="bg-[var(--color-card)] rounded-[var(--radius-lg)] overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
+            <ToggleRow
+              label="🔊 自动播放发音"
+              desc="翻页时自动朗读单词"
+              value={settings.autoPlay}
+              onChange={() => toggleSetting('autoPlay')}
+            />
+            <div className="h-px bg-[var(--color-border)] mx-4" />
+            <ToggleRow
+              label="📖 单词发音"
+              desc="学习时朗读单词"
+              value={settings.wordPronounce}
+              onChange={() => toggleSetting('wordPronounce')}
+            />
+            <div className="h-px bg-[var(--color-border)] mx-4" />
+            <ToggleRow
+              label="💬 例句发音"
+              desc="学习时朗读例句"
+              value={settings.sentencePronounce}
+              onChange={() => toggleSetting('sentencePronounce')}
+            />
+            <div className="h-px bg-[var(--color-border)] mx-4" />
+            <ToggleRow
+              label="🔁 循环播放"
+              desc="朗读完毕后自动重复"
+              value={settings.loopPlay}
+              onChange={() => toggleSetting('loopPlay')}
+            />
+          </div>
+
+          {/* ----- 音量调节 ----- */}
+          <div className="bg-[var(--color-card)] rounded-[var(--radius-lg)] p-5 space-y-3" style={{ boxShadow: 'var(--shadow-card)' }}>
+            <h2 className="text-[16px] font-semibold text-[var(--color-foreground)]">音量调节</h2>
+            <div className="flex items-center gap-3">
+              <span className="text-[16px]">🔈</span>
+              {/* HTML5 range 滑块 */}
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={settings.volume}
+                onChange={e => setVolume(Number(e.target.value))}
+                className="flex-1 h-1.5 accent-[var(--color-primary)] rounded-full appearance-none bg-[var(--color-border)] cursor-pointer
+                  [&::-webkit-slider-thumb]:appearance-none
+                  [&::-webkit-slider-thumb]:w-4
+                  [&::-webkit-slider-thumb]:h-4
+                  [&::-webkit-slider-thumb]:rounded-full
+                  [&::-webkit-slider-thumb]:bg-[var(--color-primary)]
+                  [&::-webkit-slider-thumb]:shadow-md
+                "
+              />
+              <span className="text-[16px]">🔊</span>
+              <span className="text-[13px] text-[var(--color-muted)] w-8 text-right">
+                {Math.round(settings.volume * 100)}%
+              </span>
+            </div>
+          </div>
+
+          {/* ----- 技术说明（小提示） ----- */}
+          <div className="text-center py-2">
+            <p className="text-[11px] text-[var(--color-muted-light)]">
+              使用 HTML5 SpeechSynthesis API · 无需联网 · 零费用
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ========== Toggle 行组件（带描述文字） ==========
+interface ToggleRowProps {
+  label: string
+  desc?: string
+  value: boolean
+  onChange: () => void
+}
+
+function ToggleRow({ label, desc, value, onChange }: ToggleRowProps) {
+  return (
+    <div className="flex items-center justify-between px-5 py-3.5">
+      <div>
+        <span className="text-[15px] text-[var(--color-foreground)]">{label}</span>
+        {desc && <p className="text-[11px] text-[var(--color-muted-light)] mt-0.5">{desc}</p>}
+      </div>
+      <button
+        onClick={onChange}
+        className={`w-[44px] h-[26px] rounded-full flex items-center transition-colors duration-200 ${
+          value ? 'bg-[var(--color-primary)] justify-end' : 'bg-[var(--color-border-dark)] justify-start'
+        }`}
+      >
+        <div className="w-[20px] h-[20px] rounded-full bg-white mx-[3px] shadow-sm" />
+      </button>
+    </div>
+  )
+}
