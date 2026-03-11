@@ -392,6 +392,62 @@ export async function analyzeUnfamiliarWords(
 }
 
 /**
+ * 批量翻译文本行（用于 PDF 阅读器的页面翻译）
+ *
+ * 将编号的文本行发送给 AI，返回对应编号的翻译。
+ * 如果 API 不可用，返回原始文本。
+ *
+ * @param lines   - 需要翻译的文本行数组
+ * @param targetLang - 目标语言，默认 '中文'
+ * @returns 翻译后的文本行数组（与输入一一对应）
+ */
+export async function translateBatch(
+  lines: string[],
+  targetLang: string = '中文'
+): Promise<string[]> {
+  if (lines.length === 0) return []
+
+  // 过滤出有实际内容的行（纯数字/标点不翻译）
+  const indexedLines = lines.map((l, i) => ({ idx: i, text: l.trim() }))
+  const toTranslate = indexedLines.filter(
+    l => l.text.length > 0 && /[a-zA-Z]/.test(l.text)
+  )
+
+  if (toTranslate.length === 0) return [...lines]
+
+  // 限制单次请求行数，避免 token 超限
+  const batch = toTranslate.slice(0, 80)
+  const numbered = batch.map(l => `[${l.idx}] ${l.text}`).join('\n')
+
+  const prompt = `你是专业翻译。将以下编号英文文本逐行翻译为${targetLang}。
+规则：
+- 严格保持原编号，每行格式：[编号] 翻译内容
+- 纯数字、表格数据、专有名词可保留原文
+- 不要添加解释或额外内容
+- 翻译要自然流畅
+
+${numbered}`
+
+  const raw = await callMoonshot([{ role: 'user', content: prompt }])
+  const result = [...lines]
+
+  if (raw) {
+    // 解析 [idx] 翻译内容 格式
+    const lineRegex = /\[(\d+)\]\s*(.+)/g
+    let match
+    while ((match = lineRegex.exec(raw)) !== null) {
+      const idx = parseInt(match[1])
+      const text = match[2].trim()
+      if (idx >= 0 && idx < result.length && text) {
+        result[idx] = text
+      }
+    }
+  }
+
+  return result
+}
+
+/**
  * AI 词汇分类
  */
 export async function classifyVocabulary(

@@ -85,6 +85,67 @@ export interface PDFTextLayerItem {
   cssTransform: string
 }
 
+/** 合并后的文本行（用于按行翻译和覆盖渲染） */
+export interface TextLine {
+  /** 该行的完整文本 */
+  text: string
+  /** 行起始 x 坐标 */
+  x: number
+  /** 行 y 坐标 */
+  y: number
+  /** 行宽度 */
+  width: number
+  /** 行高度（基于字号） */
+  height: number
+  /** 字号 */
+  fontSize: number
+}
+
+/**
+ * 将分散的 PDF 文本项按 y 坐标合并为逻辑行
+ *
+ * PDF 的 getTextContent 返回的是独立的文本片段（可能是单词、字符甚至空格），
+ * 这个函数将 y 坐标相近的片段合并为完整的一行文字。
+ */
+export function groupItemsIntoLines(items: PDFTextLayerItem[]): TextLine[] {
+  if (items.length === 0) return []
+
+  const sorted = [...items].sort((a, b) => a.y - b.y || a.x - b.x)
+  const lines: { items: PDFTextLayerItem[]; y: number }[] = []
+
+  let curGroup: PDFTextLayerItem[] = [sorted[0]]
+  let curY = sorted[0].y
+
+  for (let i = 1; i < sorted.length; i++) {
+    const item = sorted[i]
+    // y 坐标差距小于半个字号，视为同一行
+    const threshold = Math.max(item.fontSize, curGroup[0].fontSize) * 0.6
+    if (Math.abs(item.y - curY) < threshold) {
+      curGroup.push(item)
+    } else {
+      lines.push({ items: curGroup, y: curY })
+      curGroup = [item]
+      curY = item.y
+    }
+  }
+  lines.push({ items: curGroup, y: curY })
+
+  return lines.map(line => {
+    const byX = line.items.sort((a, b) => a.x - b.x)
+    const first = byX[0]
+    const last = byX[byX.length - 1]
+    const text = byX.map(it => it.str).join('')
+    return {
+      text,
+      x: first.x,
+      y: line.y,
+      width: (last.x + last.width) - first.x,
+      height: first.fontSize * 1.2,
+      fontSize: first.fontSize,
+    }
+  })
+}
+
 // ========== 核心函数 ==========
 
 /**

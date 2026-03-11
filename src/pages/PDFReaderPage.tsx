@@ -15,9 +15,12 @@ import {
   extractTextFromPDF,
   getPDFMetadata,
   sanitizeText,
+  groupItemsIntoLines,
   type OCRLayoutResult,
   type PDFTextLayerItem,
+  type TextLine,
 } from '../lib/pdf'
+import { translateBatch } from '../services/gemini'
 import { speakEnglish, speakAuto } from '../lib/tts'
 import { supabase, uploadFile, type UserBook } from '../lib/supabase'
 import { useVocabulary } from '../hooks/useVocabulary'
@@ -56,6 +59,9 @@ const DEFAULT_READER_SETTINGS: ReaderSettings = {
   autoCollect: true,
   fontSize: 15,
 }
+
+// 叠加层显示模式
+type OverlayMode = 'off' | 'select' | 'debug' | 'cover' | 'translate'
 
 // TTS 语言选项
 const TTS_LANG_OPTIONS = [
@@ -177,16 +183,23 @@ export default function PDFReaderPage() {
   const [ocrProgress, setOcrProgress] = useState(0)
   const [ocrPageText, setOcrPageText] = useState('')
 
-  // ===== 文本叠加层状态（布局保留核心） =====
-  // 数字版 PDF 的原生文本位置（从 pdf.js 提取）
+  // ===== 文本叠加层状态 =====
   const [pdfTextItems, setPdfTextItems] = useState<PDFTextLayerItem[]>([])
   const [pdfTextViewport, setPdfTextViewport] = useState({ w: 0, h: 0 })
-  // OCR 布局数据（扫描版 PDF，Tesseract 返回的带位置信息的结果）
   const [ocrLayoutData, setOcrLayoutData] = useState<OCRLayoutResult | null>(null)
-  // 叠加层可见性：true = 半透明显示文字（调试/验证用），false = 完全透明（只可选择）
-  const [overlayVisible, setOverlayVisible] = useState(false)
-  // 是否启用文本层叠加（用户可关闭以提高性能）
   const [textLayerEnabled, setTextLayerEnabled] = useState(true)
+
+  // 叠加层显示模式
+  const [overlayMode, setOverlayMode] = useState<OverlayMode>('select')
+
+  // 合并后的文本行（用于翻译模式和遮盖模式）
+  const [pageLines, setPageLines] = useState<TextLine[]>([])
+  // 翻译结果（与 pageLines 一一对应，null 表示未翻译）
+  const [translatedLines, setTranslatedLines] = useState<(string | null)[]>([])
+  // 翻译进行中
+  const [translating, setTranslating] = useState(false)
+  // hover 状态：当前 hover 的行索引（用于显示原文）
+  const [hoveredLineIdx, setHoveredLineIdx] = useState<number | null>(null)
 
   // ===== 文本模式（从数据库 content_text） =====
   const [contentText, setContentText] = useState('')
@@ -435,18 +448,21 @@ export default function PDFReaderPage() {
     try {
       await renderPageToCanvas(pdfDoc, currentPage, canvasRef.current, scale)
 
-      // 同时提取数字版 PDF 的文本位置数据（用于文本层叠加）
       if (textLayerEnabled) {
         try {
           const { items, viewportWidth, viewportHeight } = await getTextLayerData(pdfDoc, currentPage, scale)
           if (taskId === renderTaskRef.current) {
             setPdfTextItems(items)
             setPdfTextViewport({ w: viewportWidth, h: viewportHeight })
+            // 合并为逻辑行（用于遮盖/翻译模式）
+            const lines = groupItemsIntoLines(items)
+            setPageLines(lines)
+            setTranslatedLines(new Array(lines.length).fill(null))
           }
         } catch {
-          // 文本层提取失败不影响主渲染
           if (taskId === renderTaskRef.current) {
             setPdfTextItems([])
+            setPageLines([])
           }
         }
       }
@@ -470,9 +486,10 @@ export default function PDFReaderPage() {
   const goToPage = useCallback((page: number) => {
     const safePage = Math.max(1, Math.min(page, totalPages))
     setCurrentPage(safePage)
-    // 翻页时清除 OCR 叠加数据（每页需要单独 OCR）
     setOcrLayoutData(null)
     setOcrPageText('')
+    setTranslatedLines([])
+    setHoveredLineIdx(null)
 
     if (bookId && user && totalPages > 0) {
       const parsedBookId = parseInt(bookId, 10)
@@ -572,13 +589,51 @@ export default function PDFReaderPage() {
       const result = await ocrPageWithLayout(canvasRef.current, readerSettings.ocrLang)
       setOcrPageText(result.text)
       setOcrLayoutData(result)
-      // 不切换到 OCR 纯文本模式，而是保持 PDF 模式 + 叠加层
-      setOverlayVisible(true)
+      // 保持 PDF 模式，切换到遮盖叠加
+      setOverlayMode('cover')
     } catch (err: any) {
       alert(`OCR 识别失败: ${err.message || '未知错误'}`)
     }
 
     setOcrLoading(false)
+  }
+
+  // ================================================================
+  // 翻译当前页（按行翻译 + 覆盖显示）
+  // ================================================================
+  const handleTranslatePage = async () => {
+    // 优先用 PDF 原生行，其次用 OCR 行
+    let linesToTranslate: string[] = []
+
+    if (pageLines.length > 0) {
+      linesToTranslate = pageLines.map(l => l.text)
+    } else if (ocrLayoutData && ocrLayoutData.lines.length > 0) {
+      linesToTranslate = ocrLayoutData.lines.map(l => l.text)
+    }
+
+    if (linesToTranslate.length === 0) {
+      alert('当前页没有可翻译的文本。如果是扫描版 PDF，请先 OCR 识别。')
+      return
+    }
+
+    setTranslating(true)
+    try {
+      const targetLang = readerSettings.translateTo === 'zh-CN' ? '中文'
+        : readerSettings.translateTo === 'en' ? 'English'
+        : readerSettings.translateTo === 'ja' ? '日语'
+        : readerSettings.translateTo === 'ko' ? '韩语'
+        : readerSettings.translateTo === 'fr' ? '法语'
+        : readerSettings.translateTo === 'de' ? '德语'
+        : readerSettings.translateTo === 'es' ? '西班牙语'
+        : '中文'
+
+      const results = await translateBatch(linesToTranslate, targetLang)
+      setTranslatedLines(results)
+      setOverlayMode('translate')
+    } catch (err: any) {
+      alert(`翻译失败: ${err.message || '未知错误'}`)
+    }
+    setTranslating(false)
   }
 
   // ================================================================
@@ -805,45 +860,45 @@ export default function PDFReaderPage() {
         </button>
 
         {/* 右侧：工具 */}
-        <div className="flex items-center gap-2">
-          {/* 保存到书架按钮（仅本地文件打开时显示） */}
+        <div className="flex items-center gap-1.5">
+          {/* 保存到书架（仅本地文件） */}
           {localFile && !bookId && user && (
             <button
               onClick={handleSaveToShelf}
               disabled={savingToShelf || savedToShelf}
-              className={`px-2.5 py-1 rounded-full text-[11px] font-medium active:scale-95 transition-all ${
-                savedToShelf
-                  ? 'bg-green-500/30 text-green-300'
-                  : savingToShelf
-                    ? 'bg-white/10 text-white/50'
-                    : 'bg-[var(--color-primary)]/80 text-white'
+              className={`px-2 py-1 rounded-full text-[10px] font-medium active:scale-95 ${
+                savedToShelf ? 'bg-green-500/30 text-green-300'
+                  : savingToShelf ? 'bg-white/10 text-white/50'
+                  : 'bg-[var(--color-primary)]/80 text-white'
               }`}
             >
-              {savedToShelf ? '✓ 已保存' : savingToShelf ? '保存中...' : '保存到书架'}
+              {savedToShelf ? '✓ 已保存' : savingToShelf ? '...' : '保存'}
             </button>
           )}
-          {/* OCR 按钮（布局保留版） */}
+          {/* 翻译当前页 */}
+          <button
+            onClick={handleTranslatePage}
+            disabled={translating}
+            className={`p-1.5 active:scale-90 transition-transform ${overlayMode === 'translate' ? 'bg-blue-500/30 rounded' : ''}`}
+            title="翻译当前页"
+          >
+            {translating
+              ? <Loader2 size={18} className="text-blue-300 animate-spin" />
+              : <Languages size={18} className={overlayMode === 'translate' ? 'text-blue-400' : 'text-white/70'} />
+            }
+          </button>
+          {/* OCR 识别 */}
           <button
             onClick={handleOCRCurrentPage}
             disabled={ocrLoading}
             className={`p-1.5 active:scale-90 transition-transform ${ocrLayoutData ? 'bg-orange-500/30 rounded' : ''}`}
-            title="OCR 识别当前页（保留布局叠加）"
+            title="OCR 识别当前页"
           >
             {ocrLoading
               ? <Loader2 size={18} className="text-white/60 animate-spin" />
               : <ScanSearch size={18} className={ocrLayoutData ? 'text-orange-400' : 'text-white/70'} />
             }
           </button>
-          {/* 叠加层可见性切换 */}
-          {(ocrLayoutData || pdfTextItems.length > 0) && (
-            <button
-              onClick={() => setOverlayVisible(!overlayVisible)}
-              className={`p-1.5 active:scale-90 transition-transform ${overlayVisible ? 'bg-blue-500/30 rounded' : ''}`}
-              title={overlayVisible ? '隐藏文字叠加' : '显示文字叠加'}
-            >
-              <Languages size={18} className={overlayVisible ? 'text-blue-400' : 'text-white/70'} />
-            </button>
-          )}
           {/* 设置 */}
           <button
             onClick={() => setShowSettings(!showSettings)}
@@ -990,32 +1045,50 @@ export default function PDFReaderPage() {
                     )}
                   </div>
 
-                  {/* 文本叠加层控制 */}
+                  {/* 文本叠加层模式 */}
                   <div>
-                    <p className="text-[12px] text-white/50 mb-2 uppercase tracking-wide">文本叠加层</p>
-                    <p className="text-[10px] text-white/30 mb-2">
-                      在 PDF 页面上叠加透明文字，可选择、复制、朗读
-                    </p>
-                    <div className="space-y-1">
-                      <DarkToggleRow
-                        label="启用文本层"
-                        value={textLayerEnabled}
-                        onChange={() => setTextLayerEnabled(!textLayerEnabled)}
-                      />
-                      <DarkToggleRow
-                        label="显示叠加文字（调试）"
-                        value={overlayVisible}
-                        onChange={() => setOverlayVisible(!overlayVisible)}
-                      />
+                    <p className="text-[12px] text-white/50 mb-2 uppercase tracking-wide">叠加层模式</p>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {([
+                        { key: 'off' as const, label: '关闭', desc: '无叠加' },
+                        { key: 'select' as const, label: '可选', desc: '透明可选文字' },
+                        { key: 'cover' as const, label: '遮盖', desc: '白底覆盖原文' },
+                        { key: 'translate' as const, label: '翻译', desc: '翻译覆盖原文' },
+                      ] as const).map(m => (
+                        <button
+                          key={m.key}
+                          onClick={() => {
+                            setOverlayMode(m.key)
+                            if (m.key === 'translate' && translatedLines.every(l => l === null)) {
+                              handleTranslatePage()
+                            }
+                            setShowSettings(false)
+                          }}
+                          className={`py-2 px-2 rounded-lg text-left transition-colors ${
+                            overlayMode === m.key
+                              ? 'bg-[var(--color-primary)] text-white'
+                              : 'bg-white/10 text-white/60'
+                          }`}
+                        >
+                          <span className="text-[12px] font-medium block">{m.label}</span>
+                          <span className="text-[9px] opacity-70">{m.desc}</span>
+                        </button>
+                      ))}
                     </div>
-                    {ocrLayoutData && (
-                      <p className="mt-2 text-[10px] text-orange-300/70">
-                        已识别 {ocrLayoutData.lines.length} 行文字（OCR 叠加中）
+                    <DarkToggleRow
+                      label="启用文本层提取"
+                      value={textLayerEnabled}
+                      onChange={() => setTextLayerEnabled(!textLayerEnabled)}
+                    />
+                    {pageLines.length > 0 && (
+                      <p className="mt-2 text-[10px] text-blue-300/70">
+                        已提取 {pageLines.length} 行文字
+                        {translatedLines.some(l => l !== null) && '（已翻译）'}
                       </p>
                     )}
-                    {pdfTextItems.length > 0 && !ocrLayoutData && (
-                      <p className="mt-2 text-[10px] text-blue-300/70">
-                        已提取 {pdfTextItems.length} 个文本项（PDF 原生文本层）
+                    {ocrLayoutData && (
+                      <p className="mt-1 text-[10px] text-orange-300/70">
+                        OCR 已识别 {ocrLayoutData.lines.length} 行
                       </p>
                     )}
                   </div>
@@ -1210,39 +1283,128 @@ export default function PDFReaderPage() {
               />
 
               {/* ===== 文本叠加层 ===== */}
-              {/*
-                原理：在 Canvas 上方叠加一个和它完全重合的 div。
-                内部的 "坐标画布" div 尺寸设为原始坐标系大小（viewport 或 OCR 图片像素），
-                再用 CSS transform: scale() 缩放到实际显示尺寸。
-                这样每个文字 span 都用原始像素坐标定位，缩放后自动对齐原始位置。
-
-                效果：
-                - Canvas 保留所有视觉元素（图片、表格、色彩、排版）
-                - 叠加层的文字在原始位置上，透明但可选择、可复制
-                - 打开"显示叠加"后，文字半透明可见，可以验证定位准确性
-              */}
-              {textLayerEnabled && (
+              {textLayerEnabled && overlayMode !== 'off' && (
                 <div
                   className="absolute inset-0 overflow-hidden"
                   style={{
-                    pointerEvents: 'auto',
+                    pointerEvents: overlayMode === 'select' ? 'none' : 'auto',
                     userSelect: 'text',
                     WebkitUserSelect: 'text',
                     zIndex: 2,
                   }}
                   onMouseUp={handleTextSelect}
                 >
-                  {/* —— 数字版 PDF 原生文本层 —— */}
-                  {pdfTextItems.length > 0 && !ocrLayoutData && pdfTextViewport.w > 0 && (
+                  {/* 使用合并后的行数据渲染（遮盖/翻译模式） */}
+                  {(overlayMode === 'cover' || overlayMode === 'translate') && pageLines.length > 0 && pdfTextViewport.w > 0 && (
                     <div
                       style={{
                         position: 'absolute',
-                        top: 0,
-                        left: 0,
+                        top: 0, left: 0,
                         width: pdfTextViewport.w,
                         height: pdfTextViewport.h,
                         transformOrigin: '0 0',
                         transform: `scale(${textLayerScale})`,
+                      }}
+                    >
+                      {pageLines.map((line, i) => {
+                        const isHovered = hoveredLineIdx === i
+                        const hasTranslation = translatedLines[i] != null && translatedLines[i] !== line.text
+                        const showOriginal = isHovered && overlayMode === 'translate' && hasTranslation
+                        const displayText = (overlayMode === 'translate' && hasTranslation && !showOriginal)
+                          ? translatedLines[i]!
+                          : line.text
+
+                        return (
+                          <div
+                            key={`line-${i}`}
+                            onMouseEnter={() => setHoveredLineIdx(i)}
+                            onMouseLeave={() => setHoveredLineIdx(null)}
+                            style={{
+                              position: 'absolute',
+                              left: Math.max(0, line.x - 2),
+                              top: Math.max(0, line.y - 1),
+                              minWidth: line.width + 4,
+                              height: line.height + 2,
+                              backgroundColor: showOriginal ? '#FFF8E1' : 'white',
+                              color: '#1a1a1a',
+                              fontSize: line.fontSize * 0.95,
+                              lineHeight: `${line.height + 2}px`,
+                              padding: '0 2px',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              cursor: hasTranslation ? 'pointer' : 'default',
+                              borderBottom: showOriginal ? '2px solid #FFA000' : 'none',
+                              transition: 'background-color 0.15s',
+                            }}
+                          >
+                            {displayText}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {/* OCR 行遮盖/翻译模式 */}
+                  {(overlayMode === 'cover' || overlayMode === 'translate') && ocrLayoutData && ocrLayoutData.lines.length > 0 && pageLines.length === 0 && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 0, left: 0,
+                        width: ocrLayoutData.imageWidth,
+                        height: ocrLayoutData.imageHeight,
+                        transformOrigin: '0 0',
+                        transform: `scale(${textLayerScale})`,
+                      }}
+                    >
+                      {ocrLayoutData.lines.map((line, i) => {
+                        const isHovered = hoveredLineIdx === i
+                        const hasTranslation = translatedLines[i] != null && translatedLines[i] !== line.text
+                        const showOriginal = isHovered && overlayMode === 'translate' && hasTranslation
+                        const displayText = (overlayMode === 'translate' && hasTranslation && !showOriginal)
+                          ? translatedLines[i]!
+                          : line.text
+
+                        return (
+                          <div
+                            key={`ocr-cover-${i}`}
+                            onMouseEnter={() => setHoveredLineIdx(i)}
+                            onMouseLeave={() => setHoveredLineIdx(null)}
+                            style={{
+                              position: 'absolute',
+                              left: line.bbox.x0 - 2,
+                              top: line.bbox.y0 - 1,
+                              minWidth: line.bbox.x1 - line.bbox.x0 + 4,
+                              height: line.bbox.y1 - line.bbox.y0 + 2,
+                              backgroundColor: showOriginal ? '#FFF8E1' : 'white',
+                              color: '#1a1a1a',
+                              fontSize: Math.max(10, (line.bbox.y1 - line.bbox.y0) * 0.85),
+                              lineHeight: `${line.bbox.y1 - line.bbox.y0 + 2}px`,
+                              padding: '0 3px',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              cursor: hasTranslation ? 'pointer' : 'default',
+                              borderBottom: showOriginal ? '2px solid #FFA000' : 'none',
+                              transition: 'background-color 0.15s',
+                            }}
+                          >
+                            {displayText}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {/* 透明选择模式（select/debug）：仍用原始 items 逐个定位 */}
+                  {(overlayMode === 'select' || overlayMode === 'debug') && pdfTextItems.length > 0 && pdfTextViewport.w > 0 && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 0, left: 0,
+                        width: pdfTextViewport.w,
+                        height: pdfTextViewport.h,
+                        transformOrigin: '0 0',
+                        transform: `scale(${textLayerScale})`,
+                        pointerEvents: 'auto',
                       }}
                     >
                       {pdfTextItems.map((item, i) => (
@@ -1253,7 +1415,7 @@ export default function PDFReaderPage() {
                             left: item.x,
                             top: item.y,
                             fontSize: item.fontSize,
-                            color: overlayVisible ? 'rgba(0, 80, 255, 0.35)' : 'transparent',
+                            color: overlayMode === 'debug' ? 'rgba(0, 80, 255, 0.35)' : 'transparent',
                             whiteSpace: 'pre',
                             lineHeight: 1,
                             transformOrigin: '0% 0%',
@@ -1265,70 +1427,14 @@ export default function PDFReaderPage() {
                       ))}
                     </div>
                   )}
-
-                  {/* —— OCR 叠加层（扫描版 PDF） —— */}
-                  {ocrLayoutData && ocrLayoutData.lines.length > 0 && (
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        width: ocrLayoutData.imageWidth,
-                        height: ocrLayoutData.imageHeight,
-                        transformOrigin: '0 0',
-                        transform: `scale(${textLayerScale})`,
-                      }}
-                    >
-                      {ocrLayoutData.lines.map((line, li) => (
-                        <div
-                          key={`ocr-line-${li}`}
-                          style={{
-                            position: 'absolute',
-                            left: line.bbox.x0,
-                            top: line.bbox.y0,
-                            width: line.bbox.x1 - line.bbox.x0,
-                            height: line.bbox.y1 - line.bbox.y0,
-                            display: 'flex',
-                            alignItems: 'center',
-                          }}
-                        >
-                          {line.words.map((word, wi) => (
-                            <span
-                              key={`ocr-w-${li}-${wi}`}
-                              style={{
-                                position: 'absolute',
-                                left: word.bbox.x0 - line.bbox.x0,
-                                top: 0,
-                                width: word.bbox.x1 - word.bbox.x0,
-                                height: word.bbox.y1 - word.bbox.y0,
-                                fontSize: Math.max(8, word.bbox.y1 - word.bbox.y0 - 2),
-                                display: 'flex',
-                                alignItems: 'center',
-                                color: overlayVisible
-                                  ? word.confidence > 70
-                                    ? 'rgba(0, 150, 50, 0.4)'
-                                    : 'rgba(220, 80, 0, 0.4)'
-                                  : 'transparent',
-                                whiteSpace: 'pre',
-                                lineHeight: 1,
-                                overflow: 'hidden',
-                              }}
-                            >
-                              {word.text}
-                            </span>
-                          ))}
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </div>
               )}
 
-              {/* ===== 选择高亮样式 ===== */}
               <style>{`
-                .absolute span::selection {
+                .absolute span::selection,
+                .absolute div::selection {
                   background: rgba(59, 130, 246, 0.3);
-                  color: rgba(0, 0, 0, 0.8);
+                  color: #000;
                 }
               `}</style>
             </div>
