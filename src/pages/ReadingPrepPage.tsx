@@ -6,6 +6,7 @@ import {
 import { supabase, type UserBook } from '../lib/supabase'
 import { analyzeUnfamiliarWords, type UnfamiliarWord } from '../services/gemini'
 import { speakEnglish } from '../lib/tts'
+import { SAMPLE_BOOKS } from '../data/sampleBooks'
 
 /**
  * 阅读准备页（V2：从数据库加载真实书籍）
@@ -27,6 +28,7 @@ export default function ReadingPrepPage() {
   const [loading, setLoading] = useState(true)
   const [analyzing, setAnalyzing] = useState(false)
   const [unfamiliarWords, setUnfamiliarWords] = useState<UnfamiliarWord[]>([])
+  const WORD_LIMIT = 12
 
   // ===== 加载书籍数据 =====
   useEffect(() => {
@@ -36,10 +38,39 @@ export default function ReadingPrepPage() {
         return
       }
 
+      // 优先处理“示例书籍”（负数 ID），不走数据库查询
+      const parsedId = parseInt(bookId, 10)
+      if (Number.isNaN(parsedId)) {
+        setLoading(false)
+        return
+      }
+      if (!Number.isNaN(parsedId) && parsedId < 0) {
+        const sampleBook = SAMPLE_BOOKS.find((b) => b.id === parsedId) || null
+        if (sampleBook) {
+          setBook(sampleBook)
+          if (sampleBook.content_text) {
+            setAnalyzing(true)
+            try {
+              const words = await analyzeUnfamiliarWords(sampleBook.content_text)
+              const normalized = words.slice(0, WORD_LIMIT)
+              setUnfamiliarWords(normalized)
+              // 缓存“本次阅读准备页分析结果”，保证下个页面用同一批词
+              sessionStorage.setItem(`readingPrepWords:${sampleBook.id}`, JSON.stringify(normalized))
+            } catch {
+              // 示例书籍词汇分析失败不阻塞主流程
+            } finally {
+              setAnalyzing(false)
+            }
+          }
+        }
+        setLoading(false)
+        return
+      }
+
       const { data, error } = await supabase
         .from('user_books')
         .select('*')
-        .eq('id', parseInt(bookId))
+        .eq('id', parsedId)
         .single()
 
       if (!error && data) {
@@ -49,8 +80,10 @@ export default function ReadingPrepPage() {
         if (data.content_text) {
           setAnalyzing(true)
           try {
-            const words = await analyzeUnfamiliarWords(data.content_text, 12)
+            const words = await analyzeUnfamiliarWords(data.content_text, WORD_LIMIT)
             setUnfamiliarWords(words)
+            // 缓存“本次阅读准备页分析结果”，保证下个页面用同一批词
+            sessionStorage.setItem(`readingPrepWords:${data.id}`, JSON.stringify(words))
 
             // 更新数据库中的陌生词汇数量
             await supabase

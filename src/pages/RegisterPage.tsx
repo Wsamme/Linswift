@@ -1,20 +1,20 @@
 /**
  * 注册页
- * - 风格延续 LoginPage（橙色背景 + 白色卡片）
- * - 用户名 + 邮箱 + 密码 + 确认密码
- * - 调用 Supabase Auth signUp
+ *
+ * 桌面端：全屏粒子背景 + 毛玻璃品牌面板 + 毛玻璃注册表单
+ * 移动端：深色粒子背景 + 毛玻璃浮动卡片
  */
 
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { User, Mail, Lock, Eye, EyeOff, Loader2, ArrowLeft } from 'lucide-react'
+import { User, Mail, Lock, Eye, EyeOff, Loader2, Sparkles, ArrowLeft } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import Particles from '../components/reactbits/Particles'
 
 export default function RegisterPage() {
   const navigate = useNavigate()
   const { signUp } = useAuth()
 
-  // ===== 表单状态 =====
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -22,13 +22,10 @@ export default function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [success, setSuccess] = useState(false) // 注册成功提示
+  const [success, setSuccess] = useState(false)
 
-  // ===== 注册处理 =====
   const handleRegister = async () => {
     setError('')
-
-    // 前端验证
     if (!email.trim()) return setError('请输入邮箱')
     if (!password.trim()) return setError('请输入密码')
     if (password.length < 6) return setError('密码至少需要 6 个字符')
@@ -41,131 +38,236 @@ export default function RegisterPage() {
     if (signUpError) {
       setError(signUpError)
     } else {
-      // 注册成功 — Supabase 默认会发验证邮件
-      // 但对于开发阶段，我们可以直接跳转
       setSuccess(true)
-      setTimeout(() => navigate('/learn'), 1500)
+      setTimeout(() => navigate('/app/learn'), 1500)
     }
   }
 
+  /* ====== glass 样式 ====== */
+  const glassPanel = 'backdrop-blur-xl bg-white/35 border border-white/30 shadow-[0_8px_32px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.4)]'
+  const glassInput = 'backdrop-blur-md bg-white/30 border border-white/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.3)]'
+
   return (
-    <div className="h-full flex justify-center bg-[var(--color-primary)]">
-      <div className="w-full max-w-[390px] h-full flex flex-col relative overflow-hidden">
-        {/* ===== 顶部品牌区域 ===== */}
-        <div className="flex-1 flex flex-col items-center justify-center px-8 pt-12">
-          {/* 返回按钮 */}
-          <button
-            onClick={() => navigate('/login')}
-            className="absolute top-12 left-5 w-10 h-10 rounded-full bg-white/20 flex items-center justify-center"
-          >
-            <ArrowLeft size={20} className="text-white" />
+    <div className="h-full bg-gradient-to-br from-[#FFFBF5] to-[#FFF5EB]">
+      {/* 全局粒子背景（桌面端） */}
+      <div className="hidden lg:block fixed inset-0 z-0">
+        <Particles
+          particleColors={['#FF8400']}
+          particleBaseSize={800}
+          particleCount={180}
+          particleSpread={10}
+          speed={0.06}
+          alphaParticles={true}
+          sizeRandomness={0.9}
+          cameraDistance={20}
+          moveParticlesOnHover={true}
+          particleHoverFactor={0.4}
+        />
+      </div>
+
+      {/* 桌面端双栏容器（限制最大宽度，居中） */}
+      <div className="hidden lg:flex h-full max-w-[1400px] mx-auto relative z-10">
+        {/* 左侧品牌区 */}
+        <div className="w-[50%] xl:w-[55%] flex flex-col justify-center px-16 xl:px-24 relative">
+          <button onClick={() => navigate('/')}
+            className="absolute top-8 left-8 flex items-center gap-2 text-[#999] hover:text-[#1A1A1A] text-[14px] transition-colors">
+            <ArrowLeft size={16} />
+            返回官网
           </button>
 
-          {/* Logo */}
-          <div className="w-[64px] h-[64px] rounded-full bg-white/20 flex items-center justify-center mb-3">
-            <span className="text-white text-[28px] font-extrabold">L</span>
+        <div className="flex items-center gap-3 mb-8">
+          <div className="w-12 h-12 rounded-2xl bg-[#FF8400]/15 flex items-center justify-center">
+            <Sparkles size={24} className="text-[#FF8400]" />
           </div>
-          <h1 className="text-white text-[24px] font-bold tracking-tight">加入 Linswift</h1>
-          <p className="text-white/80 text-[13px] mt-1.5">开启你的 AI 英语学习之旅</p>
+          <span className="text-[28px] font-extrabold tracking-tight text-[#1A1A1A]">Linswift</span>
         </div>
 
-        {/* ===== 注册卡片 ===== */}
-        <div className="bg-white rounded-t-[28px] px-7 pt-7 pb-10 shadow-lg">
-          <h2 className="text-[var(--color-foreground)] text-[20px] font-bold mb-1 font-secondary">
-            创建账号
-          </h2>
-          <p className="text-[var(--color-muted)] text-[13px] mb-5">填写以下信息完成注册</p>
+        <h2 className="text-[36px] xl:text-[42px] font-extrabold leading-[1.15] mb-4 text-[#1A1A1A]">
+          加入 Linswift<br />开启学习之旅
+        </h2>
+        <p className="text-[16px] text-[#666] leading-relaxed max-w-[380px]">
+          免费注册，立即体验 AI 翻译、智能阅读、游戏化记忆等全部核心功能。
+        </p>
 
-          {/* 错误提示 */}
+        <div className="flex gap-10 mt-10">
+          {[
+            { num: '50K+', label: '活跃用户' },
+            { num: '4.9', label: 'App 评分' },
+          ].map(s => (
+            <div key={s.label}>
+              <div className="text-[28px] font-extrabold text-[#FF8400]">{s.num}</div>
+              <div className="text-[13px] text-[#999] mt-1">{s.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+        {/* 右侧注册表单（glass） */}
+        <div className="flex-1 flex items-center justify-center p-8">
+        <div className={`${glassPanel} rounded-3xl w-full max-w-[440px] px-10 py-10`}>
+          <button onClick={() => navigate('/login')}
+            className="flex items-center gap-2 text-[#999] hover:text-[#1A1A1A] text-[14px] mb-6 transition-colors">
+            <ArrowLeft size={16} />
+            返回登录
+          </button>
+
+          <h2 className="text-[28px] font-bold mb-1 text-[#1A1A1A]">创建账号</h2>
+          <p className="text-[14px] text-[#888] mb-5">填写以下信息完成注册</p>
+
           {error && (
-            <div className="mb-4 px-4 py-2.5 bg-[var(--color-error)]/10 border border-[var(--color-error)]/20 rounded-[var(--radius-sm)]">
-              <p className="text-[13px] text-[var(--color-error)]">{error}</p>
+            <div className="mb-4 px-4 py-2.5 bg-red-500/10 border border-red-500/20 rounded-xl">
+              <p className="text-[13px] text-red-600">{error}</p>
             </div>
           )}
-
-          {/* 成功提示 */}
           {success && (
-            <div className="mb-4 px-4 py-2.5 bg-[var(--color-success)]/10 border border-[var(--color-success)]/20 rounded-[var(--radius-sm)]">
-              <p className="text-[13px] text-[var(--color-success)]">注册成功！正在跳转...</p>
+            <div className="mb-4 px-4 py-2.5 bg-green-500/10 border border-green-500/20 rounded-xl">
+              <p className="text-[13px] text-green-600">注册成功！正在跳转...</p>
             </div>
           )}
 
-          {/* 用户名 */}
-          <div className="flex items-center gap-3 bg-[var(--color-background-secondary)] rounded-[var(--radius-sm)] px-4 py-3 mb-3">
-            <User size={18} className="text-[var(--color-muted)] shrink-0" />
-            <input
-              type="text"
-              placeholder="用户名（可选）"
-              value={username}
+          <div className={`${glassInput} flex items-center gap-3 rounded-xl px-4 py-3.5 mb-3`}>
+            <User size={18} className="text-[#999] shrink-0" />
+            <input type="text" placeholder="用户名（可选）" value={username}
               onChange={e => setUsername(e.target.value)}
-              className="flex-1 bg-transparent text-[14px] text-[var(--color-foreground)] placeholder:text-[var(--color-muted-light)] outline-none"
-            />
+              className="flex-1 bg-transparent text-[14px] text-[#1A1A1A] placeholder:text-[#bbb] outline-none" />
           </div>
 
-          {/* 邮箱 */}
-          <div className="flex items-center gap-3 bg-[var(--color-background-secondary)] rounded-[var(--radius-sm)] px-4 py-3 mb-3">
-            <Mail size={18} className="text-[var(--color-muted)] shrink-0" />
-            <input
-              type="email"
-              placeholder="邮箱"
-              value={email}
+          <div className={`${glassInput} flex items-center gap-3 rounded-xl px-4 py-3.5 mb-3`}>
+            <Mail size={18} className="text-[#999] shrink-0" />
+            <input type="email" placeholder="邮箱" value={email}
               onChange={e => setEmail(e.target.value)}
-              className="flex-1 bg-transparent text-[14px] text-[var(--color-foreground)] placeholder:text-[var(--color-muted-light)] outline-none"
-            />
+              className="flex-1 bg-transparent text-[14px] text-[#1A1A1A] placeholder:text-[#bbb] outline-none" />
           </div>
 
-          {/* 密码 */}
-          <div className="flex items-center gap-3 bg-[var(--color-background-secondary)] rounded-[var(--radius-sm)] px-4 py-3 mb-3">
-            <Lock size={18} className="text-[var(--color-muted)] shrink-0" />
-            <input
-              type={showPassword ? 'text' : 'password'}
-              placeholder="密码（至少 6 位）"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              className="flex-1 bg-transparent text-[14px] text-[var(--color-foreground)] placeholder:text-[var(--color-muted-light)] outline-none"
-            />
+          <div className={`${glassInput} flex items-center gap-3 rounded-xl px-4 py-3.5 mb-3`}>
+            <Lock size={18} className="text-[#999] shrink-0" />
+            <input type={showPassword ? 'text' : 'password'} placeholder="密码（至少 6 位）"
+              value={password} onChange={e => setPassword(e.target.value)}
+              className="flex-1 bg-transparent text-[14px] text-[#1A1A1A] placeholder:text-[#bbb] outline-none" />
             <button onClick={() => setShowPassword(!showPassword)} className="shrink-0">
-              {showPassword ? (
-                <EyeOff size={18} className="text-[var(--color-muted)]" />
-              ) : (
-                <Eye size={18} className="text-[var(--color-muted)]" />
-              )}
+              {showPassword
+                ? <EyeOff size={18} className="text-[#999]" />
+                : <Eye size={18} className="text-[#999]" />}
             </button>
           </div>
 
-          {/* 确认密码 */}
-          <div className="flex items-center gap-3 bg-[var(--color-background-secondary)] rounded-[var(--radius-sm)] px-4 py-3 mb-5">
-            <Lock size={18} className="text-[var(--color-muted)] shrink-0" />
-            <input
-              type={showPassword ? 'text' : 'password'}
-              placeholder="确认密码"
-              value={confirmPassword}
-              onChange={e => setConfirmPassword(e.target.value)}
+          <div className={`${glassInput} flex items-center gap-3 rounded-xl px-4 py-3.5 mb-5`}>
+            <Lock size={18} className="text-[#999] shrink-0" />
+            <input type={showPassword ? 'text' : 'password'} placeholder="确认密码"
+              value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleRegister()}
-              className="flex-1 bg-transparent text-[14px] text-[var(--color-foreground)] placeholder:text-[var(--color-muted-light)] outline-none"
-            />
+              className="flex-1 bg-transparent text-[14px] text-[#1A1A1A] placeholder:text-[#bbb] outline-none" />
           </div>
 
-          {/* 注册按钮 */}
-          <button
-            onClick={handleRegister}
-            disabled={loading}
-            className="w-full py-3.5 bg-[var(--color-primary)] text-white text-[15px] font-semibold rounded-[var(--radius-sm)] active:scale-[0.98] transition-transform disabled:opacity-60 flex items-center justify-center gap-2"
-          >
+          <button onClick={handleRegister} disabled={loading}
+            className="w-full py-3.5 bg-[#FF8400] hover:bg-[#E87600] text-white text-[15px] font-semibold rounded-xl active:scale-[0.98] transition-all disabled:opacity-60 flex items-center justify-center gap-2">
             {loading && <Loader2 size={16} className="animate-spin" />}
             {loading ? '注册中...' : '注册'}
           </button>
 
-          {/* 已有账号 */}
-          <p className="text-center text-[13px] text-[var(--color-muted)] mt-5">
+          <p className="text-center text-[13px] text-[#999] mt-5">
             已有账号？
-            <span
-              onClick={() => navigate('/login')}
-              className="text-[var(--color-primary)] font-semibold ml-1 cursor-pointer"
-            >
-              登录
-            </span>
+            <span onClick={() => navigate('/login')}
+              className="text-[#FF8400] font-semibold ml-1 cursor-pointer hover:underline">登录</span>
           </p>
+        </div>
+        </div>
+      </div>
+
+      {/* ===== 移动端 ===== */}
+      <div className="lg:hidden flex-1 flex flex-col">
+        {/* 移动端顶部品牌区（深色+粒子） */}
+        <div className="flex-1 flex flex-col items-center justify-center pb-8 bg-gradient-to-br from-[#FFFBF5] to-[#FFF5EB] relative overflow-hidden">
+          <div className="absolute inset-0 z-0">
+            <Particles
+              particleColors={['#FF8400']}
+              particleBaseSize={800}
+              particleCount={120}
+              particleSpread={10}
+              speed={0.06}
+              alphaParticles={true}
+              sizeRandomness={0.9}
+              cameraDistance={20}
+              moveParticlesOnHover={false}
+            />
+          </div>
+          <div className="relative z-10 flex flex-col items-center">
+            <button onClick={() => navigate('/login')}
+              className="absolute -top-16 left-5 w-10 h-10 rounded-full bg-black/5 flex items-center justify-center">
+              <ArrowLeft size={20} className="text-[#1A1A1A]" />
+            </button>
+            <div className="w-[64px] h-[64px] rounded-full bg-[#FF8400]/15 flex items-center justify-center mb-3">
+              <span className="text-[#FF8400] text-[28px] font-extrabold">L</span>
+            </div>
+            <h1 className="text-[#1A1A1A] text-[24px] font-bold tracking-tight">加入 Linswift</h1>
+            <p className="text-[#888] text-[13px] mt-1.5">开启你的 AI 英语学习之旅</p>
+          </div>
+        </div>
+
+        {/* 移动端注册表单（glass 毛玻璃卡片） */}
+        <div className="backdrop-blur-xl bg-white/70 border-t border-white/50 rounded-t-[28px] px-7 pt-7 pb-10 shadow-[0_-8px_32px_rgba(0,0,0,0.1)] -mt-7 relative z-10"
+          style={{ WebkitBackdropFilter: 'blur(24px) saturate(1.8)', backdropFilter: 'blur(24px) saturate(1.8)' }}>
+          <div className="w-full max-w-[400px] mx-auto">
+            <h2 className="text-[#1A1A1A] text-[24px] font-bold mb-1">创建账号</h2>
+            <p className="text-[#888] text-[13px] mb-5">填写以下信息完成注册</p>
+
+            {error && (
+              <div className="mb-4 px-4 py-2.5 bg-red-500/10 border border-red-500/20 rounded-xl">
+                <p className="text-[13px] text-red-600">{error}</p>
+              </div>
+            )}
+            {success && (
+              <div className="mb-4 px-4 py-2.5 bg-green-500/10 border border-green-500/20 rounded-xl">
+                <p className="text-[13px] text-green-600">注册成功！正在跳转...</p>
+              </div>
+            )}
+
+            <div className={`${glassInput} flex items-center gap-3 rounded-xl px-4 py-3.5 mb-3`}>
+              <User size={18} className="text-[#999] shrink-0" />
+              <input type="text" placeholder="用户名（可选）" value={username}
+                onChange={e => setUsername(e.target.value)}
+                className="flex-1 bg-transparent text-[14px] text-[#1A1A1A] placeholder:text-[#bbb] outline-none" />
+            </div>
+
+            <div className={`${glassInput} flex items-center gap-3 rounded-xl px-4 py-3.5 mb-3`}>
+              <Mail size={18} className="text-[#999] shrink-0" />
+              <input type="email" placeholder="邮箱" value={email}
+                onChange={e => setEmail(e.target.value)}
+                className="flex-1 bg-transparent text-[14px] text-[#1A1A1A] placeholder:text-[#bbb] outline-none" />
+            </div>
+
+            <div className={`${glassInput} flex items-center gap-3 rounded-xl px-4 py-3.5 mb-3`}>
+              <Lock size={18} className="text-[#999] shrink-0" />
+              <input type={showPassword ? 'text' : 'password'} placeholder="密码（至少 6 位）"
+                value={password} onChange={e => setPassword(e.target.value)}
+                className="flex-1 bg-transparent text-[14px] text-[#1A1A1A] placeholder:text-[#bbb] outline-none" />
+              <button onClick={() => setShowPassword(!showPassword)} className="shrink-0">
+                {showPassword
+                  ? <EyeOff size={18} className="text-[#999]" />
+                  : <Eye size={18} className="text-[#999]" />}
+              </button>
+            </div>
+
+            <div className={`${glassInput} flex items-center gap-3 rounded-xl px-4 py-3.5 mb-5`}>
+              <Lock size={18} className="text-[#999] shrink-0" />
+              <input type={showPassword ? 'text' : 'password'} placeholder="确认密码"
+                value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleRegister()}
+                className="flex-1 bg-transparent text-[14px] text-[#1A1A1A] placeholder:text-[#bbb] outline-none" />
+            </div>
+
+            <button onClick={handleRegister} disabled={loading}
+              className="w-full py-3.5 bg-[#FF8400] hover:bg-[#E87600] text-white text-[15px] font-semibold rounded-xl active:scale-[0.98] transition-all disabled:opacity-60 flex items-center justify-center gap-2">
+              {loading && <Loader2 size={16} className="animate-spin" />}
+              {loading ? '注册中...' : '注册'}
+            </button>
+
+            <p className="text-center text-[13px] text-[#999] mt-5">
+              已有账号？
+              <span onClick={() => navigate('/login')}
+                className="text-[#FF8400] font-semibold ml-1 cursor-pointer hover:underline">登录</span>
+            </p>
+          </div>
         </div>
       </div>
     </div>

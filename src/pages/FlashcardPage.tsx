@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ChevronLeft, Volume2, RotateCcw, Check, HelpCircle, X } from 'lucide-react'
 import { useVocabulary } from '../hooks/useVocabulary'
 import { useStudyRecords } from '../hooks/useStudyRecords'
 import { calculateNextReview } from '../lib/ebbinghaus'
 import { speakEnglish } from '../lib/tts'
+import { supabase, type UserBook } from '../lib/supabase'
+import { analyzeUnfamiliarWords, type UnfamiliarWord } from '../services/gemini'
+import { SAMPLE_BOOKS } from '../data/sampleBooks'
 
 /**
  * 卡片学习页 —— 阅读器模块
@@ -25,21 +28,92 @@ const cards = [
   { word: 'supercilious', phonetic: '/ˌsuː.pəˈsɪl.i.əs/', meaning: '目中无人的；傲慢的', example: 'He gave a supercilious smile.' },
 ]
 
+interface StudyCard {
+  id: number
+  word: string
+  phonetic: string
+  meaning: string
+  example: string
+}
+
 export default function FlashcardPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const bookId = searchParams.get('bookId')
   const { vocabulary, fetchVocabulary, addReview, updateNextReview } = useVocabulary()
   const { appendStudy } = useStudyRecords()
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isFlipped, setIsFlipped] = useState(false)
   const [results, setResults] = useState<('know' | 'vague' | 'unknown')[]>([])
+  const [bookCards, setBookCards] = useState<StudyCard[] | null>(null)
+  const [loadingBookCards, setLoadingBookCards] = useState(false)
 
-  // 尝试从数据库加载词汇；若失败则使用 mock
+  // 仅“无 bookId”时，才使用全局词库逻辑（兼容旧入口）
   useEffect(() => {
-    fetchVocabulary('all')
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    if (!bookId) {
+      fetchVocabulary('all')
+    }
+  }, [bookId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 优先使用数据库词汇；若为空则使用 mock
-  const dbCards = vocabulary.length > 0
+  // “阅读准备页 -> 词汇学习”专用：优先使用阅读准备页缓存的同一批词
+  useEffect(() => {
+    async function loadBookWords() {
+      if (!bookId) return
+
+      const parsedId = parseInt(bookId, 10)
+      if (Number.isNaN(parsedId)) return
+
+      setLoadingBookCards(true)
+      try {
+        const cacheKey = `readingPrepWords:${parsedId}`
+        const cachedRaw = sessionStorage.getItem(cacheKey)
+
+        let words: UnfamiliarWord[] = []
+        if (cachedRaw) {
+          words = JSON.parse(cachedRaw) as UnfamiliarWord[]
+        } else {
+          // 如果没有缓存，降级为重新分析（尽量保持可用）
+          let sourceBook: UserBook | null = null
+          if (parsedId < 0) {
+            sourceBook = SAMPLE_BOOKS.find((b) => b.id === parsedId) || null
+          } else {
+            const { data } = await supabase
+              .from('user_books')
+              .select('*')
+              .eq('id', parsedId)
+              .single()
+            sourceBook = data || null
+          }
+
+          if (sourceBook?.content_text) {
+            words = await analyzeUnfamiliarWords(sourceBook.content_text, 12)
+            sessionStorage.setItem(cacheKey, JSON.stringify(words))
+          }
+        }
+
+        const generated: StudyCard[] = words.map((w, idx) => ({
+          id: -100000 - idx,
+          word: w.word,
+          phonetic: w.phonetic || '',
+          meaning: w.meaning || '',
+          // 示例例句：保持轻量，避免无例句时空白体验
+          example: `Try to use "${w.word}" in your own sentence.`,
+        }))
+        setBookCards(generated.length > 0 ? generated : [])
+      } catch {
+        setBookCards([])
+      } finally {
+        setLoadingBookCards(false)
+      }
+    }
+
+    loadBookWords()
+  }, [bookId])
+
+  // 词卡来源优先级：
+  // 1) 有 bookId：使用书籍专属词卡（和“建议先学习词汇”一致）
+  // 2) 无 bookId：沿用原有全局词库/Mock 逻辑
+  const fallbackCards: StudyCard[] = vocabulary.length > 0
     ? vocabulary.map(v => ({
         id: v.id,
         word: v.word,
@@ -49,8 +123,9 @@ export default function FlashcardPage() {
       }))
     : cards.map((c, i) => ({ ...c, id: i }))
 
-  const currentCard = dbCards[currentIndex]
-  const isFinished = currentIndex >= dbCards.length
+  const finalCards = bookId ? (bookCards ?? []) : fallbackCards
+  const currentCard = finalCards[currentIndex]
+  const isFinished = currentIndex >= finalCards.length
 
   // ===== 翻转卡片 =====
   const handleFlip = () => setIsFlipped(!isFlipped)
@@ -62,7 +137,8 @@ export default function FlashcardPage() {
     // 异步写入数据库（不阻塞 UI）
     const resultMap = { know: 'known', vague: 'fuzzy', unknown: 'unknown' } as const
 
-    if (currentCard && vocabulary.length > 0) {
+    // 仅全局词库模式才写入复习记录（书籍专属词卡是临时分析结果）
+    if (!bookId && currentCard && vocabulary.length > 0) {
       const current = vocabulary.find(v => v.id === currentCard.id)
       addReview(currentCard.id, resultMap[choice], 'flashcard').catch(() => {})
 
@@ -106,7 +182,7 @@ export default function FlashcardPage() {
         </button>
         <h1 className="text-[18px] font-bold text-[var(--color-foreground)] font-secondary">词汇学习</h1>
         <span className="text-[13px] text-[var(--color-muted)]">
-          {Math.min(currentIndex + 1, dbCards.length)}/{dbCards.length}
+          {Math.min(currentIndex + 1, finalCards.length)}/{finalCards.length}
         </span>
       </div>
 
@@ -114,20 +190,28 @@ export default function FlashcardPage() {
       <div className="mx-5 mb-6 h-1.5 bg-[var(--color-background-secondary)] rounded-full overflow-hidden">
         <div
           className="h-full bg-[var(--color-primary)] rounded-full transition-all duration-300"
-          style={{ width: `${(currentIndex / dbCards.length) * 100}%` }}
+          style={{ width: `${finalCards.length > 0 ? (currentIndex / finalCards.length) * 100 : 0}%` }}
         />
       </div>
 
       {/* ===== 卡片区域 ===== */}
       <div className="flex-1 flex items-center justify-center px-8">
-        {isFinished ? (
+        {loadingBookCards ? (
+          <div className="text-center">
+            <p className="text-[14px] text-[var(--color-muted)]">正在加载本书词汇...</p>
+          </div>
+        ) : finalCards.length === 0 ? (
+          <div className="text-center">
+            <p className="text-[14px] text-[var(--color-muted)]">暂未找到可学习词汇</p>
+          </div>
+        ) : isFinished ? (
           /* 学习完成 - 结果统计 */
           <div className="w-full text-center">
             <div className="w-16 h-16 rounded-full bg-[var(--color-success)]/10 flex items-center justify-center mx-auto mb-4">
               <Check size={32} className="text-[var(--color-success)]" />
             </div>
             <h2 className="text-[22px] font-bold text-[var(--color-foreground)] mb-2">学习完成！</h2>
-            <p className="text-[14px] text-[var(--color-muted)] mb-6">你已经复习了 {dbCards.length} 个单词</p>
+            <p className="text-[14px] text-[var(--color-muted)] mb-6">你已经复习了 {finalCards.length} 个单词</p>
 
             {/* 结果统计 */}
             <div className="flex justify-center gap-6 mb-8">
@@ -165,10 +249,10 @@ export default function FlashcardPage() {
           /* 卡片堆叠效果 */
           <div className="relative w-full max-w-[320px]" style={{ perspective: '1000px' }}>
             {/* 底层卡片（装饰用，模拟堆叠） */}
-            {currentIndex + 2 < cards.length && (
+            {currentIndex + 2 < finalCards.length && (
               <div className="absolute inset-0 top-4 mx-4 bg-[var(--color-card)] rounded-[var(--radius-lg)] border border-[var(--color-border)] opacity-40" />
             )}
-            {currentIndex + 1 < cards.length && (
+            {currentIndex + 1 < finalCards.length && (
               <div className="absolute inset-0 top-2 mx-2 bg-[var(--color-card)] rounded-[var(--radius-lg)] border border-[var(--color-border)] opacity-60" />
             )}
 

@@ -56,6 +56,9 @@ import SpellingGame from './pages/SpellingGame'
 // ===== Phase 7 (V3): PDF 阅读器 =====
 import PDFReaderPage from './pages/PDFReaderPage'
 
+// ===== Phase 8: 桌面端官网 =====
+import LandingPage from './pages/LandingPage'
+
 /**
  * 应用路由配置
  *
@@ -72,19 +75,20 @@ export default function App() {
   return (
     <Routes>
       {/* ===== 公开路由（无需登录）===== */}
+      <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
 
-      {/* ===== 受保护路由 —— 主应用（带底部导航）===== */}
+      {/* ===== 受保护路由 —— 主应用（带导航）===== */}
       <Route
-        path="/"
+        path="/app"
         element={
           <ProtectedRoute>
             <AppShell />
           </ProtectedRoute>
         }
       >
-        <Route index element={<Navigate to="/learn" replace />} />
+        <Route index element={<Navigate to="/app/learn" replace />} />
         <Route path="learn" element={<LearnPage />} />
         <Route path="translate" element={<TranslatePage />} />
         <Route path="vocab" element={<VocabPage />} />

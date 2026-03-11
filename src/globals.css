@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+html {
+  scroll-behavior: smooth;
+}
+
 /* ===== 设计变量（从 Pencil 设计稿提取） ===== */
 :root {
   /* 主色系 */

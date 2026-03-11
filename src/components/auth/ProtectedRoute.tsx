@@ -33,9 +33,9 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
     )
   }
 
-  // 2. 未登录 -> 重定向到登录页
+  // 2. 未登录 -> 重定向到落地页（而非直接登录页，让用户了解产品后再登录）
   if (!user) {
-    return <Navigate to="/login" replace />
+    return <Navigate to="/" replace />
   }
 
   // 3. 已登录 -> 正常渲染

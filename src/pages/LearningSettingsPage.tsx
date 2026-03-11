@@ -185,7 +185,7 @@ export default function LearningSettingsPage() {
 
             {/* 学习统计（跳转） */}
             <button
-              onClick={() => navigate('/learn')}
+              onClick={() => navigate('/app/learn')}
               className="w-full flex items-center justify-between px-5 py-3.5 active:bg-[var(--color-background-secondary)] transition-colors"
             >
               <div className="flex items-center gap-3">

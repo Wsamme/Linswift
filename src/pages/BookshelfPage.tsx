@@ -5,8 +5,9 @@ import {
   BookOpen,
 } from 'lucide-react'
 import { supabase, uploadFile, type UserBook } from '../lib/supabase'
-import { extractTextFromPDF, getPDFMetadata, isScannedPDF, ocrExtractFromPDF } from '../lib/pdf'
+import { extractTextFromPDF, getPDFMetadata, sanitizeText } from '../lib/pdf'
 import { useAuth } from '../contexts/AuthContext'
+import { SAMPLE_BOOKS } from '../data/sampleBooks'
 
 /**
  * 书架页 —— 阅读器模块入口（V3：支持 OCR 导入 + PDF 阅读器）
@@ -56,8 +57,12 @@ export default function BookshelfPage() {
     fetchBooks()
   }, [fetchBooks])
 
+  // ===== 合并“示例书籍” + 用户真实书架 =====
+  // 示例书籍用于演示阅读器，不依赖数据库
+  const allBooks = [...SAMPLE_BOOKS, ...books]
+
   // ===== 搜索过滤 =====
-  const filteredBooks = books.filter(b =>
+  const filteredBooks = allBooks.filter(b =>
     b.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     (b.author || '').toLowerCase().includes(searchQuery.toLowerCase())
   )
@@ -88,47 +93,79 @@ export default function BookshelfPage() {
     try {
       // 第 1 步：提取 PDF 元数据
       setImportStatus('正在读取 PDF 信息...')
-      const meta = await getPDFMetadata(file)
+      let meta
+      try {
+        meta = await getPDFMetadata(file)
+      } catch {
+        // 元数据读取失败时，仍允许继续导入
+        meta = {
+          title: file.name.replace(/\.pdf$/i, ''),
+          author: '未知作者',
+          numPages: 0,
+          fileSize: file.size,
+        }
+      }
 
-      // 第 2 步：检测是否为扫描版 PDF
-      setImportStatus('正在分析 PDF 类型...')
-      const scanned = await isScannedPDF(file)
-
-      // 第 3 步：提取文本
+      // 第 2 步：提取文本（快速模式，超时自动跳过，避免“长期加载”）
       let fullText = ''
-      if (scanned) {
-        // 扫描版 → 使用 OCR 提取（逐页渲染+识别）
-        setImportStatus(`扫描版 PDF，启动 OCR 识别（共 ${meta.numPages} 页）...`)
-        fullText = await ocrExtractFromPDF(file, 'eng', (percent, page, total) => {
-          setImportStatus(`OCR 识别中... 第 ${page}/${total} 页 (${percent}%)`)
-        })
-      } else {
-        // 标准文本 PDF → 直接提取
+      try {
         setImportStatus(`正在提取文本（共 ${meta.numPages} 页）...`)
-        fullText = await extractTextFromPDF(file)
+        const textTask = extractTextFromPDF(file)
+        const timeoutTask = new Promise<string>((resolve) =>
+          setTimeout(() => resolve(''), 12000)
+        )
+        fullText = await Promise.race([textTask, timeoutTask])
+      } catch {
+        // 文本提取失败时不阻塞导入，后续可在阅读器里 OCR
+        fullText = ''
       }
 
       // 第 4 步：上传 PDF 到 Supabase Storage
       setImportStatus('正在上传文件...')
-      const filePath = `${user.id}/${Date.now()}_${file.name}`
-      let publicUrl = ''
+      // 文件名做安全清洗，避免特殊字符导致 storage 路径异常
+      const safeName = file.name
+        .replace(/\s+/g, '_')
+        .replace(/[^a-zA-Z0-9._-]/g, '_')
+      const filePath = `${user.id}/${Date.now()}_${safeName}`
+      let storedFilePath = ''
       try {
-        publicUrl = await uploadFile('books', filePath, file)
-      } catch {
-        // Storage 上传失败不阻塞，文本已提取
-        console.warn('PDF 文件上传到 Storage 失败，但文本已提取')
+        const uploadTask = uploadFile('books', filePath, file)
+        const uploadTimeout = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('PDF 上传超时，请检查网络或稍后重试')), 45000)
+        )
+        await Promise.race([uploadTask, uploadTimeout])
+        // 存路径而非 URL，后续在阅读器里用签名 URL 读取，更稳定也兼容私有桶
+        storedFilePath = `books:${filePath}`
+      } catch (e: any) {
+        // 强约束：必须成功上传 PDF 文件，才允许入库
+        const detail = String(e?.message || '')
+        if (detail.includes('not found') || detail.includes('Bucket')) {
+          throw new Error('PDF 存储桶 books 不存在，请先在 Supabase Storage 创建 books 桶')
+        }
+        if (detail.includes('row-level security') || detail.includes('policy') || detail.includes('Unauthorized')) {
+          throw new Error('PDF 上传权限不足（Storage RLS），请在 Supabase 配置 books 桶的上传策略')
+        }
+        if (detail.includes('Payload too large') || detail.includes('413')) {
+          throw new Error('PDF 文件过大，超出 Supabase 上传限制')
+        }
+        throw new Error(`PDF 上传失败：${detail || '未知错误'}`)
       }
 
-      // 第 5 步：保存到数据库
+      // 到这里表示 PDF 本体已成功上传；文本提取是否成功不影响文件阅读
+
+      // 第 5 步：保存到数据库（对所有用户输入做 sanitize，防止无效 Unicode 导致入库失败）
       setImportStatus('正在保存书籍...')
       const randomEmoji = COVER_EMOJIS[Math.floor(Math.random() * COVER_EMOJIS.length)]
+      const safeTitle = sanitizeText(meta.title) || file.name.replace(/\.pdf$/i, '')
+      const safeAuthor = sanitizeText(meta.author) || '未知作者'
+      const safeText = sanitizeText(fullText).slice(0, 500000)
       const { error } = await supabase.from('user_books').insert({
         user_id: user.id,
-        title: meta.title,
-        author: meta.author,
+        title: safeTitle,
+        author: safeAuthor,
         cover_emoji: randomEmoji,
-        file_path: publicUrl || null,
-        content_text: fullText.slice(0, 500000), // 限制文本最大 500K 字符
+        file_path: storedFilePath,
+        content_text: safeText,
         total_pages: meta.numPages,
         current_page: 0,
         progress: 0,
@@ -139,9 +176,9 @@ export default function BookshelfPage() {
         throw new Error(error.message)
       }
 
-      // 成功！刷新书架
-      setImportStatus(scanned ? 'OCR 导入成功！' : '导入成功！')
-      await fetchBooks()
+      // 成功！刷新书架（非阻塞，避免卡在刷新阶段导致“一直加载”）
+      setImportStatus(fullText ? '导入成功！' : '导入成功（可在阅读器里 OCR）')
+      fetchBooks().catch(() => {})
     } catch (err: any) {
       alert(`导入失败: ${err.message || '未知错误'}`)
     } finally {
@@ -267,7 +304,7 @@ export default function BookshelfPage() {
       {/* ===== 书架网格 ===== */}
       <div className="px-5 pb-8">
         <h3 className="text-[16px] font-bold text-[var(--color-foreground)] mb-3 font-secondary">
-          全部书籍 {books.length > 0 && `(${books.length})`}
+          全部书籍 {allBooks.length > 0 && `(${allBooks.length})`}
         </h3>
 
         {/* 加载中 */}
@@ -278,7 +315,7 @@ export default function BookshelfPage() {
         )}
 
         {/* 空状态 */}
-        {!loading && books.length === 0 && (
+        {!loading && allBooks.length === 0 && (
           <div className="text-center py-12">
             <p className="text-[48px] mb-3">📚</p>
             <p className="text-[14px] text-[var(--color-muted)]">书架还是空的</p>
@@ -322,13 +359,15 @@ export default function BookshelfPage() {
                 {/* 信息 */}
                 <p className="text-[12px] font-medium text-[var(--color-foreground)] text-center line-clamp-1 w-full">{book.title}</p>
                 <p className="text-[10px] text-[var(--color-muted)] text-center line-clamp-1 w-full">{book.author}</p>
-                {/* 删除按钮（hover 显示） */}
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleDeleteBook(book.id) }}
-                  className="absolute top-1 right-1 p-1 bg-white/80 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                >
-                  <Trash2 size={12} className="text-[var(--color-error)]" />
-                </button>
+                {/* 删除按钮（仅真实书籍允许删除；示例书籍不显示删除） */}
+                {book.id > 0 && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleDeleteBook(book.id) }}
+                    className="absolute top-1 right-1 p-1 bg-white/80 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <Trash2 size={12} className="text-[var(--color-error)]" />
+                  </button>
+                )}
               </div>
             ))}
           </div>

@@ -10,10 +10,16 @@ import {
   loadPDFDocument,
   renderPageToCanvas,
   isScannedPDF,
-  ocrPageFromCanvas,
+  ocrPageWithLayout,
+  getTextLayerData,
+  extractTextFromPDF,
+  getPDFMetadata,
+  sanitizeText,
+  type OCRLayoutResult,
+  type PDFTextLayerItem,
 } from '../lib/pdf'
 import { speakEnglish, speakAuto } from '../lib/tts'
-import { supabase, type UserBook } from '../lib/supabase'
+import { supabase, uploadFile, type UserBook } from '../lib/supabase'
 import { useVocabulary } from '../hooks/useVocabulary'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -157,6 +163,7 @@ export default function PDFReaderPage() {
   const [scale, setScale] = useState(1.5) // 默认缩放
   const minScale = 0.5
   const maxScale = 3.0
+  const [hasAutoFitted, setHasAutoFitted] = useState(false)
 
   // ===== 状态 =====
   const [loading, setLoading] = useState(true)
@@ -168,7 +175,18 @@ export default function PDFReaderPage() {
   const [ocrText, setOcrText] = useState('')
   const [ocrLoading, setOcrLoading] = useState(false)
   const [ocrProgress, setOcrProgress] = useState(0)
-  const [ocrPageText, setOcrPageText] = useState('') // 当前页 OCR 文本
+  const [ocrPageText, setOcrPageText] = useState('')
+
+  // ===== 文本叠加层状态（布局保留核心） =====
+  // 数字版 PDF 的原生文本位置（从 pdf.js 提取）
+  const [pdfTextItems, setPdfTextItems] = useState<PDFTextLayerItem[]>([])
+  const [pdfTextViewport, setPdfTextViewport] = useState({ w: 0, h: 0 })
+  // OCR 布局数据（扫描版 PDF，Tesseract 返回的带位置信息的结果）
+  const [ocrLayoutData, setOcrLayoutData] = useState<OCRLayoutResult | null>(null)
+  // 叠加层可见性：true = 半透明显示文字（调试/验证用），false = 完全透明（只可选择）
+  const [overlayVisible, setOverlayVisible] = useState(false)
+  // 是否启用文本层叠加（用户可关闭以提高性能）
+  const [textLayerEnabled, setTextLayerEnabled] = useState(true)
 
   // ===== 文本模式（从数据库 content_text） =====
   const [contentText, setContentText] = useState('')
@@ -192,11 +210,38 @@ export default function PDFReaderPage() {
   const [pageInput, setPageInput] = useState('')
   const [showPageJump, setShowPageJump] = useState(false)
 
-  // ===== Canvas Ref =====
+  // ===== 导入到书架状态（阅读器内导入） =====
+  const [localFile, setLocalFile] = useState<File | null>(null)
+  const [savingToShelf, setSavingToShelf] = useState(false)
+  const [savedToShelf, setSavedToShelf] = useState(false)
+
+  // ===== Canvas / Overlay Refs =====
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const renderTaskRef = useRef<number>(0) // 防止并发渲染
+  const renderTaskRef = useRef<number>(0)
+  // 叠加层 wrapper ref（用于 ResizeObserver 测量实际显示尺寸）
+  const overlayWrapperRef = useRef<HTMLDivElement>(null)
+  // 叠加层缩放比例：实际显示宽度 / 原始坐标系宽度
+  const [textLayerScale, setTextLayerScale] = useState(1)
+
+  // 解析 user_books.file_path，兼容历史 URL 与新路径格式
+  const extractStoragePath = (rawPath: string): string | null => {
+    if (!rawPath) return null
+    if (rawPath.startsWith('books:')) return rawPath.slice('books:'.length)
+
+    const publicMarker = '/storage/v1/object/public/books/'
+    const signMarker = '/storage/v1/object/sign/books/'
+
+    if (rawPath.includes(publicMarker)) {
+      return decodeURIComponent(rawPath.split(publicMarker)[1] || '')
+    }
+    if (rawPath.includes(signMarker)) {
+      const remain = rawPath.split(signMarker)[1] || ''
+      return decodeURIComponent(remain.split('?')[0] || '')
+    }
+    return null
+  }
 
   // ================================================================
   // 加载 PDF（从数据库或本地文件）
@@ -208,12 +253,18 @@ export default function PDFReaderPage() {
         return
       }
 
+      const parsedBookId = parseInt(bookId, 10)
+      if (Number.isNaN(parsedBookId)) {
+        setLoading(false)
+        return
+      }
+
       try {
         // 从数据库获取书籍信息
         const { data, error } = await supabase
           .from('user_books')
           .select('*')
-          .eq('id', parseInt(bookId))
+          .eq('id', parsedBookId)
           .single()
 
         if (error || !data) {
@@ -224,13 +275,40 @@ export default function PDFReaderPage() {
         setBook(data)
         setContentText(data.content_text || '')
 
-        // 如果有 file_path（Supabase Storage URL），尝试加载 PDF
+        // 如果有 file_path（历史 URL 或存储路径），尝试加载 PDF
         if (data.file_path) {
           try {
-            const pdf = await loadPDFDocument(data.file_path)
+            let source = data.file_path
+
+            // 先尝试直接加载（兼容历史公开 URL）
+            try {
+              const pdf = await loadPDFDocument(source)
+              setPdfDoc(pdf)
+              setTotalPages(pdf.numPages)
+              setCurrentPage(data.current_page > 0 ? data.current_page : 1)
+              setHasAutoFitted(false)
+              setReadMode('pdf')
+              setLoading(false)
+              return
+            } catch {
+              // 继续走签名 URL
+            }
+
+            const storagePath = extractStoragePath(data.file_path)
+            if (storagePath) {
+              const { data: signedData, error: signedErr } = await supabase.storage
+                .from('books')
+                .createSignedUrl(storagePath, 60 * 60)
+              if (!signedErr && signedData?.signedUrl) {
+                source = signedData.signedUrl
+              }
+            }
+
+            const pdf = await loadPDFDocument(source)
             setPdfDoc(pdf)
             setTotalPages(pdf.numPages)
             setCurrentPage(data.current_page > 0 ? data.current_page : 1)
+            setHasAutoFitted(false)
             setReadMode('pdf')
           } catch {
             // PDF 加载失败（URL 过期等），回退到文本模式
@@ -262,20 +340,23 @@ export default function PDFReaderPage() {
     if (!file) return
 
     setLoading(true)
+    setSavedToShelf(false)
     try {
       const pdf = await loadPDFDocument(file)
       setPdfDoc(pdf)
       setTotalPages(pdf.numPages)
       setCurrentPage(1)
+      setHasAutoFitted(false)
       setReadMode('pdf')
+      setLocalFile(file) // 保存文件引用，用于后续"保存到书架"
 
       // 检测是否是扫描版
-      const scanned = await isScannedPDF(file)
-      setIsScanned(scanned)
-
-      if (scanned) {
-        // 提示用户这是扫描版 PDF
-        setShowSettings(true)
+      try {
+        const scanned = await isScannedPDF(file)
+        setIsScanned(scanned)
+        if (scanned) setShowSettings(true)
+      } catch {
+        // 扫描检测失败不影响阅读
       }
     } catch (err: any) {
       alert(`打开 PDF 失败: ${err.message || '格式不支持'}`)
@@ -284,25 +365,99 @@ export default function PDFReaderPage() {
   }
 
   // ================================================================
-  // 渲染当前页到 Canvas
+  // 从阅读器保存当前本地 PDF 到书架
+  // ================================================================
+  const handleSaveToShelf = async () => {
+    if (!localFile || !user || savingToShelf) return
+
+    setSavingToShelf(true)
+    try {
+      // 提取元数据
+      let meta
+      try {
+        meta = await getPDFMetadata(localFile)
+      } catch {
+        meta = {
+          title: localFile.name.replace(/\.pdf$/i, ''),
+          author: '未知作者',
+          numPages: totalPages || 0,
+          fileSize: localFile.size,
+        }
+      }
+
+      // 提取文本（限时 10 秒）
+      let fullText = ''
+      try {
+        fullText = await Promise.race([
+          extractTextFromPDF(localFile),
+          new Promise<string>((resolve) => setTimeout(() => resolve(''), 10000)),
+        ])
+      } catch { /* 文本提取失败不阻塞 */ }
+
+      // 上传到 Storage
+      const safeName = localFile.name.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9._-]/g, '_')
+      const filePath = `${user.id}/${Date.now()}_${safeName}`
+      await uploadFile('books', filePath, localFile)
+      const storedFilePath = `books:${filePath}`
+
+      // 保存到数据库
+      const emojis = ['📘', '📗', '📙', '📕', '📒', '📓', '📔', '📚']
+      const { error } = await supabase.from('user_books').insert({
+        user_id: user.id,
+        title: sanitizeText(meta.title) || localFile.name.replace(/\.pdf$/i, ''),
+        author: sanitizeText(meta.author) || '未知作者',
+        cover_emoji: emojis[Math.floor(Math.random() * emojis.length)],
+        file_path: storedFilePath,
+        content_text: sanitizeText(fullText).slice(0, 500000),
+        total_pages: meta.numPages || totalPages,
+        current_page: currentPage,
+        progress: totalPages > 0 ? Math.round((currentPage / totalPages) * 100) : 0,
+        unfamiliar_words_count: 0,
+      })
+
+      if (error) throw new Error(error.message)
+      setSavedToShelf(true)
+    } catch (err: any) {
+      alert(`保存失败: ${err.message || '未知错误'}`)
+    }
+    setSavingToShelf(false)
+  }
+
+  // ================================================================
+  // 渲染当前页到 Canvas + 提取文本层数据
   // ================================================================
   const renderCurrentPage = useCallback(async () => {
     if (!pdfDoc || !canvasRef.current || readMode !== 'pdf') return
 
-    const taskId = ++renderTaskRef.current // 防止旧渲染覆盖新渲染
+    const taskId = ++renderTaskRef.current
     setRendering(true)
 
     try {
       await renderPageToCanvas(pdfDoc, currentPage, canvasRef.current, scale)
+
+      // 同时提取数字版 PDF 的文本位置数据（用于文本层叠加）
+      if (textLayerEnabled) {
+        try {
+          const { items, viewportWidth, viewportHeight } = await getTextLayerData(pdfDoc, currentPage, scale)
+          if (taskId === renderTaskRef.current) {
+            setPdfTextItems(items)
+            setPdfTextViewport({ w: viewportWidth, h: viewportHeight })
+          }
+        } catch {
+          // 文本层提取失败不影响主渲染
+          if (taskId === renderTaskRef.current) {
+            setPdfTextItems([])
+          }
+        }
+      }
     } catch (err) {
       console.error('渲染页面失败:', err)
     }
 
-    // 只有最新的任务才清除 loading 状态
     if (taskId === renderTaskRef.current) {
       setRendering(false)
     }
-  }, [pdfDoc, currentPage, scale, readMode])
+  }, [pdfDoc, currentPage, scale, readMode, textLayerEnabled])
 
   // 每次页码或缩放变化时重新渲染
   useEffect(() => {
@@ -315,14 +470,18 @@ export default function PDFReaderPage() {
   const goToPage = useCallback((page: number) => {
     const safePage = Math.max(1, Math.min(page, totalPages))
     setCurrentPage(safePage)
+    // 翻页时清除 OCR 叠加数据（每页需要单独 OCR）
+    setOcrLayoutData(null)
+    setOcrPageText('')
 
-    // 自动保存阅读进度到数据库
-    if (bookId && user) {
+    if (bookId && user && totalPages > 0) {
+      const parsedBookId = parseInt(bookId, 10)
+      if (Number.isNaN(parsedBookId)) return
       const progress = Math.round((safePage / totalPages) * 100)
       supabase
         .from('user_books')
         .update({ current_page: safePage, progress })
-        .eq('id', parseInt(bookId))
+        .eq('id', parsedBookId)
         .then(() => {})
     }
   }, [totalPages, bookId, user])
@@ -345,13 +504,46 @@ export default function PDFReaderPage() {
   // ================================================================
   const zoomIn = () => setScale(prev => Math.min(prev + 0.25, maxScale))
   const zoomOut = () => setScale(prev => Math.max(prev - 0.25, minScale))
-  const fitWidth = () => {
-    if (!containerRef.current) return
-    // 计算适应容器宽度的缩放比
-    const containerWidth = containerRef.current.clientWidth - 32 // 减去 padding
-    // 假设 PDF 页面默认宽约 595pt (A4)，在 scale=1 时
-    setScale(containerWidth / 595)
-  }
+  const fitWidth = useCallback(async () => {
+    if (!containerRef.current || !pdfDoc) return
+    try {
+      // 按当前页真实宽度计算缩放，避免移动端首屏拉伸
+      const page = await pdfDoc.getPage(currentPage)
+      const baseViewport = page.getViewport({ scale: 1 })
+      const containerWidth = Math.max(120, containerRef.current.clientWidth - 24)
+      const nextScale = Math.min(maxScale, Math.max(minScale, containerWidth / baseViewport.width))
+      setScale(nextScale)
+    } catch {
+      // 不阻断阅读
+    }
+  }, [pdfDoc, currentPage])
+
+  // 首次加载 PDF 后自动适配屏幕宽度
+  useEffect(() => {
+    if (!pdfDoc || hasAutoFitted || readMode !== 'pdf') return
+    fitWidth().finally(() => setHasAutoFitted(true))
+  }, [pdfDoc, hasAutoFitted, readMode, fitWidth])
+
+  // 使用 ResizeObserver 追踪 Canvas 实际显示宽度，用于文本叠加层的坐标缩放
+  useEffect(() => {
+    const wrapper = overlayWrapperRef.current
+    if (!wrapper) return
+
+    const naturalWidth = ocrLayoutData
+      ? ocrLayoutData.imageWidth
+      : pdfTextViewport.w
+
+    if (naturalWidth <= 0) return
+
+    const ro = new ResizeObserver((entries) => {
+      const actualW = entries[0]?.contentRect.width
+      if (actualW && actualW > 0) {
+        setTextLayerScale(actualW / naturalWidth)
+      }
+    })
+    ro.observe(wrapper)
+    return () => ro.disconnect()
+  }, [pdfTextViewport.w, ocrLayoutData])
 
   // ================================================================
   // 文本选择 → 查词功能
@@ -366,18 +558,22 @@ export default function PDFReaderPage() {
   }
 
   // ================================================================
-  // 当前页 OCR 识别
+  // 当前页 OCR 识别 —— 带布局保留
   // ================================================================
   const handleOCRCurrentPage = async () => {
     if (!canvasRef.current) return
 
     setOcrLoading(true)
     setOcrPageText('')
+    setOcrLayoutData(null)
 
     try {
-      const text = await ocrPageFromCanvas(canvasRef.current, readerSettings.ocrLang)
-      setOcrPageText(text)
-      setReadMode('ocr')
+      // 使用带布局的 OCR，返回每行每词的位置信息
+      const result = await ocrPageWithLayout(canvasRef.current, readerSettings.ocrLang)
+      setOcrPageText(result.text)
+      setOcrLayoutData(result)
+      // 不切换到 OCR 纯文本模式，而是保持 PDF 模式 + 叠加层
+      setOverlayVisible(true)
     } catch (err: any) {
       alert(`OCR 识别失败: ${err.message || '未知错误'}`)
     }
@@ -492,7 +688,8 @@ export default function PDFReaderPage() {
           </div>
           <h2 className="text-[20px] font-bold text-[var(--color-foreground)] mb-2">打开 PDF 文件</h2>
           <p className="text-[13px] text-[var(--color-muted)] text-center mb-6">
-            支持标准 PDF 和扫描版 PDF（OCR 识别）
+            支持标准 PDF 和扫描版 PDF（OCR 识别）<br />
+            <span className="text-[11px]">打开后可一键保存到书架</span>
           </p>
           <button
             onClick={() => fileInputRef.current?.click()}
@@ -505,6 +702,34 @@ export default function PDFReaderPage() {
             className="mt-3 text-[13px] text-[var(--color-primary)]"
           >
             或从书架选择
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // ===== 有书籍但 PDF 与文本都不可用：给出明确兜底 =====
+  if (!pdfDoc && book && !contentText) {
+    return (
+      <div className="min-h-screen bg-[var(--color-background)] flex flex-col">
+        <div className="flex items-center gap-3 px-5 py-4">
+          <button onClick={() => navigate(-1)} className="p-1">
+            <ChevronLeft size={24} className="text-[var(--color-foreground)]" />
+          </button>
+          <h1 className="text-[18px] font-bold text-[var(--color-foreground)] font-secondary">PDF 阅读器</h1>
+        </div>
+
+        <div className="flex-1 flex flex-col items-center justify-center px-8 text-center">
+          <BookOpen size={44} className="text-[var(--color-muted)] mb-3" />
+          <p className="text-[15px] font-semibold text-[var(--color-foreground)] mb-1">当前书籍暂时无法打开</p>
+          <p className="text-[12px] text-[var(--color-muted)] mb-5">
+            PDF 链接可能已失效或文件无权限，建议回书架重新导入该 PDF。
+          </p>
+          <button
+            onClick={() => navigate('/bookshelf')}
+            className="px-6 py-2.5 bg-[var(--color-primary)] text-white rounded-[var(--radius-sm)] text-[14px] font-semibold"
+          >
+            返回书架重新导入
           </button>
         </div>
       </div>
@@ -581,18 +806,44 @@ export default function PDFReaderPage() {
 
         {/* 右侧：工具 */}
         <div className="flex items-center gap-2">
-          {/* OCR 按钮 */}
+          {/* 保存到书架按钮（仅本地文件打开时显示） */}
+          {localFile && !bookId && user && (
+            <button
+              onClick={handleSaveToShelf}
+              disabled={savingToShelf || savedToShelf}
+              className={`px-2.5 py-1 rounded-full text-[11px] font-medium active:scale-95 transition-all ${
+                savedToShelf
+                  ? 'bg-green-500/30 text-green-300'
+                  : savingToShelf
+                    ? 'bg-white/10 text-white/50'
+                    : 'bg-[var(--color-primary)]/80 text-white'
+              }`}
+            >
+              {savedToShelf ? '✓ 已保存' : savingToShelf ? '保存中...' : '保存到书架'}
+            </button>
+          )}
+          {/* OCR 按钮（布局保留版） */}
           <button
             onClick={handleOCRCurrentPage}
             disabled={ocrLoading}
-            className="p-1.5 active:scale-90 transition-transform"
-            title="OCR 识别当前页"
+            className={`p-1.5 active:scale-90 transition-transform ${ocrLayoutData ? 'bg-orange-500/30 rounded' : ''}`}
+            title="OCR 识别当前页（保留布局叠加）"
           >
             {ocrLoading
               ? <Loader2 size={18} className="text-white/60 animate-spin" />
-              : <ScanSearch size={18} className="text-white/70" />
+              : <ScanSearch size={18} className={ocrLayoutData ? 'text-orange-400' : 'text-white/70'} />
             }
           </button>
+          {/* 叠加层可见性切换 */}
+          {(ocrLayoutData || pdfTextItems.length > 0) && (
+            <button
+              onClick={() => setOverlayVisible(!overlayVisible)}
+              className={`p-1.5 active:scale-90 transition-transform ${overlayVisible ? 'bg-blue-500/30 rounded' : ''}`}
+              title={overlayVisible ? '隐藏文字叠加' : '显示文字叠加'}
+            >
+              <Languages size={18} className={overlayVisible ? 'text-blue-400' : 'text-white/70'} />
+            </button>
+          )}
           {/* 设置 */}
           <button
             onClick={() => setShowSettings(!showSettings)}
@@ -715,7 +966,7 @@ export default function PDFReaderPage() {
                     </p>
                   </div>
 
-                  {/* OCR 工具 */}
+                  {/* OCR 工具 + 叠加层控制 */}
                   <div>
                     <p className="text-[12px] text-white/50 mb-2 uppercase tracking-wide">OCR 识别</p>
                     <button
@@ -723,7 +974,7 @@ export default function PDFReaderPage() {
                       disabled={ocrLoading}
                       className="w-full flex items-center justify-center gap-2 py-2.5 bg-white/10 rounded-lg text-[13px] text-white/70 active:scale-95 disabled:opacity-50 mb-2"
                     >
-                      <ScanSearch size={14} /> 识别当前页
+                      <ScanSearch size={14} /> 识别当前页（保留布局）
                     </button>
                     {isScanned && (
                       <button
@@ -736,6 +987,36 @@ export default function PDFReaderPage() {
                           : <><ScanSearch size={14} /> 全书 OCR 识别</>
                         }
                       </button>
+                    )}
+                  </div>
+
+                  {/* 文本叠加层控制 */}
+                  <div>
+                    <p className="text-[12px] text-white/50 mb-2 uppercase tracking-wide">文本叠加层</p>
+                    <p className="text-[10px] text-white/30 mb-2">
+                      在 PDF 页面上叠加透明文字，可选择、复制、朗读
+                    </p>
+                    <div className="space-y-1">
+                      <DarkToggleRow
+                        label="启用文本层"
+                        value={textLayerEnabled}
+                        onChange={() => setTextLayerEnabled(!textLayerEnabled)}
+                      />
+                      <DarkToggleRow
+                        label="显示叠加文字（调试）"
+                        value={overlayVisible}
+                        onChange={() => setOverlayVisible(!overlayVisible)}
+                      />
+                    </div>
+                    {ocrLayoutData && (
+                      <p className="mt-2 text-[10px] text-orange-300/70">
+                        已识别 {ocrLayoutData.lines.length} 行文字（OCR 叠加中）
+                      </p>
+                    )}
+                    {pdfTextItems.length > 0 && !ocrLayoutData && (
+                      <p className="mt-2 text-[10px] text-blue-300/70">
+                        已提取 {pdfTextItems.length} 个文本项（PDF 原生文本层）
+                      </p>
                     )}
                   </div>
 
@@ -912,19 +1193,145 @@ export default function PDFReaderPage() {
         className="flex-1 overflow-auto flex justify-center"
         onMouseUp={handleTextSelect}
       >
-        {/* PDF Canvas 渲染模式 */}
+        {/* PDF Canvas 渲染模式 + 文本叠加层 */}
         {readMode === 'pdf' && (
-          <div className="relative py-4">
+          <div className="relative py-4 flex justify-center">
             {rendering && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/20 z-10">
                 <Loader2 size={24} className="text-white animate-spin" />
               </div>
             )}
-            <canvas
-              ref={canvasRef}
-              className="mx-auto shadow-lg"
-              style={{ maxWidth: '100%' }}
-            />
+            {/* 外层 wrapper：inline-block 收缩到和 canvas 一样大，用于 ResizeObserver 测量 */}
+            <div ref={overlayWrapperRef} className="relative inline-block" style={{ maxWidth: '100%' }}>
+              <canvas
+                ref={canvasRef}
+                className="shadow-lg block"
+                style={{ maxWidth: '100%', height: 'auto' }}
+              />
+
+              {/* ===== 文本叠加层 ===== */}
+              {/*
+                原理：在 Canvas 上方叠加一个和它完全重合的 div。
+                内部的 "坐标画布" div 尺寸设为原始坐标系大小（viewport 或 OCR 图片像素），
+                再用 CSS transform: scale() 缩放到实际显示尺寸。
+                这样每个文字 span 都用原始像素坐标定位，缩放后自动对齐原始位置。
+
+                效果：
+                - Canvas 保留所有视觉元素（图片、表格、色彩、排版）
+                - 叠加层的文字在原始位置上，透明但可选择、可复制
+                - 打开"显示叠加"后，文字半透明可见，可以验证定位准确性
+              */}
+              {textLayerEnabled && (
+                <div
+                  className="absolute inset-0 overflow-hidden"
+                  style={{
+                    pointerEvents: 'auto',
+                    userSelect: 'text',
+                    WebkitUserSelect: 'text',
+                    zIndex: 2,
+                  }}
+                  onMouseUp={handleTextSelect}
+                >
+                  {/* —— 数字版 PDF 原生文本层 —— */}
+                  {pdfTextItems.length > 0 && !ocrLayoutData && pdfTextViewport.w > 0 && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: pdfTextViewport.w,
+                        height: pdfTextViewport.h,
+                        transformOrigin: '0 0',
+                        transform: `scale(${textLayerScale})`,
+                      }}
+                    >
+                      {pdfTextItems.map((item, i) => (
+                        <span
+                          key={`pdf-${i}`}
+                          style={{
+                            position: 'absolute',
+                            left: item.x,
+                            top: item.y,
+                            fontSize: item.fontSize,
+                            color: overlayVisible ? 'rgba(0, 80, 255, 0.35)' : 'transparent',
+                            whiteSpace: 'pre',
+                            lineHeight: 1,
+                            transformOrigin: '0% 0%',
+                            transform: item.cssTransform || undefined,
+                          }}
+                        >
+                          {item.str}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* —— OCR 叠加层（扫描版 PDF） —— */}
+                  {ocrLayoutData && ocrLayoutData.lines.length > 0 && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: ocrLayoutData.imageWidth,
+                        height: ocrLayoutData.imageHeight,
+                        transformOrigin: '0 0',
+                        transform: `scale(${textLayerScale})`,
+                      }}
+                    >
+                      {ocrLayoutData.lines.map((line, li) => (
+                        <div
+                          key={`ocr-line-${li}`}
+                          style={{
+                            position: 'absolute',
+                            left: line.bbox.x0,
+                            top: line.bbox.y0,
+                            width: line.bbox.x1 - line.bbox.x0,
+                            height: line.bbox.y1 - line.bbox.y0,
+                            display: 'flex',
+                            alignItems: 'center',
+                          }}
+                        >
+                          {line.words.map((word, wi) => (
+                            <span
+                              key={`ocr-w-${li}-${wi}`}
+                              style={{
+                                position: 'absolute',
+                                left: word.bbox.x0 - line.bbox.x0,
+                                top: 0,
+                                width: word.bbox.x1 - word.bbox.x0,
+                                height: word.bbox.y1 - word.bbox.y0,
+                                fontSize: Math.max(8, word.bbox.y1 - word.bbox.y0 - 2),
+                                display: 'flex',
+                                alignItems: 'center',
+                                color: overlayVisible
+                                  ? word.confidence > 70
+                                    ? 'rgba(0, 150, 50, 0.4)'
+                                    : 'rgba(220, 80, 0, 0.4)'
+                                  : 'transparent',
+                                whiteSpace: 'pre',
+                                lineHeight: 1,
+                                overflow: 'hidden',
+                              }}
+                            >
+                              {word.text}
+                            </span>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ===== 选择高亮样式 ===== */}
+              <style>{`
+                .absolute span::selection {
+                  background: rgba(59, 130, 246, 0.3);
+                  color: rgba(0, 0, 0, 0.8);
+                }
+              `}</style>
+            </div>
           </div>
         )}
 

@@ -224,9 +224,19 @@ export async function signOut() {
 export async function uploadFile(bucket: string, path: string, file: File) {
   const { error } = await supabase.storage.from(bucket).upload(path, file, {
     upsert: true,
+    contentType: file.type || 'application/octet-stream',
+    cacheControl: '3600',
   })
 
-  if (error) throw error
+  if (error) {
+    const err: any = error
+    const msg = [
+      err?.message || 'Storage 上传失败',
+      err?.statusCode ? `status=${err.statusCode}` : '',
+      err?.error ? `error=${err.error}` : '',
+    ].filter(Boolean).join(' | ')
+    throw new Error(msg)
+  }
 
   // 获取公开 URL
   const {

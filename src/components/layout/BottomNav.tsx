@@ -3,10 +3,10 @@ import { Languages, BookOpen, Library, User } from 'lucide-react'
 
 /* 底部 Tab 导航栏配置 */
 const tabs = [
-  { path: '/translate', label: '翻译', icon: Languages },
-  { path: '/learn', label: '学习', icon: BookOpen },
-  { path: '/vocab', label: '词库', icon: Library },
-  { path: '/profile', label: '个人', icon: User },
+  { path: '/app/translate', label: '翻译', icon: Languages },
+  { path: '/app/learn', label: '学习', icon: BookOpen },
+  { path: '/app/vocab', label: '词库', icon: Library },
+  { path: '/app/profile', label: '个人', icon: User },
 ]
 
 export default function BottomNav() {

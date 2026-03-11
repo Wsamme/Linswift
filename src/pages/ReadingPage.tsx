@@ -5,6 +5,7 @@ import { speakEnglish } from '../lib/tts'
 import { useVocabulary } from '../hooks/useVocabulary'
 import { supabase, type UserBook } from '../lib/supabase'
 import { analyzeUnfamiliarWords } from '../services/gemini'
+import { SAMPLE_BOOKS } from '../data/sampleBooks'
 
 /**
  * 阅读界面（V2：从数据库加载真实内容）
@@ -53,10 +54,44 @@ export default function ReadingPage() {
         return
       }
 
+      const parsedId = parseInt(bookId, 10)
+      if (Number.isNaN(parsedId)) {
+        setLoading(false)
+        return
+      }
+
+      // 支持示例书籍（负数 ID）：不查数据库，直接读取本地演示数据
+      if (parsedId < 0) {
+        const sampleBook = SAMPLE_BOOKS.find((b) => b.id === parsedId) || null
+        if (sampleBook) {
+          setBook(sampleBook)
+          if (sampleBook.content_text) {
+            const paras = sampleBook.content_text
+              .split(/\n\n+/)
+              .map((p: string) => p.trim())
+              .filter((p: string) => p.length > 0)
+            setParagraphs(paras)
+
+            try {
+              const words = await analyzeUnfamiliarWords(sampleBook.content_text, 20)
+              const map: Record<string, { meaning: string; phonetic: string }> = {}
+              words.forEach(w => {
+                map[w.word.toLowerCase()] = { meaning: w.meaning, phonetic: w.phonetic || '' }
+              })
+              setVocabMap(map)
+            } catch {
+              // AI 分析失败，不影响阅读
+            }
+          }
+        }
+        setLoading(false)
+        return
+      }
+
       const { data, error } = await supabase
         .from('user_books')
         .select('*')
-        .eq('id', parseInt(bookId))
+        .eq('id', parsedId)
         .single()
 
       if (!error && data) {
