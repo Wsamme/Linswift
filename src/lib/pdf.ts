@@ -357,9 +357,7 @@ export async function renderPageToCanvas(
   canvas.width = viewport.width * dpr
   canvas.height = viewport.height * dpr
   canvas.style.width = `${viewport.width}px`
-  // 关键修复：CSS 高度使用 auto，避免在移动端 max-width 缩放时出现强制拉伸
-  // 实际渲染尺寸由 canvas.width / canvas.height 决定，显示层保持原始宽高比
-  canvas.style.height = 'auto'
+  canvas.style.height = `${viewport.height}px`
 
   const ctx = canvas.getContext('2d')!
   ctx.scale(dpr, dpr)
