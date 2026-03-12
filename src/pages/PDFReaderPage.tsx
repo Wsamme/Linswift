@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ChevronLeft, ZoomIn, ZoomOut, ChevronRight, Volume2,
@@ -11,13 +11,12 @@ import {
   renderPageToCanvas,
   isScannedPDF,
   ocrPageWithLayout,
-  getTextLayerData,
+  renderNativeTextLayer,
+  extractLinesFromTextLayer,
   extractTextFromPDF,
   getPDFMetadata,
   sanitizeText,
-  groupItemsIntoLines,
   type OCRLayoutResult,
-  type PDFTextLayerItem,
   type TextLine,
 } from '../lib/pdf'
 import { translateBatch } from '../services/gemini'
@@ -184,21 +183,18 @@ export default function PDFReaderPage() {
   const [ocrPageText, setOcrPageText] = useState('')
 
   // ===== 文本叠加层状态 =====
-  const [pdfTextItems, setPdfTextItems] = useState<PDFTextLayerItem[]>([])
-  const [pdfTextViewport, setPdfTextViewport] = useState({ w: 0, h: 0 })
+  const textLayerRef = useRef<HTMLDivElement>(null)
+  const [textLayerViewport, setTextLayerViewport] = useState({ w: 0, h: 0 })
+  const [, setTextLayerReady] = useState(false)
   const [ocrLayoutData, setOcrLayoutData] = useState<OCRLayoutResult | null>(null)
-  const [textLayerEnabled, setTextLayerEnabled] = useState(true)
 
   // 叠加层显示模式
   const [overlayMode, setOverlayMode] = useState<OverlayMode>('select')
 
-  // 合并后的文本行（用于翻译模式和遮盖模式）
+  // 合并后的文本行（用于翻译模式）
   const [pageLines, setPageLines] = useState<TextLine[]>([])
-  // 翻译结果（与 pageLines 一一对应，null 表示未翻译）
   const [translatedLines, setTranslatedLines] = useState<(string | null)[]>([])
-  // 翻译进行中
   const [translating, setTranslating] = useState(false)
-  // hover 状态：当前 hover 的行索引（用于显示原文）
   const [hoveredLineIdx, setHoveredLineIdx] = useState<number | null>(null)
 
   // ===== 文本模式（从数据库 content_text） =====
@@ -237,6 +233,8 @@ export default function PDFReaderPage() {
   const overlayWrapperRef = useRef<HTMLDivElement>(null)
   // 叠加层缩放比例：实际显示宽度 / 原始坐标系宽度
   const [textLayerScale, setTextLayerScale] = useState(0)
+  // 用于追踪canvas ref是否已经触发过首次渲染
+  const hasTriggeredFirstRender = useRef(false)
 
   // 解析 user_books.file_path，兼容历史 URL 与新路径格式
   const extractStoragePath = (rawPath: string): string | null => {
@@ -369,6 +367,7 @@ export default function PDFReaderPage() {
       setHasAutoFitted(false)
       setReadMode('pdf')
       setLocalFile(file) // 保存文件引用，用于后续"保存到书架"
+      hasTriggeredFirstRender.current = false // 重置标志，允许新PDF触发渲染
       console.log('[DEBUG] PDF state updated')
 
       // 检测是否是扫描版
@@ -447,42 +446,34 @@ export default function PDFReaderPage() {
   }
 
   // ================================================================
-  // 渲染当前页到 Canvas + 提取文本层数据
+  // 渲染当前页到 Canvas + 用 pdf.js TextLayer 渲染文本层
   // ================================================================
   const renderCurrentPage = useCallback(async () => {
-    console.log('[DEBUG] renderCurrentPage called', {
-      hasPdfDoc: !!pdfDoc,
-      hasCanvas: !!canvasRef.current,
-      readMode,
-      currentPage,
-      scale
-    })
-    if (!pdfDoc || !canvasRef.current || readMode !== 'pdf') {
-      console.log('[DEBUG] renderCurrentPage skipped - missing requirements')
-      return
-    }
+    if (!pdfDoc || !canvasRef.current || readMode !== 'pdf') return
 
     const taskId = ++renderTaskRef.current
     setRendering(true)
-    console.log('[DEBUG] Starting render, taskId:', taskId)
+    setTextLayerReady(false)
 
     try {
-      console.log('[DEBUG] Calling renderPageToCanvas...')
       await renderPageToCanvas(pdfDoc, currentPage, canvasRef.current, scale)
-      console.log('[DEBUG] renderPageToCanvas completed')
 
-      if (textLayerEnabled) {
+      // 用 pdf.js 原生 TextLayer 渲染——定位精度由 pdf.js 内部保证
+      if (textLayerRef.current) {
         try {
-          const { items, viewportWidth, viewportHeight } = await getTextLayerData(pdfDoc, currentPage, scale)
+          const { viewportWidth, viewportHeight } = await renderNativeTextLayer(
+            pdfDoc, currentPage, scale, textLayerRef.current
+          )
           if (taskId === renderTaskRef.current) {
-            setPdfTextItems(items)
-            setPdfTextViewport({ w: viewportWidth, h: viewportHeight })
-            const lines = groupItemsIntoLines(items)
+            setTextLayerViewport({ w: viewportWidth, h: viewportHeight })
+            setTextLayerReady(true)
+
+            // 提取行数据（翻译用）
+            const lines = extractLinesFromTextLayer(textLayerRef.current)
             setPageLines(lines)
             setTranslatedLines(new Array(lines.length).fill(null))
 
-            // 首页关键：canvas 已渲染完毕，立即算出正确的缩放比
-            // 避免 ResizeObserver 异步延迟导致第一帧用错误的 textLayerScale=1
+            // 计算缩放比
             requestAnimationFrame(() => {
               const wrapper = overlayWrapperRef.current
               if (wrapper && viewportWidth > 0) {
@@ -491,11 +482,8 @@ export default function PDFReaderPage() {
               }
             })
           }
-        } catch {
-          if (taskId === renderTaskRef.current) {
-            setPdfTextItems([])
-            setPageLines([])
-          }
+        } catch (e) {
+          console.warn('TextLayer 渲染失败:', e)
         }
       }
     } catch (err) {
@@ -505,7 +493,7 @@ export default function PDFReaderPage() {
     if (taskId === renderTaskRef.current) {
       setRendering(false)
     }
-  }, [pdfDoc, currentPage, scale, readMode, textLayerEnabled])
+  }, [pdfDoc, currentPage, scale, readMode])
 
   // 每次页码或缩放变化时重新渲染
   useEffect(() => {
@@ -514,20 +502,16 @@ export default function PDFReaderPage() {
 
   // 当canvas元素首次可用且有PDF文档时，触发渲染
   // 这解决了PDF加载时canvas还未渲染到DOM的时序问题
-  // 使用setTimeout确保在React完成DOM更新和ref赋值后再检查
-  useEffect(() => {
-    if (pdfDoc && readMode === 'pdf') {
-      console.log('[DEBUG] PDF loaded, waiting for canvas ref...')
-      // 使用setTimeout确保ref已经被设置
-      const timer = setTimeout(() => {
-        if (canvasRef.current) {
-          console.log('[DEBUG] Canvas now available, triggering render')
-          renderCurrentPage()
-        } else {
-          console.log('[DEBUG] Canvas ref still null after timeout')
-        }
-      }, 100)
-      return () => clearTimeout(timer)
+  // 使用useLayoutEffect确保在DOM更新后立即执行，此时ref已经被设置
+  useLayoutEffect(() => {
+    console.log('[DEBUG] useLayoutEffect triggered', {
+      hasPdfDoc: !!pdfDoc,
+      hasCanvas: !!canvasRef.current,
+      readMode
+    })
+    if (pdfDoc && canvasRef.current && readMode === 'pdf') {
+      console.log('[DEBUG] Canvas available in useLayoutEffect, triggering render')
+      renderCurrentPage()
     }
   }, [pdfDoc, readMode, renderCurrentPage])
 
@@ -593,24 +577,21 @@ export default function PDFReaderPage() {
   }, [pdfDoc, hasAutoFitted, readMode, fitWidth])
 
   // 追踪 Canvas 实际显示宽度，计算文本叠加层的精确缩放比
-  // 关键：在 ResizeObserver 回调之前就同步计算一次，避免首页首帧错位
   useEffect(() => {
     const wrapper = overlayWrapperRef.current
     if (!wrapper) return
 
     const naturalWidth = ocrLayoutData
       ? ocrLayoutData.imageWidth
-      : pdfTextViewport.w
+      : textLayerViewport.w
 
     if (naturalWidth <= 0) return
 
-    // 立即同步计算（读取 clientWidth 会强制浏览器 reflow，保证拿到最新尺寸）
     const immediateW = wrapper.clientWidth
     if (immediateW > 0) {
       setTextLayerScale(immediateW / naturalWidth)
     }
 
-    // ResizeObserver 持续监听后续尺寸变化（窗口缩放等）
     const ro = new ResizeObserver((entries) => {
       const actualW = entries[0]?.contentRect.width
       if (actualW && actualW > 0) {
@@ -619,7 +600,7 @@ export default function PDFReaderPage() {
     })
     ro.observe(wrapper)
     return () => ro.disconnect()
-  }, [pdfTextViewport.w, ocrLayoutData])
+  }, [textLayerViewport.w, ocrLayoutData])
 
   // ================================================================
   // 文本选择 → 查词功能
@@ -768,6 +749,7 @@ export default function PDFReaderPage() {
 
   // ===== 加载中 =====
   if (loading) {
+    console.log('[DEBUG] Rendering loading screen')
     return (
       <div className="min-h-screen bg-[var(--color-background)] flex flex-col items-center justify-center gap-3">
         <Loader2 size={32} className="text-[var(--color-primary)] animate-spin" />
@@ -778,6 +760,7 @@ export default function PDFReaderPage() {
 
   // ===== 没有 PDF 且没有 bookId → 本地文件选择 =====
   if (!pdfDoc && !book) {
+    console.log('[DEBUG] Rendering file selection screen')
     return (
       <div className="min-h-screen bg-[var(--color-background)] flex flex-col">
         {/* Header */}
@@ -901,6 +884,12 @@ export default function PDFReaderPage() {
   }
 
   // ===== PDF 渲染模式 =====
+  console.log('[DEBUG] Rendering PDF reader interface', {
+    hasPdfDoc: !!pdfDoc,
+    hasBook: !!book,
+    readMode,
+    loading
+  })
   return (
     <div className="min-h-screen bg-[#333] flex flex-col">
       {/* ===== 顶部工具栏 ===== */}
@@ -1134,11 +1123,6 @@ export default function PDFReaderPage() {
                         </button>
                       ))}
                     </div>
-                    <DarkToggleRow
-                      label="启用文本层提取"
-                      value={textLayerEnabled}
-                      onChange={() => setTextLayerEnabled(!textLayerEnabled)}
-                    />
                     {pageLines.length > 0 && (
                       <p className="mt-2 text-[10px] text-blue-300/70">
                         已提取 {pageLines.length} 行文字
@@ -1336,163 +1320,121 @@ export default function PDFReaderPage() {
             {/* 外层 wrapper：inline-block 收缩到和 canvas 一样大，用于 ResizeObserver 测量 */}
             <div ref={overlayWrapperRef} className="relative inline-block" style={{ maxWidth: '100%' }}>
               <canvas
-                ref={canvasRef}
+                ref={(el) => {
+                  canvasRef.current = el
+                  // 当canvas首次被挂载且有PDF文档时，触发渲染
+                  if (el && pdfDoc && readMode === 'pdf' && !hasTriggeredFirstRender.current) {
+                    console.log('[DEBUG] Canvas ref callback triggered, scheduling render')
+                    hasTriggeredFirstRender.current = true
+                    // 使用setTimeout确保在当前渲染周期完成后再调用
+                    setTimeout(() => {
+                      console.log('[DEBUG] Triggering render from canvas ref callback')
+                      renderCurrentPage()
+                    }, 0)
+                  }
+                }}
                 className="shadow-lg block"
                 style={{ maxWidth: '100%', height: 'auto' }}
               />
 
-              {/* ===== 文本叠加层（仅在 scale 已计算后渲染，防止首帧闪烁） ===== */}
-              {textLayerEnabled && overlayMode !== 'off' && textLayerScale > 0 && (
+              {/* ===== pdf.js 原生 TextLayer ===== */}
+              <div
+                ref={textLayerRef}
+                className={`textLayer absolute top-0 left-0 overlay-mode-${overlayMode}`}
+                style={{
+                  transformOrigin: '0 0',
+                  transform: textLayerScale > 0 ? `scale(${textLayerScale})` : 'scale(0)',
+                  zIndex: overlayMode === 'off' ? -1 : 2,
+                  pointerEvents: overlayMode === 'off' ? 'none' : 'auto',
+                  opacity: overlayMode === 'off' ? 0 : 1,
+                }}
+                onMouseUp={handleTextSelect}
+              />
+
+              {/* 遮盖/翻译模式的覆盖层（用精确的行数据） */}
+              {(overlayMode === 'cover' || overlayMode === 'translate') && pageLines.length > 0 && textLayerViewport.w > 0 && textLayerScale > 0 && (
                 <div
-                  className="absolute inset-0 overflow-hidden"
+                  className="absolute top-0 left-0"
                   style={{
-                    pointerEvents: overlayMode === 'select' ? 'none' : 'auto',
-                    userSelect: 'text',
-                    WebkitUserSelect: 'text',
-                    zIndex: 2,
+                    width: textLayerViewport.w,
+                    height: textLayerViewport.h,
+                    transformOrigin: '0 0',
+                    transform: `scale(${textLayerScale})`,
+                    zIndex: 3,
+                    pointerEvents: 'auto',
                   }}
                   onMouseUp={handleTextSelect}
                 >
-                  {/* 使用合并后的行数据渲染（遮盖/翻译模式） */}
-                  {(overlayMode === 'cover' || overlayMode === 'translate') && pageLines.length > 0 && pdfTextViewport.w > 0 && (
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: 0, left: 0,
-                        width: pdfTextViewport.w,
-                        height: pdfTextViewport.h,
-                        transformOrigin: '0 0',
-                        transform: `scale(${textLayerScale})`,
-                      }}
-                    >
-                      {pageLines.map((line, i) => {
-                        const isHovered = hoveredLineIdx === i
-                        const hasTranslation = translatedLines[i] != null && translatedLines[i] !== line.text
-                        const showOriginal = isHovered && overlayMode === 'translate' && hasTranslation
-                        const displayText = (overlayMode === 'translate' && hasTranslation && !showOriginal)
-                          ? translatedLines[i]!
-                          : line.text
+                  {pageLines.map((line, i) => {
+                    const isHovered = hoveredLineIdx === i
+                    const hasTranslation = translatedLines[i] != null && translatedLines[i] !== line.text
+                    const showOriginal = isHovered && overlayMode === 'translate' && hasTranslation
+                    const displayText = (overlayMode === 'translate' && hasTranslation && !showOriginal)
+                      ? translatedLines[i]!
+                      : line.text
 
-                        return (
-                          <div
-                            key={`line-${i}`}
-                            onMouseEnter={() => setHoveredLineIdx(i)}
-                            onMouseLeave={() => setHoveredLineIdx(null)}
-                            style={{
-                              position: 'absolute',
-                              left: line.x,
-                              top: line.y,
-                              minWidth: line.width,
-                              height: line.height,
-                              backgroundColor: showOriginal ? '#FFF8E1' : 'white',
-                              color: '#1a1a1a',
-                              fontSize: line.fontSize,
-                              lineHeight: `${line.height}px`,
-                              whiteSpace: 'nowrap',
-                              overflow: 'hidden',
-                              cursor: hasTranslation ? 'pointer' : 'default',
-                              borderBottom: showOriginal ? '2px solid #FFA000' : 'none',
-                              transition: 'background-color 0.15s',
-                            }}
-                          >
-                            {displayText}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-
-                  {/* OCR 行遮盖/翻译模式 */}
-                  {(overlayMode === 'cover' || overlayMode === 'translate') && ocrLayoutData && ocrLayoutData.lines.length > 0 && pageLines.length === 0 && (
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: 0, left: 0,
-                        width: ocrLayoutData.imageWidth,
-                        height: ocrLayoutData.imageHeight,
-                        transformOrigin: '0 0',
-                        transform: `scale(${textLayerScale})`,
-                      }}
-                    >
-                      {ocrLayoutData.lines.map((line, i) => {
-                        const isHovered = hoveredLineIdx === i
-                        const hasTranslation = translatedLines[i] != null && translatedLines[i] !== line.text
-                        const showOriginal = isHovered && overlayMode === 'translate' && hasTranslation
-                        const displayText = (overlayMode === 'translate' && hasTranslation && !showOriginal)
-                          ? translatedLines[i]!
-                          : line.text
-
-                        return (
-                          <div
-                            key={`ocr-cover-${i}`}
-                            onMouseEnter={() => setHoveredLineIdx(i)}
-                            onMouseLeave={() => setHoveredLineIdx(null)}
-                            style={{
-                              position: 'absolute',
-                              left: line.bbox.x0 - 2,
-                              top: line.bbox.y0 - 1,
-                              minWidth: line.bbox.x1 - line.bbox.x0 + 4,
-                              height: line.bbox.y1 - line.bbox.y0 + 2,
-                              backgroundColor: showOriginal ? '#FFF8E1' : 'white',
-                              color: '#1a1a1a',
-                              fontSize: Math.max(10, (line.bbox.y1 - line.bbox.y0) * 0.85),
-                              lineHeight: `${line.bbox.y1 - line.bbox.y0 + 2}px`,
-                              padding: '0 3px',
-                              whiteSpace: 'nowrap',
-                              overflow: 'hidden',
-                              cursor: hasTranslation ? 'pointer' : 'default',
-                              borderBottom: showOriginal ? '2px solid #FFA000' : 'none',
-                              transition: 'background-color 0.15s',
-                            }}
-                          >
-                            {displayText}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-
-                  {/* 透明选择模式（select/debug）：仍用原始 items 逐个定位 */}
-                  {(overlayMode === 'select' || overlayMode === 'debug') && pdfTextItems.length > 0 && pdfTextViewport.w > 0 && (
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: 0, left: 0,
-                        width: pdfTextViewport.w,
-                        height: pdfTextViewport.h,
-                        transformOrigin: '0 0',
-                        transform: `scale(${textLayerScale})`,
-                        pointerEvents: 'auto',
-                      }}
-                    >
-                      {pdfTextItems.map((item, i) => (
-                        <span
-                          key={`pdf-${i}`}
-                          style={{
-                            position: 'absolute',
-                            left: item.x,
-                            top: item.y,
-                            fontSize: item.fontSize,
-                            color: overlayMode === 'debug' ? 'rgba(0, 80, 255, 0.35)' : 'transparent',
-                            whiteSpace: 'pre',
-                            lineHeight: 1,
-                            transformOrigin: '0% 0%',
-                            transform: item.cssTransform || undefined,
-                          }}
-                        >
-                          {item.str}
-                        </span>
-                      ))}
-                    </div>
-                  )}
+                    return (
+                      <div
+                        key={`line-${i}`}
+                        onMouseEnter={() => setHoveredLineIdx(i)}
+                        onMouseLeave={() => setHoveredLineIdx(null)}
+                        style={{
+                          position: 'absolute',
+                          left: line.x,
+                          top: line.y,
+                          minWidth: line.width,
+                          height: line.height,
+                          backgroundColor: showOriginal ? '#FFF8E1' : 'white',
+                          color: '#1a1a1a',
+                          fontSize: line.fontSize,
+                          lineHeight: `${line.height}px`,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          cursor: hasTranslation ? 'pointer' : 'default',
+                          borderBottom: showOriginal ? '2px solid #FFA000' : 'none',
+                          transition: 'background-color 0.15s',
+                        }}
+                      >
+                        {displayText}
+                      </div>
+                    )
+                  })}
                 </div>
               )}
 
+              {/* pdf.js TextLayer 的样式控制 */}
               <style>{`
-                .absolute span::selection,
-                .absolute div::selection {
+                /* pdf.js 内置 textLayer 样式 */
+                .textLayer {
+                  text-align: initial;
+                  overflow: hidden;
+                }
+                .textLayer span,
+                .textLayer br {
+                  color: transparent;
+                  position: absolute;
+                  white-space: pre;
+                  transform-origin: 0% 0%;
+                  user-select: text;
+                  -webkit-user-select: text;
+                }
+                .textLayer span::selection {
                   background: rgba(59, 130, 246, 0.3);
-                  color: #000;
+                  color: rgba(0, 0, 0, 0.8);
+                }
+                /* 可选模式：文字透明可选 */
+                .overlay-mode-select span {
+                  color: transparent !important;
+                }
+                /* 调试模式：半透明蓝色 */
+                .overlay-mode-debug span {
+                  color: rgba(0, 80, 255, 0.35) !important;
+                }
+                /* 遮盖/翻译模式：隐藏原生 TextLayer（用上方的行级覆盖代替） */
+                .overlay-mode-cover,
+                .overlay-mode-translate {
+                  opacity: 0 !important;
+                  pointer-events: none !important;
                 }
               `}</style>
             </div>

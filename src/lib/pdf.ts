@@ -474,89 +474,92 @@ export async function ocrPageWithLayout(
 }
 
 /**
- * 获取数字版 PDF 某一页的文本层数据（带精确位置信息）
+ * 使用 pdf.js 内置 TextLayer 渲染文本层到一个临时容器，
+ * 然后读取浏览器计算的精确位置。
  *
- * 对于非扫描版 PDF，pdf.js 能直接提取每个文字项的精确坐标和变换矩阵。
- * 返回的数据可用于在 Canvas 上叠加透明文字层，实现文本选择、搜索、翻译。
- *
- * @param pdf     - PDF 文档对象
- * @param pageNum - 页码
- * @param scale   - 缩放比例（必须和 Canvas 渲染时一致）
- * @returns 文本项数组 + viewport 尺寸
+ * 这比手动从 transform 矩阵计算坐标可靠得多，
+ * 因为 pdf.js TextLayer 内部处理了所有字体度量、旋转、缩放的细节。
  */
-export async function getTextLayerData(
+export async function renderNativeTextLayer(
   pdf: PDFDocumentProxy,
   pageNum: number,
-  scale: number
-): Promise<{
-  items: PDFTextLayerItem[]
-  viewportWidth: number
-  viewportHeight: number
-}> {
+  scale: number,
+  container: HTMLDivElement
+): Promise<{ viewportWidth: number; viewportHeight: number }> {
   const page = await pdf.getPage(pageNum)
   const viewport = page.getViewport({ scale })
-  const content = await page.getTextContent()
 
-  // pdf.js 返回的 styles 包含每个字体的精确 ascent/descent 比率
-  const fontStyles = (content as any).styles as Record<string, {
-    ascent?: number
-    descent?: number
-    fontFamily?: string
-    vertical?: boolean
-  }> | undefined
+  // 清空旧内容
+  container.innerHTML = ''
 
-  const items: PDFTextLayerItem[] = content.items
-    .filter((item: any) => item.str && item.str.length > 0)
-    .map((item: any) => {
-      const tx = pdfjsLib.Util.transform(viewport.transform, item.transform)
+  // 设置容器尺寸匹配 viewport
+  container.style.width = `${viewport.width}px`
+  container.style.height = `${viewport.height}px`
 
-      // 水平方向字号
-      const fontSize = Math.hypot(tx[0], tx[1])
-      // 垂直方向字高（非旋转时与 fontSize 相同）
-      const fontHeight = Math.hypot(tx[2], tx[3])
-      const angle = Math.atan2(tx[1], tx[0])
-
-      // 从字体度量获取精确的 ascent 比率（基线到顶部的比例）
-      const fontMeta = fontStyles?.[item.fontName]
-      const ascent = fontMeta?.ascent ?? 0.8
-
-      // tx[4] = 屏幕 x，tx[5] = 屏幕 y（基线位置）
-      // 用 ascent 比率而非完整字号来偏移，使覆盖层精确对齐基线
-      const x = tx[4]
-      const y = tx[5] - fontHeight * ascent
-
-      const cosA = Math.cos(angle)
-      const sinA = Math.sin(angle)
-      const cssTransform =
-        Math.abs(angle) > 0.01
-          ? `matrix(${cosA.toFixed(4)},${sinA.toFixed(4)},${(-sinA).toFixed(4)},${cosA.toFixed(4)},0,0)`
-          : ''
-
-      return {
-        str: item.str,
-        x,
-        y,
-        width: (item.width || 0) * scale,
-        fontSize,
-        cssTransform,
-      }
-    })
-
-  // 去除完全重叠的文本项（某些 PDF 生成器会产生位置重叠的重复片段）
-  const deduped: PDFTextLayerItem[] = []
-  for (const it of items) {
-    const dup = deduped.find(
-      d => Math.abs(d.y - it.y) < d.fontSize * 0.3 &&
-           it.x >= d.x - 1 && it.x + it.width <= d.x + d.width + 1
-    )
-    if (!dup) deduped.push(it)
-  }
+  const { TextLayer } = await import('pdfjs-dist')
+  const textLayer = new TextLayer({
+    textContentSource: await page.getTextContent(),
+    container,
+    viewport,
+  })
+  await textLayer.render()
 
   return {
-    items: deduped,
     viewportWidth: viewport.width,
     viewportHeight: viewport.height,
   }
+}
+
+/**
+ * 从 TextLayer 渲染的 DOM 中提取行数据
+ * 用于翻译模式（需要按行翻译和替换）
+ */
+export function extractLinesFromTextLayer(container: HTMLDivElement): TextLine[] {
+  const spans = Array.from(container.querySelectorAll('span'))
+  if (spans.length === 0) return []
+
+  // 按 offsetTop 分组为逻辑行
+  const groups: Map<number, { spans: HTMLSpanElement[]; y: number }> = new Map()
+
+  for (const span of spans) {
+    if (!span.textContent?.trim()) continue
+    const y = span.offsetTop
+    const fontSize = parseFloat(getComputedStyle(span).fontSize) || 12
+
+    // 找到 y 坐标相近的已有组
+    let matched = false
+    for (const [, group] of groups) {
+      if (Math.abs(y - group.y) < fontSize * 0.5) {
+        group.spans.push(span)
+        matched = true
+        break
+      }
+    }
+    if (!matched) {
+      groups.set(y, { spans: [span], y })
+    }
+  }
+
+  const lines: TextLine[] = []
+  for (const group of groups.values()) {
+    const sorted = group.spans.sort((a, b) => a.offsetLeft - b.offsetLeft)
+    const first = sorted[0]
+    const last = sorted[sorted.length - 1]
+    const text = sorted.map(s => s.textContent || '').join('')
+    if (!text.trim()) continue
+
+    const fontSize = parseFloat(getComputedStyle(first).fontSize) || 12
+    lines.push({
+      text,
+      x: first.offsetLeft,
+      y: group.y,
+      width: (last.offsetLeft + last.offsetWidth) - first.offsetLeft,
+      height: first.offsetHeight,
+      fontSize,
+    })
+  }
+
+  return lines.sort((a, b) => a.y - b.y)
 }
 
 /**
