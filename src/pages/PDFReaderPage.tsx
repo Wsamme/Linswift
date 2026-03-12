@@ -236,7 +236,7 @@ export default function PDFReaderPage() {
   // 叠加层 wrapper ref（用于 ResizeObserver 测量实际显示尺寸）
   const overlayWrapperRef = useRef<HTMLDivElement>(null)
   // 叠加层缩放比例：实际显示宽度 / 原始坐标系宽度
-  const [textLayerScale, setTextLayerScale] = useState(1)
+  const [textLayerScale, setTextLayerScale] = useState(0)
 
   // 解析 user_books.file_path，兼容历史 URL 与新路径格式
   const extractStoragePath = (rawPath: string): string | null => {
@@ -349,19 +349,27 @@ export default function PDFReaderPage() {
   // 本地文件导入（没有 bookId 时可以直接选文件阅读）
   // ================================================================
   const handleLocalFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    console.log('[DEBUG] handleLocalFile called')
     const file = e.target.files?.[0]
-    if (!file) return
+    console.log('[DEBUG] file:', file?.name, file?.size)
+    if (!file) {
+      console.log('[DEBUG] No file selected')
+      return
+    }
 
     setLoading(true)
     setSavedToShelf(false)
     try {
+      console.log('[DEBUG] Loading PDF document...')
       const pdf = await loadPDFDocument(file)
+      console.log('[DEBUG] PDF loaded, numPages:', pdf.numPages)
       setPdfDoc(pdf)
       setTotalPages(pdf.numPages)
       setCurrentPage(1)
       setHasAutoFitted(false)
       setReadMode('pdf')
       setLocalFile(file) // 保存文件引用，用于后续"保存到书架"
+      console.log('[DEBUG] PDF state updated')
 
       // 检测是否是扫描版
       try {
@@ -372,9 +380,11 @@ export default function PDFReaderPage() {
         // 扫描检测失败不影响阅读
       }
     } catch (err: any) {
+      console.error('[DEBUG] PDF load error:', err)
       alert(`打开 PDF 失败: ${err.message || '格式不支持'}`)
     }
     setLoading(false)
+    console.log('[DEBUG] handleLocalFile completed')
   }
 
   // ================================================================
@@ -440,13 +450,26 @@ export default function PDFReaderPage() {
   // 渲染当前页到 Canvas + 提取文本层数据
   // ================================================================
   const renderCurrentPage = useCallback(async () => {
-    if (!pdfDoc || !canvasRef.current || readMode !== 'pdf') return
+    console.log('[DEBUG] renderCurrentPage called', {
+      hasPdfDoc: !!pdfDoc,
+      hasCanvas: !!canvasRef.current,
+      readMode,
+      currentPage,
+      scale
+    })
+    if (!pdfDoc || !canvasRef.current || readMode !== 'pdf') {
+      console.log('[DEBUG] renderCurrentPage skipped - missing requirements')
+      return
+    }
 
     const taskId = ++renderTaskRef.current
     setRendering(true)
+    console.log('[DEBUG] Starting render, taskId:', taskId)
 
     try {
+      console.log('[DEBUG] Calling renderPageToCanvas...')
       await renderPageToCanvas(pdfDoc, currentPage, canvasRef.current, scale)
+      console.log('[DEBUG] renderPageToCanvas completed')
 
       if (textLayerEnabled) {
         try {
@@ -454,10 +477,19 @@ export default function PDFReaderPage() {
           if (taskId === renderTaskRef.current) {
             setPdfTextItems(items)
             setPdfTextViewport({ w: viewportWidth, h: viewportHeight })
-            // 合并为逻辑行（用于遮盖/翻译模式）
             const lines = groupItemsIntoLines(items)
             setPageLines(lines)
             setTranslatedLines(new Array(lines.length).fill(null))
+
+            // 首页关键：canvas 已渲染完毕，立即算出正确的缩放比
+            // 避免 ResizeObserver 异步延迟导致第一帧用错误的 textLayerScale=1
+            requestAnimationFrame(() => {
+              const wrapper = overlayWrapperRef.current
+              if (wrapper && viewportWidth > 0) {
+                const w = wrapper.clientWidth
+                if (w > 0) setTextLayerScale(w / viewportWidth)
+              }
+            })
           }
         } catch {
           if (taskId === renderTaskRef.current) {
@@ -479,6 +511,25 @@ export default function PDFReaderPage() {
   useEffect(() => {
     renderCurrentPage()
   }, [renderCurrentPage])
+
+  // 当canvas元素首次可用且有PDF文档时，触发渲染
+  // 这解决了PDF加载时canvas还未渲染到DOM的时序问题
+  // 使用setTimeout确保在React完成DOM更新和ref赋值后再检查
+  useEffect(() => {
+    if (pdfDoc && readMode === 'pdf') {
+      console.log('[DEBUG] PDF loaded, waiting for canvas ref...')
+      // 使用setTimeout确保ref已经被设置
+      const timer = setTimeout(() => {
+        if (canvasRef.current) {
+          console.log('[DEBUG] Canvas now available, triggering render')
+          renderCurrentPage()
+        } else {
+          console.log('[DEBUG] Canvas ref still null after timeout')
+        }
+      }, 100)
+      return () => clearTimeout(timer)
+    }
+  }, [pdfDoc, readMode, renderCurrentPage])
 
   // ================================================================
   // 翻页操作
@@ -541,7 +592,8 @@ export default function PDFReaderPage() {
     fitWidth().finally(() => setHasAutoFitted(true))
   }, [pdfDoc, hasAutoFitted, readMode, fitWidth])
 
-  // 使用 ResizeObserver 追踪 Canvas 实际显示宽度，用于文本叠加层的坐标缩放
+  // 追踪 Canvas 实际显示宽度，计算文本叠加层的精确缩放比
+  // 关键：在 ResizeObserver 回调之前就同步计算一次，避免首页首帧错位
   useEffect(() => {
     const wrapper = overlayWrapperRef.current
     if (!wrapper) return
@@ -552,6 +604,13 @@ export default function PDFReaderPage() {
 
     if (naturalWidth <= 0) return
 
+    // 立即同步计算（读取 clientWidth 会强制浏览器 reflow，保证拿到最新尺寸）
+    const immediateW = wrapper.clientWidth
+    if (immediateW > 0) {
+      setTextLayerScale(immediateW / naturalWidth)
+    }
+
+    // ResizeObserver 持续监听后续尺寸变化（窗口缩放等）
     const ro = new ResizeObserver((entries) => {
       const actualW = entries[0]?.contentRect.width
       if (actualW && actualW > 0) {
@@ -1282,8 +1341,8 @@ export default function PDFReaderPage() {
                 style={{ maxWidth: '100%', height: 'auto' }}
               />
 
-              {/* ===== 文本叠加层 ===== */}
-              {textLayerEnabled && overlayMode !== 'off' && (
+              {/* ===== 文本叠加层（仅在 scale 已计算后渲染，防止首帧闪烁） ===== */}
+              {textLayerEnabled && overlayMode !== 'off' && textLayerScale > 0 && (
                 <div
                   className="absolute inset-0 overflow-hidden"
                   style={{
@@ -1321,15 +1380,14 @@ export default function PDFReaderPage() {
                             onMouseLeave={() => setHoveredLineIdx(null)}
                             style={{
                               position: 'absolute',
-                              left: Math.max(0, line.x - 2),
-                              top: Math.max(0, line.y - 1),
-                              minWidth: line.width + 4,
-                              height: line.height + 2,
+                              left: line.x,
+                              top: line.y,
+                              minWidth: line.width,
+                              height: line.height,
                               backgroundColor: showOriginal ? '#FFF8E1' : 'white',
                               color: '#1a1a1a',
-                              fontSize: line.fontSize * 0.95,
-                              lineHeight: `${line.height + 2}px`,
-                              padding: '0 2px',
+                              fontSize: line.fontSize,
+                              lineHeight: `${line.height}px`,
                               whiteSpace: 'nowrap',
                               overflow: 'hidden',
                               cursor: hasTranslation ? 'pointer' : 'default',

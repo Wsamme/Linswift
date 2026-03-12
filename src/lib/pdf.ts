@@ -133,14 +133,35 @@ export function groupItemsIntoLines(items: PDFTextLayerItem[]): TextLine[] {
   return lines.map(line => {
     const byX = line.items.sort((a, b) => a.x - b.x)
     const first = byX[0]
-    const last = byX[byX.length - 1]
-    const text = byX.map(it => it.str).join('')
+
+    // pdf.js 有时返回重叠的文本项（如 "positioning" 和 "ing."）
+    // 检测 x 范围重叠，跳过已覆盖的部分
+    let text = ''
+    let lastEnd = -Infinity
+    for (const it of byX) {
+      if (it.x >= lastEnd - 1) {
+        text += it.str
+      } else if (it.x + it.width > lastEnd) {
+        // 部分重叠——只保留超出已有范围的字符
+        const overlapRatio = Math.min(1, (lastEnd - it.x) / Math.max(1, it.width))
+        const skip = Math.max(0, Math.round(overlapRatio * it.str.length))
+        text += it.str.slice(skip)
+      }
+      lastEnd = Math.max(lastEnd, it.x + it.width)
+    }
+
+    let minY = Infinity, maxY = -Infinity
+    for (const it of byX) {
+      minY = Math.min(minY, it.y)
+      maxY = Math.max(maxY, it.y + it.fontSize)
+    }
+
     return {
       text,
       x: first.x,
-      y: line.y,
-      width: (last.x + last.width) - first.x,
-      height: first.fontSize * 1.2,
+      y: minY,
+      width: lastEnd - first.x,
+      height: maxY - minY,
       fontSize: first.fontSize,
     }
   })
@@ -476,24 +497,34 @@ export async function getTextLayerData(
   const viewport = page.getViewport({ scale })
   const content = await page.getTextContent()
 
+  // pdf.js 返回的 styles 包含每个字体的精确 ascent/descent 比率
+  const fontStyles = (content as any).styles as Record<string, {
+    ascent?: number
+    descent?: number
+    fontFamily?: string
+    vertical?: boolean
+  }> | undefined
+
   const items: PDFTextLayerItem[] = content.items
     .filter((item: any) => item.str && item.str.length > 0)
     .map((item: any) => {
-      // item.transform = [scaleX, skewY, skewX, scaleY, translateX, translateY]
-      // 用 viewport.transform 将 PDF 坐标转为屏幕坐标
       const tx = pdfjsLib.Util.transform(viewport.transform, item.transform)
 
-      // tx[0], tx[1] → 字号和旋转分量
-      const fontSize = Math.sqrt(tx[0] * tx[0] + tx[1] * tx[1])
-      // 旋转角度
+      // 水平方向字号
+      const fontSize = Math.hypot(tx[0], tx[1])
+      // 垂直方向字高（非旋转时与 fontSize 相同）
+      const fontHeight = Math.hypot(tx[2], tx[3])
       const angle = Math.atan2(tx[1], tx[0])
 
-      // tx[4] = 屏幕 x，tx[5] = 屏幕 y（基线位置）
-      // y 需要往上偏移一个字号高度（因为 PDF 文字锚点在基线）
-      const x = tx[4]
-      const y = tx[5] - fontSize
+      // 从字体度量获取精确的 ascent 比率（基线到顶部的比例）
+      const fontMeta = fontStyles?.[item.fontName]
+      const ascent = fontMeta?.ascent ?? 0.8
 
-      // CSS transform：处理旋转和缩放
+      // tx[4] = 屏幕 x，tx[5] = 屏幕 y（基线位置）
+      // 用 ascent 比率而非完整字号来偏移，使覆盖层精确对齐基线
+      const x = tx[4]
+      const y = tx[5] - fontHeight * ascent
+
       const cosA = Math.cos(angle)
       const sinA = Math.sin(angle)
       const cssTransform =
@@ -511,8 +542,18 @@ export async function getTextLayerData(
       }
     })
 
+  // 去除完全重叠的文本项（某些 PDF 生成器会产生位置重叠的重复片段）
+  const deduped: PDFTextLayerItem[] = []
+  for (const it of items) {
+    const dup = deduped.find(
+      d => Math.abs(d.y - it.y) < d.fontSize * 0.3 &&
+           it.x >= d.x - 1 && it.x + it.width <= d.x + d.width + 1
+    )
+    if (!dup) deduped.push(it)
+  }
+
   return {
-    items,
+    items: deduped,
     viewportWidth: viewport.width,
     viewportHeight: viewport.height,
   }
