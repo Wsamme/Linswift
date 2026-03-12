@@ -920,7 +920,7 @@ export default function PDFReaderPage() {
     loading
   })
   return (
-    <div className="min-h-screen bg-[#333] flex flex-col">
+    <div className="h-full min-h-screen bg-[#333] flex flex-col">
       {/* ===== 顶部工具栏 ===== */}
       <div className="flex items-center justify-between px-4 py-3 bg-[#222] text-white">
         {/* 左侧：返回 */}

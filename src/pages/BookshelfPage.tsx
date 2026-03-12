@@ -197,7 +197,7 @@ export default function BookshelfPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--color-background)]">
+    <div className="h-full min-h-screen bg-[var(--color-background)] overflow-y-auto">
       {/* ===== Header ===== */}
       <div className="flex items-center justify-between px-5 py-4">
         <button onClick={() => navigate(-1)} className="p-1">

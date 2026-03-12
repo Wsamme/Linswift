@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 
 // ===== 布局组件 =====
 import AppShell from './components/layout/AppShell'
+import ReaderShell from './components/layout/ReaderShell'
 import ProtectedRoute from './components/auth/ProtectedRoute'
 
 // ===== Phase 1: 核心页面 =====
@@ -95,50 +96,52 @@ export default function App() {
         <Route path="profile" element={<ProfilePage />} />
       </Route>
 
-      {/* ===== 受保护路由 —— 独立页面（无底部导航）===== */}
-      {/* 阅读器模块 */}
-      <Route path="/bookshelf" element={<ProtectedRoute><BookshelfPage /></ProtectedRoute>} />
-      <Route path="/reading-prep" element={<ProtectedRoute><ReadingPrepPage /></ProtectedRoute>} />
-      <Route path="/flashcard" element={<ProtectedRoute><FlashcardPage /></ProtectedRoute>} />
-      <Route path="/reading" element={<ProtectedRoute><ReadingPage /></ProtectedRoute>} />
-      <Route path="/pdf-reader" element={<ProtectedRoute><PDFReaderPage /></ProtectedRoute>} />
+      {/* ===== 受保护路由 —— 桌面端带侧边导航的独立页面 ===== */}
+      <Route element={<ProtectedRoute><ReaderShell /></ProtectedRoute>}>
+        {/* 阅读器模块 */}
+        <Route path="/bookshelf" element={<BookshelfPage />} />
+        <Route path="/reading-prep" element={<ReadingPrepPage />} />
+        <Route path="/flashcard" element={<FlashcardPage />} />
+        <Route path="/reading" element={<ReadingPage />} />
+        <Route path="/pdf-reader" element={<PDFReaderPage />} />
 
-      {/* 背单词模块 */}
-      <Route path="/ebbinghaus" element={<ProtectedRoute><EbbinghausPage /></ProtectedRoute>} />
-      <Route path="/vocab-game" element={<ProtectedRoute><VocabGamePage /></ProtectedRoute>} />
-      <Route path="/ai-memo" element={<ProtectedRoute><AIMemoPage /></ProtectedRoute>} />
+        {/* 背单词模块 */}
+        <Route path="/ebbinghaus" element={<EbbinghausPage />} />
+        <Route path="/vocab-game" element={<VocabGamePage />} />
+        <Route path="/ai-memo" element={<AIMemoPage />} />
 
-      {/* 听力模块 */}
-      <Route path="/listening" element={<ProtectedRoute><ListeningHubPage /></ProtectedRoute>} />
-      <Route path="/listen-fill" element={<ProtectedRoute><ListenFillPage /></ProtectedRoute>} />
-      <Route path="/listen-go" element={<ProtectedRoute><ListenGoPage /></ProtectedRoute>} />
-      <Route path="/listen-lib" element={<ProtectedRoute><ListenLibPage /></ProtectedRoute>} />
+        {/* 听力模块 */}
+        <Route path="/listening" element={<ListeningHubPage />} />
+        <Route path="/listen-fill" element={<ListenFillPage />} />
+        <Route path="/listen-go" element={<ListenGoPage />} />
+        <Route path="/listen-lib" element={<ListenLibPage />} />
 
-      {/* 口语模块 */}
-      <Route path="/speaking" element={<ProtectedRoute><SpeakingHubPage /></ProtectedRoute>} />
-      <Route path="/retell" element={<ProtectedRoute><RetellPage /></ProtectedRoute>} />
-      <Route path="/ai-dialog" element={<ProtectedRoute><AIDialogPage /></ProtectedRoute>} />
-      <Route path="/scene-select" element={<ProtectedRoute><SceneSelectPage /></ProtectedRoute>} />
+        {/* 口语模块 */}
+        <Route path="/speaking" element={<SpeakingHubPage />} />
+        <Route path="/retell" element={<RetellPage />} />
+        <Route path="/ai-dialog" element={<AIDialogPage />} />
+        <Route path="/scene-select" element={<SceneSelectPage />} />
 
-      {/* 语法 + 测试 */}
-      <Route path="/grammar" element={<ProtectedRoute><GrammarTreePage /></ProtectedRoute>} />
-      <Route path="/reading-test" element={<ProtectedRoute><ReadingTestPage /></ProtectedRoute>} />
-      <Route path="/vocab-test" element={<ProtectedRoute><VocabTestPage /></ProtectedRoute>} />
-      <Route path="/ai-classify" element={<ProtectedRoute><AIClassifyPage /></ProtectedRoute>} />
+        {/* 语法 + 测试 */}
+        <Route path="/grammar" element={<GrammarTreePage />} />
+        <Route path="/reading-test" element={<ReadingTestPage />} />
+        <Route path="/vocab-test" element={<VocabTestPage />} />
+        <Route path="/ai-classify" element={<AIClassifyPage />} />
 
-      {/* 个人资料编辑 */}
-      <Route path="/profile-edit" element={<ProtectedRoute><ProfileEditPage /></ProtectedRoute>} />
+        {/* 个人资料编辑 */}
+        <Route path="/profile-edit" element={<ProfileEditPage />} />
 
-      {/* 个人中心 - 设置子页面 */}
-      <Route path="/learning-settings" element={<ProtectedRoute><LearningSettingsPage /></ProtectedRoute>} />
-      <Route path="/pronunciation-settings" element={<ProtectedRoute><PronunciationSettingsPage /></ProtectedRoute>} />
-      <Route path="/notification-settings" element={<ProtectedRoute><NotificationSettingsPage /></ProtectedRoute>} />
-      <Route path="/theme-settings" element={<ProtectedRoute><ThemeSettingsPage /></ProtectedRoute>} />
-      <Route path="/about" element={<ProtectedRoute><AboutPage /></ProtectedRoute>} />
+        {/* 个人中心 - 设置子页面 */}
+        <Route path="/learning-settings" element={<LearningSettingsPage />} />
+        <Route path="/pronunciation-settings" element={<PronunciationSettingsPage />} />
+        <Route path="/notification-settings" element={<NotificationSettingsPage />} />
+        <Route path="/theme-settings" element={<ThemeSettingsPage />} />
+        <Route path="/about" element={<AboutPage />} />
 
-      {/* V2: 词汇游戏 */}
-      <Route path="/word-match" element={<ProtectedRoute><WordMatchGame /></ProtectedRoute>} />
-      <Route path="/spelling-game" element={<ProtectedRoute><SpellingGame /></ProtectedRoute>} />
+        {/* V2: 词汇游戏 */}
+        <Route path="/word-match" element={<WordMatchGame />} />
+        <Route path="/spelling-game" element={<SpellingGame />} />
+      </Route>
     </Routes>
   )
 }
