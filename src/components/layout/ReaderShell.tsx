@@ -15,7 +15,7 @@ export default function ReaderShell() {
     return (
       <div className="h-full flex bg-[var(--color-background-secondary)]">
         <CardNav />
-        <main className="flex-1 h-full overflow-hidden">
+        <main className="flex-1 h-full overflow-y-auto">
           <Outlet />
         </main>
       </div>

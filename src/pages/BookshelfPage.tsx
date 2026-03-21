@@ -2,31 +2,37 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ChevronLeft, Upload, Clock, Search, MoreVertical, Loader2, Trash2,
-  BookOpen,
+  BookOpen, Download, LayoutGrid, Rows3,
 } from 'lucide-react'
 import { supabase, uploadFile, type UserBook } from '../lib/supabase'
 import { extractTextFromPDF, getPDFMetadata, sanitizeText } from '../lib/pdf'
 import { useAuth } from '../contexts/AuthContext'
-import { SAMPLE_BOOKS } from '../data/sampleBooks'
+import { useLogicalBack } from '../hooks/useLogicalBack'
+import { CLASSIC_BOOKS, getClassicBookBySlug, type ClassicBookCatalogItem } from '../data/classicBooks'
+import { resolveUserBookMetadata } from '../lib/books'
+import ClassicBookCover from '../components/books/ClassicBookCover'
 
 /**
- * 书架页 —— 阅读器模块入口（V3：支持 OCR 导入 + PDF 阅读器）
+ * 书架页 —— 阅读器模块入口（V3：PDF 阅读器）
  *
  * 功能：
- *   1. 从文件选择器导入 PDF（标准 + OCR 扫描版）
- *   2. 自动检测扫描版 PDF → OCR 提取文本
- *   3. 上传 PDF 到 Supabase Storage
- *   4. 保存书籍元数据 + 提取文本到数据库
- *   5. 展示真实书籍列表（来自数据库）
- *   6. 点击书籍 → PDF 阅读器（有 PDF 文件）或阅读准备页
- *   7. 直接打开 PDF 文件阅读入口
+ *   1. 从文件选择器导入 PDF
+ *   2. 上传 PDF 到 Supabase Storage
+ *   3. 保存书籍元数据 + 提取文本到数据库
+ *   4. 展示真实书籍列表（来自数据库，无静态示例数据）
+ *   5. 点击书籍 → PDF 阅读器（有 PDF 文件）或阅读准备页
+ *   6. 直接打开 PDF 文件阅读入口
  */
 
 // 封面 emoji 随机池
 const COVER_EMOJIS = ['📘', '📗', '📙', '📕', '📒', '📓', '📔', '📚']
+const CLASSIC_LIBRARY_VIEW_KEY = 'linswift_classic_library_view'
+
+type ClassicLibraryView = 'cover' | 'list'
 
 export default function BookshelfPage() {
   const navigate = useNavigate()
+  const goBack = useLogicalBack('/app/learn')
   const { user } = useAuth()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -36,6 +42,11 @@ export default function BookshelfPage() {
   const [importing, setImporting] = useState(false)
   const [importStatus, setImportStatus] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
+  const [addingClassicSlug, setAddingClassicSlug] = useState<string | null>(null)
+  const [classicLibraryView, setClassicLibraryView] = useState<ClassicLibraryView>(() => {
+    const saved = localStorage.getItem(CLASSIC_LIBRARY_VIEW_KEY)
+    return saved === 'list' ? 'list' : 'cover'
+  })
 
   // ===== 加载用户书架 =====
   const fetchBooks = useCallback(async () => {
@@ -48,7 +59,7 @@ export default function BookshelfPage() {
       .order('updated_at', { ascending: false })
 
     if (!error && data) {
-      setBooks(data)
+      setBooks(data.map(resolveUserBookMetadata))
     }
     setLoading(false)
   }, [user])
@@ -57,22 +68,49 @@ export default function BookshelfPage() {
     fetchBooks()
   }, [fetchBooks])
 
-  // ===== 合并“示例书籍” + 用户真实书架 =====
-  // 示例书籍用于演示阅读器，不依赖数据库
-  const allBooks = [...SAMPLE_BOOKS, ...books]
+  useEffect(() => {
+    localStorage.setItem(CLASSIC_LIBRARY_VIEW_KEY, classicLibraryView)
+  }, [classicLibraryView])
+
+  const allBooks = books
+  const classicBookMap = books.reduce<Record<string, UserBook>>((acc, book) => {
+    if (book.shared_book_slug) {
+      acc[book.shared_book_slug] = book
+    }
+    return acc
+  }, {})
 
   // ===== 搜索过滤 =====
   const filteredBooks = allBooks.filter(b =>
     b.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     (b.author || '').toLowerCase().includes(searchQuery.toLowerCase())
   )
+  const filteredClassicBooks = CLASSIC_BOOKS
+    .filter((book) => (
+      book.title.toLowerCase().includes(searchQuery.toLowerCase())
+      || book.author.toLowerCase().includes(searchQuery.toLowerCase())
+    ))
+    .sort((a, b) => a.sortOrder - b.sortOrder)
 
   // ===== 最近阅读（有进度的书，按更新时间排序） =====
   const recentReads = books
     .filter(b => b.progress > 0)
     .slice(0, 5)
 
-  // ===== 导入 PDF（支持自动检测扫描版 + OCR） =====
+  const openBook = useCallback((book: UserBook) => {
+    if (book.file_path) {
+      navigate(`/pdf-reader?bookId=${book.id}`)
+      return
+    }
+
+    navigate(book.shared_book_slug ? `/reading?bookId=${book.id}` : `/reading-prep?bookId=${book.id}`)
+  }, [navigate])
+
+  const getClassicCoverBook = useCallback((book: UserBook) => {
+    return getClassicBookBySlug(book.shared_book_slug)
+  }, [])
+
+  // ===== 导入 PDF =====
   const handleImportPDF = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file || !user) return
@@ -177,7 +215,7 @@ export default function BookshelfPage() {
       }
 
       // 成功！刷新书架（非阻塞，避免卡在刷新阶段导致“一直加载”）
-      setImportStatus(fullText ? '导入成功！' : '导入成功（可在阅读器里 OCR）')
+      setImportStatus('导入成功！')
       fetchBooks().catch(() => {})
     } catch (err: any) {
       alert(`导入失败: ${err.message || '未知错误'}`)
@@ -196,22 +234,67 @@ export default function BookshelfPage() {
     setBooks(prev => prev.filter(b => b.id !== bookId))
   }
 
+  const handleAddClassicBook = async (classicBook: ClassicBookCatalogItem) => {
+    if (!user) return
+
+    const existingBook = classicBookMap[classicBook.slug]
+    if (existingBook) {
+      openBook(existingBook)
+      return
+    }
+
+    setAddingClassicSlug(classicBook.slug)
+    try {
+      const { data, error } = await supabase
+        .from('user_books')
+        .insert({
+          user_id: user.id,
+          title: classicBook.title,
+          author: classicBook.author,
+          cover_emoji: classicBook.coverEmoji,
+          shared_book_slug: classicBook.slug,
+          file_path: null,
+          content_text: null,
+          total_pages: null,
+          current_page: 0,
+          progress: 0,
+          unfamiliar_words_count: 0,
+        })
+        .select('*')
+        .single()
+
+      if (error || !data) {
+        throw new Error(error?.message || '加入书架失败')
+      }
+
+      const nextBook = resolveUserBookMetadata(data)
+      setBooks((prev) => [nextBook, ...prev])
+      openBook(nextBook)
+    } catch (err: any) {
+      alert(`加入失败: ${err.message || '未知错误'}`)
+    } finally {
+      setAddingClassicSlug(null)
+    }
+  }
+
   return (
-    <div className="h-full min-h-screen bg-[var(--color-background)] overflow-y-auto">
+    <div className="glass-page h-full min-h-screen overflow-y-auto">
       {/* ===== Header ===== */}
-      <div className="flex items-center justify-between px-5 py-4">
-        <button onClick={() => navigate(-1)} className="p-1">
-          <ChevronLeft size={24} className="text-[var(--color-foreground)]" />
-        </button>
-        <h1 className="text-[18px] font-bold text-[var(--color-foreground)] font-secondary">书架</h1>
-        <button className="p-1">
-          <MoreVertical size={20} className="text-[var(--color-muted)]" />
-        </button>
+      <div className="px-5 pt-5">
+        <div className="glass-card rounded-[28px] px-5 py-4 flex items-center justify-between">
+          <button onClick={goBack} className="p-1">
+            <ChevronLeft size={24} className="text-[var(--color-foreground)]" />
+          </button>
+          <h1 className="text-[18px] font-bold text-[var(--color-foreground)] font-secondary">书架</h1>
+          <button className="p-1">
+            <MoreVertical size={20} className="text-[var(--color-muted)]" />
+          </button>
+        </div>
       </div>
 
       {/* ===== 搜索栏 ===== */}
-      <div className="px-5 mb-4">
-        <div className="flex items-center gap-3 bg-[var(--color-background-secondary)] rounded-[var(--radius-sm)] px-4 py-2.5">
+      <div className="px-5 mt-4">
+        <div className="glass-input-shell flex items-center gap-3 px-4 py-2.5">
           <Search size={18} className="text-[var(--color-muted)] shrink-0" />
           <input
             type="text"
@@ -224,7 +307,7 @@ export default function BookshelfPage() {
       </div>
 
       {/* ===== 导入 PDF 按钮 ===== */}
-      <div className="px-5 mb-4">
+      <div className="px-5 mt-4">
         {/* 隐藏的文件选择器 */}
         <input
           ref={fileInputRef}
@@ -236,7 +319,7 @@ export default function BookshelfPage() {
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={importing}
-          className="w-full flex items-center justify-center gap-2 py-3.5 border-2 border-dashed border-[var(--color-primary)]/30 rounded-[var(--radius-md)] text-[var(--color-primary)] active:bg-[var(--color-primary-light)] transition-colors disabled:opacity-50"
+          className="glass-card-soft glass-card-interactive w-full flex items-center justify-center gap-2 rounded-[24px] border border-dashed border-[var(--color-primary)]/40 py-3.5 text-[var(--color-primary)] disabled:opacity-50"
         >
           {importing ? (
             <>
@@ -253,56 +336,211 @@ export default function BookshelfPage() {
       </div>
 
       {/* ===== 直接打开 PDF 阅读器 ===== */}
-      <div className="px-5 mb-5">
+      <div className="px-5 mt-4">
         <button
           onClick={() => navigate('/pdf-reader')}
-          className="w-full flex items-center justify-center gap-2 py-3 bg-[var(--color-card)] rounded-[var(--radius-sm)] text-[var(--color-foreground)] active:bg-[var(--color-background-secondary)] transition-colors"
-          style={{ boxShadow: 'var(--shadow-card)' }}
+          className="glass-card glass-card-interactive w-full flex items-center justify-center gap-2 rounded-[22px] py-3 text-[var(--color-foreground)]"
         >
           <BookOpen size={16} className="text-[var(--color-primary)]" />
           <span className="text-[13px] font-medium">直接打开 PDF 阅读器</span>
-          <span className="text-[10px] text-[var(--color-muted)] ml-1">支持 OCR 扫描版</span>
         </button>
       </div>
 
       {/* ===== 最近阅读 ===== */}
       {recentReads.length > 0 && (
-        <div className="px-5 mb-5">
+        <div className="px-5 mt-5">
           <h3 className="text-[16px] font-bold text-[var(--color-foreground)] mb-3 font-secondary">最近阅读</h3>
           <div className="flex gap-3 overflow-x-auto pb-2 -mx-5 px-5">
-            {recentReads.map((book) => (
-              <div
-                key={book.id}
-                className="shrink-0 w-[220px] p-3.5 bg-[var(--color-card)] rounded-[var(--radius-md)] cursor-pointer active:scale-[0.98] transition-transform"
-                style={{ boxShadow: 'var(--shadow-card)' }}
-                onClick={() => navigate(book.file_path ? `/pdf-reader?bookId=${book.id}` : `/reading-prep?bookId=${book.id}`)}
-              >
-                <div className="flex items-center gap-2 mb-2">
-                  <Clock size={14} className="text-[var(--color-muted)]" />
-                  <span className="text-[11px] text-[var(--color-muted)]">
-                    {new Date(book.updated_at).toLocaleDateString('zh-CN')}
-                  </span>
+            {recentReads.map((book) => {
+              const classicCoverBook = getClassicCoverBook(book)
+
+              return (
+                <div
+                  key={book.id}
+                  className="glass-card glass-card-interactive shrink-0 w-[220px] rounded-[24px] p-3.5"
+                  onClick={() => openBook(book)}
+                >
+                  <div className="mb-3 flex items-center gap-2">
+                    <Clock size={14} className="text-[var(--color-muted)]" />
+                    <span className="text-[11px] text-[var(--color-muted)]">
+                      {new Date(book.updated_at).toLocaleDateString('zh-CN')}
+                    </span>
+                  </div>
+
+                  <div className="mb-3 overflow-hidden rounded-[18px]">
+                    {classicCoverBook ? (
+                      <div className="aspect-[5/7]">
+                        <ClassicBookCover book={classicCoverBook} compact />
+                      </div>
+                    ) : (
+                      <div className="glass-card-soft flex aspect-[5/7] items-center justify-center rounded-[18px]">
+                        <span className="text-[34px]">{book.cover_emoji}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <p className="text-[14px] font-semibold text-[var(--color-foreground)] line-clamp-1">{book.title}</p>
+                  <p className="text-[12px] text-[var(--color-muted)] mt-0.5">{book.author}</p>
+                  <div className="glass-card-soft mt-2 h-1.5 overflow-hidden rounded-full border-0 shadow-none">
+                    <div
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${book.progress}%`,
+                        backgroundColor: book.progress === 100 ? '#22C55E' : '#FF8400',
+                      }}
+                    />
+                  </div>
                 </div>
-                <p className="text-[14px] font-semibold text-[var(--color-foreground)] line-clamp-1">{book.title}</p>
-                <p className="text-[12px] text-[var(--color-muted)] mt-0.5">{book.author}</p>
-                {/* 进度条 */}
-                <div className="mt-2 h-1.5 bg-[var(--color-background-secondary)] rounded-full overflow-hidden">
-                  <div
-                    className="h-full rounded-full"
-                    style={{
-                      width: `${book.progress}%`,
-                      backgroundColor: book.progress === 100 ? '#22C55E' : '#FF8400',
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}
 
+      {/* ===== 公共经典书库 ===== */}
+      <div className="px-5 mt-5">
+        <div className="mb-3 flex items-end justify-between gap-3">
+          <div>
+            <h3 className="font-secondary text-[16px] font-bold text-[var(--color-foreground)]">公共经典书库</h3>
+            <p className="mt-1 text-[12px] text-[var(--color-muted)]">
+              所有人共用同一份正文资源，你的书架只记录个人进度
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="glass-card-soft flex items-center rounded-full p-1">
+              <button
+                onClick={() => setClassicLibraryView('cover')}
+                className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
+                  classicLibraryView === 'cover'
+                    ? 'bg-[var(--color-primary)] text-white'
+                    : 'text-[var(--color-muted)]'
+                }`}
+                aria-label="封面视图"
+                title="封面视图"
+              >
+                <LayoutGrid size={15} />
+              </button>
+              <button
+                onClick={() => setClassicLibraryView('list')}
+                className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
+                  classicLibraryView === 'list'
+                    ? 'bg-[var(--color-primary)] text-white'
+                    : 'text-[var(--color-muted)]'
+                }`}
+                aria-label="列表视图"
+                title="列表视图"
+              >
+                <Rows3 size={15} />
+              </button>
+            </div>
+            <span className="text-[11px] font-medium text-[var(--color-primary)]">{CLASSIC_BOOKS.length} 本</span>
+          </div>
+        </div>
+
+        {classicLibraryView === 'cover' ? (
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+            {filteredClassicBooks.map((classicBook) => {
+              const linkedBook = classicBookMap[classicBook.slug]
+              const isAdding = addingClassicSlug === classicBook.slug
+
+              return (
+                <div key={classicBook.slug} className="glass-card rounded-[24px] p-2.5">
+                  <button
+                    onClick={() => linkedBook ? openBook(linkedBook) : handleAddClassicBook(classicBook)}
+                    className="w-full text-left"
+                  >
+                    <div className="mb-3 aspect-[5/7] overflow-hidden rounded-[18px]">
+                      <ClassicBookCover book={classicBook} compact />
+                    </div>
+                    <p className="line-clamp-2 text-[12px] font-semibold text-[var(--color-foreground)]">{classicBook.title}</p>
+                    <p className="mt-1 line-clamp-1 text-[10px] text-[var(--color-muted)]">{classicBook.author}</p>
+                  </button>
+
+                  <button
+                    onClick={() => linkedBook ? openBook(linkedBook) : handleAddClassicBook(classicBook)}
+                    disabled={isAdding}
+                    className="glass-card-soft mt-3 flex w-full items-center justify-center gap-2 rounded-[14px] py-2 text-[11px] font-semibold text-[var(--color-foreground)] disabled:opacity-60"
+                  >
+                    {isAdding ? (
+                      <>
+                        <Loader2 size={13} className="animate-spin" />
+                        <span>加入中...</span>
+                      </>
+                    ) : linkedBook ? (
+                      <>
+                        <BookOpen size={13} className="text-[var(--color-primary)]" />
+                        <span>{linkedBook.progress > 0 ? '继续阅读' : '打开书籍'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Download size={13} className="text-[var(--color-primary)]" />
+                        <span>加入书架</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {filteredClassicBooks.map((classicBook) => {
+              const linkedBook = classicBookMap[classicBook.slug]
+              const isAdding = addingClassicSlug === classicBook.slug
+
+              return (
+                <div key={classicBook.slug} className="glass-card flex items-center gap-3 rounded-[24px] p-3">
+                  <button
+                    onClick={() => linkedBook ? openBook(linkedBook) : handleAddClassicBook(classicBook)}
+                    className="shrink-0"
+                  >
+                    <div className="h-[112px] w-[82px] overflow-hidden rounded-[16px]">
+                      <ClassicBookCover book={classicBook} />
+                    </div>
+                  </button>
+
+                  <div className="min-w-0 flex-1">
+                    <button
+                      onClick={() => linkedBook ? openBook(linkedBook) : handleAddClassicBook(classicBook)}
+                      className="block w-full text-left"
+                    >
+                      <p className="line-clamp-2 text-[14px] font-semibold text-[var(--color-foreground)]">{classicBook.title}</p>
+                      <p className="mt-1 text-[12px] text-[var(--color-muted)]">{classicBook.author}</p>
+                      <p className="mt-2 line-clamp-1 text-[11px] text-[var(--color-muted-light)]">{classicBook.coverTheme.tagline}</p>
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={() => linkedBook ? openBook(linkedBook) : handleAddClassicBook(classicBook)}
+                    disabled={isAdding}
+                    className="glass-card-soft flex shrink-0 items-center justify-center gap-2 rounded-[16px] px-3 py-2 text-[11px] font-semibold text-[var(--color-foreground)] disabled:opacity-60"
+                  >
+                    {isAdding ? (
+                      <>
+                        <Loader2 size={13} className="animate-spin" />
+                        <span>加入中</span>
+                      </>
+                    ) : linkedBook ? (
+                      <>
+                        <BookOpen size={13} className="text-[var(--color-primary)]" />
+                        <span>{linkedBook.progress > 0 ? '继续' : '打开'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Download size={13} className="text-[var(--color-primary)]" />
+                        <span>加入</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
       {/* ===== 书架网格 ===== */}
-      <div className="px-5 pb-8">
+      <div className="px-5 py-6">
         <h3 className="text-[16px] font-bold text-[var(--color-foreground)] mb-3 font-secondary">
           全部书籍 {allBooks.length > 0 && `(${allBooks.length})`}
         </h3>
@@ -316,60 +554,66 @@ export default function BookshelfPage() {
 
         {/* 空状态 */}
         {!loading && allBooks.length === 0 && (
-          <div className="text-center py-12">
+          <div className="glass-card-soft text-center rounded-[24px] py-12">
             <p className="text-[48px] mb-3">📚</p>
             <p className="text-[14px] text-[var(--color-muted)]">书架还是空的</p>
-            <p className="text-[12px] text-[var(--color-muted-light)] mt-1">点击上方按钮导入你的第一本 PDF 书籍</p>
+            <p className="text-[12px] text-[var(--color-muted-light)] mt-1">你可以先导入 PDF，或从上方公共经典书库直接开始阅读</p>
           </div>
         )}
 
         {/* 书籍网格 */}
         {!loading && filteredBooks.length > 0 && (
-          <div className="grid grid-cols-3 gap-3">
-            {filteredBooks.map((book) => (
-              <div
-                key={book.id}
-                className="flex flex-col items-center cursor-pointer active:scale-[0.96] transition-transform relative group"
-                onClick={() => navigate(book.file_path ? `/pdf-reader?bookId=${book.id}` : `/reading-prep?bookId=${book.id}`)}
-              >
-                {/* 封面 */}
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5 2xl:grid-cols-6">
+            {filteredBooks.map((book) => {
+              const classicCoverBook = getClassicCoverBook(book)
+
+              return (
                 <div
-                  className="w-full aspect-[3/4] rounded-[var(--radius-sm)] bg-[var(--color-primary-light)] flex items-center justify-center mb-2 relative overflow-hidden"
-                  style={{ boxShadow: 'var(--shadow-card)' }}
+                  key={book.id}
+                  className="glass-card glass-card-interactive relative mx-auto flex w-full max-w-[220px] flex-col items-center rounded-[24px] p-2.5 cursor-pointer group"
+                  onClick={() => openBook(book)}
                 >
-                  <span className="text-[36px]">{book.cover_emoji}</span>
-                  {/* 进度指示 */}
-                  {book.progress > 0 && book.progress < 100 && (
-                    <div className="absolute bottom-0 left-0 right-0 h-1 bg-[var(--color-background-secondary)]">
-                      <div className="h-full bg-[var(--color-primary)]" style={{ width: `${book.progress}%` }} />
-                    </div>
-                  )}
-                  {book.progress === 100 && (
-                    <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-[var(--color-success)] rounded text-[9px] text-white font-bold">
-                      已读完
-                    </div>
-                  )}
-                  {/* 页数 */}
-                  {book.total_pages && (
-                    <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-black/30 rounded text-[9px] text-white">
-                      {book.total_pages}页
-                    </div>
+                  <div className="relative mb-2 w-full overflow-hidden rounded-[20px]">
+                    {classicCoverBook ? (
+                      <div className="aspect-[5/7]">
+                        <ClassicBookCover book={classicCoverBook} compact />
+                      </div>
+                    ) : (
+                      <div className="glass-card-soft relative flex aspect-[3/4] w-full items-center justify-center rounded-[20px]">
+                        <span className="text-[36px]">{book.cover_emoji}</span>
+                      </div>
+                    )}
+
+                    {book.progress > 0 && book.progress < 100 && (
+                      <div className="glass-card-soft absolute bottom-0 left-0 right-0 h-1 rounded-none border-0 shadow-none">
+                        <div className="h-full bg-[var(--color-primary)]" style={{ width: `${book.progress}%` }} />
+                      </div>
+                    )}
+                    {book.progress === 100 && (
+                      <div className="absolute top-2 right-2 rounded bg-[var(--color-success)] px-1.5 py-0.5 text-[9px] font-bold text-white">
+                        已读完
+                      </div>
+                    )}
+                    {book.total_pages && (
+                      <div className="absolute top-2 left-2 rounded bg-black/30 px-1.5 py-0.5 text-[9px] text-white">
+                        {book.total_pages}页
+                      </div>
+                    )}
+                  </div>
+
+                  <p className="w-full text-center text-[12px] font-medium text-[var(--color-foreground)] line-clamp-1">{book.title}</p>
+                  <p className="w-full text-center text-[10px] text-[var(--color-muted)] line-clamp-1">{book.author}</p>
+                  {book.id > 0 && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDeleteBook(book.id) }}
+                      className="glass-pill absolute top-1 right-1 rounded-full p-1 opacity-0 transition-opacity group-hover:opacity-100"
+                    >
+                      <Trash2 size={12} className="text-[var(--color-error)]" />
+                    </button>
                   )}
                 </div>
-                {/* 信息 */}
-                <p className="text-[12px] font-medium text-[var(--color-foreground)] text-center line-clamp-1 w-full">{book.title}</p>
-                <p className="text-[10px] text-[var(--color-muted)] text-center line-clamp-1 w-full">{book.author}</p>
-                {/* 删除按钮（仅真实书籍允许删除；示例书籍不显示删除） */}
-                {book.id > 0 && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleDeleteBook(book.id) }}
-                    className="absolute top-1 right-1 p-1 bg-white/80 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <Trash2 size={12} className="text-[var(--color-error)]" />
-                  </button>
-                )}
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>

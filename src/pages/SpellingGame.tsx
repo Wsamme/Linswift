@@ -1,19 +1,21 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  ChevronLeft, RotateCcw, Trophy, Clock, Zap, Volume2, Eye, HelpCircle, Check, X,
+  ChevronLeft, RotateCcw, Trophy, Clock, Zap, Volume2, VolumeX, Eye, HelpCircle, Check, X,
 } from 'lucide-react'
 import { useVocabulary } from '../hooks/useVocabulary'
 import { speakEnglish, stopSpeaking } from '../lib/tts'
+import { calculateNextReview, getReviewCycleDaysFromLocalStorage } from '../lib/ebbinghaus'
 import {
   type WordPair,
   shuffleArray,
   calcCorrectScore,
   calcWrongPenalty,
-  saveGameRecord,
-  getHighScore,
-  FALLBACK_WORDS,
 } from '../lib/gameEngine'
+import { supabase } from '../lib/supabase'
+import { useAuth } from '../contexts/AuthContext'
+import { useLogicalBack } from '../hooks/useLogicalBack'
+import { normalizeWhitespace } from '../lib/text'
 
 /**
  * 拼写挑战游戏
@@ -27,19 +29,39 @@ import {
  */
 
 const WORDS_PER_ROUND = 10 // 每局题数
+const SPELLING_SOUND_KEY = 'linswift_spelling_sound'
+
+function createAudioContext() {
+  const AudioCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  return AudioCtor ? new AudioCtor() : null
+}
+
+function normalizeSpellingAttempt(value: string) {
+  return normalizeWhitespace(value).toLocaleLowerCase()
+}
+
+function cloneWordForRetry(word: WordPair): WordPair {
+  return { ...word }
+}
 
 export default function SpellingGame() {
   const navigate = useNavigate()
-  const { vocabulary, fetchVocabulary } = useVocabulary()
+  const goBack = useLogicalBack('/vocab-game')
+  const { user } = useAuth()
+  const { vocabulary, fetchVocabulary, loading: vocabLoading, addReview, updateNextReview } = useVocabulary()
 
   // ===== 游戏数据 =====
   const [words, setWords] = useState<WordPair[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
-  const [status, setStatus] = useState<'loading' | 'playing' | 'checking' | 'finished'>('loading')
+  const [status, setStatus] = useState<'loading' | 'playing' | 'checking' | 'finished' | 'empty'>('loading')
 
   // ===== 输入 & 答案 =====
   const [userInput, setUserInput] = useState('')
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null)
+  const [lastAttempt, setLastAttempt] = useState('')
+  const [showCorrectSpelling, setShowCorrectSpelling] = useState(false)
+  const [hasMistypedCurrentWord, setHasMistypedCurrentWord] = useState(false)
+  const [queuedRetryForCurrentWord, setQueuedRetryForCurrentWord] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   // ===== 分数 =====
@@ -48,43 +70,90 @@ export default function SpellingGame() {
   const [maxCombo, setMaxCombo] = useState(0)
   const [correctCount, setCorrectCount] = useState(0)
   const [elapsed, setElapsed] = useState(0)
-  const [highScore] = useState(() => getHighScore('spelling'))
+  const [highScore, setHighScore] = useState(0)
+  const savedRef = useRef(false)
 
   // ===== 提示状态 =====
   const [showFirstLetter, setShowFirstLetter] = useState(false)
   const [showLength, setShowLength] = useState(false)
   const [hintUsed, setHintUsed] = useState(false) // 用了提示则该题减分
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
+    const raw = localStorage.getItem(SPELLING_SOUND_KEY)
+    return raw === null ? true : raw === '1'
+  })
 
   // 计时器
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const spokenQuestionRef = useRef('')
+  const checkingEnteredAtRef = useRef(0)
 
   const currentWord = words[currentIndex]
 
-  // ===== 初始化词库 =====
-  useEffect(() => {
-    fetchVocabulary('all')
-  }, [fetchVocabulary])
+  const playTone = useCallback((
+    frequency: number,
+    duration: number,
+    type: OscillatorType,
+    gainValue: number,
+    endFrequency?: number,
+  ) => {
+    if (!soundEnabled) return
 
-  // ===== 当词库准备好后生成题目 =====
-  useEffect(() => {
-    if (status !== 'loading') return
+    const ctx = audioContextRef.current || createAudioContext()
+    if (!ctx) return
+    audioContextRef.current = ctx
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {})
+    }
 
-    const userWords: WordPair[] = vocabulary
-      .filter(v => v.word && v.meaning)
-      .map(v => ({
-        id: v.id,
-        english: v.word,
-        chinese: v.meaning || '',
-        phonetic: v.phonetic || '',
-      }))
+    const now = ctx.currentTime
+    const oscillator = ctx.createOscillator()
+    const gain = ctx.createGain()
+    oscillator.type = type
+    oscillator.frequency.setValueAtTime(frequency, now)
+    if (endFrequency) {
+      oscillator.frequency.exponentialRampToValueAtTime(endFrequency, now + duration)
+    }
+    gain.gain.setValueAtTime(0.0001, now)
+    gain.gain.exponentialRampToValueAtTime(gainValue, now + 0.01)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration)
+    oscillator.connect(gain)
+    gain.connect(ctx.destination)
+    oscillator.start(now)
+    oscillator.stop(now + duration)
+  }, [soundEnabled])
 
-    const source = userWords.length >= WORDS_PER_ROUND ? userWords : FALLBACK_WORDS
-    initGame(source)
-  }, [vocabulary, status])
+  const playTypingSound = useCallback((key: string) => {
+    const lower = key.toLowerCase()
+    const code = lower.charCodeAt(0)
+
+    if (lower === 'backspace') {
+      playTone(170, 0.05, 'triangle', 0.018, 120)
+      return
+    }
+
+    if (!/^[a-z]$/.test(lower)) return
+
+    const index = code - 97
+    const waveform: OscillatorType[] = ['triangle', 'sine', 'square']
+    const baseFrequency = 230 + (index % 12) * 18 + Math.floor(index / 12) * 9
+    playTone(baseFrequency, 0.035, waveform[index % waveform.length], 0.014, baseFrequency + 22)
+  }, [playTone])
+
+  const playSuccessSound = useCallback((isFinal: boolean) => {
+    playTone(520, 0.08, 'triangle', 0.03, 660)
+    window.setTimeout(() => playTone(isFinal ? 880 : 740, 0.12, 'sine', 0.025), 70)
+  }, [playTone])
+
+  const speakCurrentWord = useCallback(() => {
+    if (!currentWord || !soundEnabled) return
+    stopSpeaking()
+    speakEnglish(currentWord.english, 0.7)
+  }, [currentWord, soundEnabled])
 
   // ===== 初始化游戏 =====
-  const initGame = (source: WordPair[]) => {
-    const selected = shuffleArray(source).slice(0, WORDS_PER_ROUND)
+  const initGame = useCallback((source: WordPair[]) => {
+    const selected = shuffleArray(source).slice(0, Math.min(WORDS_PER_ROUND, source.length))
     setWords(selected)
     setCurrentIndex(0)
     setUserInput('')
@@ -96,17 +165,92 @@ export default function SpellingGame() {
     setElapsed(0)
     setShowFirstLetter(false)
     setShowLength(false)
+    setShowCorrectSpelling(false)
+    setHasMistypedCurrentWord(false)
+    setQueuedRetryForCurrentWord(false)
     setHintUsed(false)
     setStatus('playing')
+    savedRef.current = false
 
     if (timerRef.current) clearInterval(timerRef.current)
     timerRef.current = setInterval(() => setElapsed(prev => prev + 1), 1000)
-  }
+  }, [])
+
+  // ===== 下一题 =====
+  const handleNext = useCallback(() => {
+    if (Date.now() - checkingEnteredAtRef.current < 180) return
+
+    if (currentIndex >= words.length - 1) {
+      if (timerRef.current) clearInterval(timerRef.current)
+      setStatus('finished')
+      return
+    }
+
+    setCurrentIndex(prev => prev + 1)
+    setUserInput('')
+    setIsCorrect(null)
+    setLastAttempt('')
+    setShowFirstLetter(false)
+    setShowLength(false)
+    setShowCorrectSpelling(false)
+    setHasMistypedCurrentWord(false)
+    setQueuedRetryForCurrentWord(false)
+    setHintUsed(false)
+    setStatus('playing')
+  }, [currentIndex, words.length])
+
+  // ===== 初始化词库 =====
+  useEffect(() => {
+    fetchVocabulary('all')
+  }, [fetchVocabulary])
+
+  // ===== 当词库准备好后生成题目 =====
+  useEffect(() => {
+    if (status !== 'loading') return
+    if (vocabLoading) return
+
+    const userWords: WordPair[] = vocabulary
+      .filter(v => v.word && v.meaning)
+      .map(v => ({
+        id: v.id,
+        english: v.word,
+        chinese: v.meaning || '',
+        phonetic: v.phonetic || '',
+      }))
+
+    if (userWords.length < 2) {
+      window.setTimeout(() => setStatus('empty'), 0)
+      return
+    }
+
+    window.setTimeout(() => initGame(userWords), 0)
+  }, [vocabulary, status, vocabLoading, initGame])
+
+  useEffect(() => {
+    async function loadHighScore() {
+      if (!user) return
+      const { data, error } = await supabase
+        .from('game_scores')
+        .select('score')
+        .eq('user_id', user.id)
+        .eq('game_type', 'spell')
+        .order('score', { ascending: false })
+        .limit(1)
+      if (!error && data && data.length > 0) {
+        setHighScore(data[0].score || 0)
+      }
+    }
+    loadHighScore()
+  }, [user])
 
   // 清理计时器
   useEffect(() => {
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
   }, [])
+
+  useEffect(() => {
+    localStorage.setItem(SPELLING_SOUND_KEY, soundEnabled ? '1' : '0')
+  }, [soundEnabled])
 
   // 每题开始时聚焦输入框
   useEffect(() => {
@@ -115,62 +259,120 @@ export default function SpellingGame() {
     }
   }, [currentIndex, status])
 
+  useEffect(() => {
+    if (status !== 'checking') return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Enter') return
+      event.preventDefault()
+      handleNext()
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [status, handleNext])
+
+  useEffect(() => {
+    if (status !== 'playing' || !currentWord) return
+    const speakKey = `${currentIndex}:${currentWord.english}`
+    if (spokenQuestionRef.current === speakKey) return
+    spokenQuestionRef.current = speakKey
+    speakCurrentWord()
+  }, [currentIndex, currentWord, speakCurrentWord, status])
+
   // ===== 提交答案 =====
   const handleSubmit = useCallback(() => {
-    if (!currentWord || status !== 'playing' || !userInput.trim()) return
+    const liveInput = inputRef.current?.value ?? userInput
+    if (!currentWord || status !== 'playing' || !liveInput.trim()) return
 
-    const answer = currentWord.english.toLowerCase().trim()
-    const input = userInput.toLowerCase().trim()
+    const answer = normalizeSpellingAttempt(currentWord.english)
+    const input = normalizeSpellingAttempt(liveInput)
     const correct = answer === input
+    const shouldRetryLater = hasMistypedCurrentWord || showCorrectSpelling
 
+    setUserInput(liveInput)
+    setLastAttempt(liveInput.trim())
     setIsCorrect(correct)
-    setStatus('checking')
 
     if (correct) {
-      const newCombo = combo + 1
-      // 使用了提示则只拿一半分
-      const points = hintUsed
-        ? Math.floor(calcCorrectScore(newCombo) / 2)
-        : calcCorrectScore(newCombo)
-      setScore(prev => prev + points)
-      setCombo(newCombo)
-      setMaxCombo(prev => Math.max(prev, newCombo))
-      setCorrectCount(prev => prev + 1)
+      checkingEnteredAtRef.current = Date.now()
+      setStatus('checking')
+      setQueuedRetryForCurrentWord(shouldRetryLater)
+
+      if (shouldRetryLater) {
+        setWords((prev) => [...prev, cloneWordForRetry(currentWord)])
+        setCombo(0)
+      } else {
+        const newCombo = combo + 1
+        // 使用了提示则只拿一半分
+        const points = hintUsed
+          ? Math.floor(calcCorrectScore(newCombo) / 2)
+          : calcCorrectScore(newCombo)
+        setScore(prev => prev + points)
+        setCombo(newCombo)
+        setMaxCombo(prev => Math.max(prev, newCombo))
+        setCorrectCount(prev => prev + 1)
+
+        if (typeof currentWord.id === 'number') {
+          const current = vocabulary.find(v => v.id === currentWord.id)
+          if (current) {
+            const cycle = getReviewCycleDaysFromLocalStorage()
+            const review = calculateNextReview(current.mastery_level, 'known', cycle)
+            addReview(current.id, 'known', 'game').catch(() => {})
+            updateNextReview(current.id, review.nextReviewAt, (current.review_count || 0) + 1, review.newMastery).catch(() => {})
+          }
+        }
+      }
+
+      playSuccessSound(currentIndex >= words.length - 1)
     } else {
+      setHasMistypedCurrentWord(true)
+      setQueuedRetryForCurrentWord(false)
       setScore(prev => Math.max(0, prev + calcWrongPenalty()))
       setCombo(0)
+      window.setTimeout(() => inputRef.current?.focus(), 30)
     }
-  }, [currentWord, status, userInput, combo, hintUsed])
-
-  // ===== 下一题 =====
-  const handleNext = () => {
-    if (currentIndex >= words.length - 1) {
-      // 最后一题 → 结算
-      if (timerRef.current) clearInterval(timerRef.current)
-      setStatus('finished')
-      saveGameRecord({
-        gameType: 'spelling',
-        score,
-        date: new Date().toISOString(),
-        maxCombo,
-        correctCount,
-        totalCount: words.length,
-      })
-      return
-    }
-
-    // 进入下一题
-    setCurrentIndex(prev => prev + 1)
-    setUserInput('')
-    setIsCorrect(null)
-    setShowFirstLetter(false)
-    setShowLength(false)
-    setHintUsed(false)
-    setStatus('playing')
-  }
+  }, [currentWord, status, userInput, combo, hintUsed, vocabulary, addReview, updateNextReview, playSuccessSound, currentIndex, words.length])
 
   // ===== 重新开始 =====
-  const handleRestart = () => setStatus('loading')
+  const handleRestart = () => {
+    setLastAttempt('')
+    setUserInput('')
+    setIsCorrect(null)
+    setShowCorrectSpelling(false)
+    setHasMistypedCurrentWord(false)
+    setQueuedRetryForCurrentWord(false)
+    setStatus('loading')
+  }
+
+  // ===== 游戏结束时保存记录 =====
+  useEffect(() => {
+    if (status === 'finished' && !savedRef.current) {
+      savedRef.current = true
+
+      if (user) {
+        const practicedWords = words
+          .map(w => w.english?.trim().toLowerCase())
+          .filter((w): w is string => Boolean(w))
+
+        supabase.from('game_scores').insert({
+          user_id: user.id,
+          game_type: 'spell',
+          score,
+          duration_seconds: elapsed,
+          words_practiced: practicedWords,
+        }).then(({ error }) => {
+          if (error) {
+            console.error('[game_scores] spell insert failed:', error.message)
+            return
+          }
+          if (score > highScore) {
+            setHighScore(score)
+          }
+        })
+      }
+    }
+  }, [status, user, score, elapsed, words, highScore])
 
   // ===== 播放发音 =====
   const handleSpeak = () => {
@@ -187,7 +389,7 @@ export default function SpellingGame() {
   const renderLetterComparison = () => {
     if (!currentWord || isCorrect === null) return null
     const answer = currentWord.english.toLowerCase()
-    const input = userInput.toLowerCase()
+    const input = (isCorrect ? userInput : lastAttempt).toLowerCase()
     const maxLen = Math.max(answer.length, input.length)
 
     return (
@@ -221,6 +423,21 @@ export default function SpellingGame() {
           <div className="w-12 h-12 border-4 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
           <p className="text-[14px] text-[var(--color-muted)]">正在加载题目...</p>
         </div>
+      </div>
+    )
+  }
+
+  if (status === 'empty') {
+    return (
+      <div className="min-h-screen bg-[var(--color-background)] flex flex-col items-center justify-center px-8 text-center">
+        <p className="text-[18px] font-bold text-[var(--color-foreground)] mb-2">词库不足，无法开始游戏</p>
+        <p className="text-[13px] text-[var(--color-muted)] mb-5">请先在翻译或阅读中收集至少 2 个词汇</p>
+        <button
+          onClick={() => navigate('/app/vocab')}
+          className="px-6 py-3 bg-[var(--color-primary)] text-white rounded-[var(--radius-sm)] text-[14px] font-semibold"
+        >
+          前往词库
+        </button>
       </div>
     )
   }
@@ -260,7 +477,7 @@ export default function SpellingGame() {
         </div>
 
         <div className="flex gap-3 w-full max-w-[300px]">
-          <button onClick={() => navigate(-1)} className="flex-1 py-3 bg-[var(--color-background-secondary)] rounded-[var(--radius-sm)] text-[14px] font-semibold text-[var(--color-foreground)]">
+          <button onClick={goBack} className="flex-1 py-3 bg-[var(--color-background-secondary)] rounded-[var(--radius-sm)] text-[14px] font-semibold text-[var(--color-foreground)]">
             返回
           </button>
           <button onClick={handleRestart} className="flex-1 py-3 bg-[var(--color-primary)] rounded-[var(--radius-sm)] text-[14px] font-semibold text-white flex items-center justify-center gap-2">
@@ -276,11 +493,22 @@ export default function SpellingGame() {
     <div className="min-h-screen bg-[var(--color-background)] flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-4">
-        <button onClick={() => navigate(-1)} className="p-1">
+        <button onClick={goBack} className="p-1">
           <ChevronLeft size={24} className="text-[var(--color-foreground)]" />
         </button>
         <h1 className="text-[18px] font-bold text-[var(--color-foreground)] font-secondary">拼写挑战</h1>
-        <span className="text-[13px] text-[var(--color-muted)]">{currentIndex + 1}/{words.length}</span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setSoundEnabled((prev) => !prev)}
+            className={`p-1.5 rounded-full ${soundEnabled ? 'bg-[var(--color-primary-light)]' : 'bg-[var(--color-background-secondary)]'}`}
+            title={soundEnabled ? '音效与朗读已开启' : '音效与朗读已关闭'}
+          >
+            {soundEnabled
+              ? <Volume2 size={16} className="text-[var(--color-primary)]" />
+              : <VolumeX size={16} className="text-[var(--color-muted)]" />}
+          </button>
+          <span className="text-[13px] text-[var(--color-muted)]">{currentIndex + 1}/{words.length}</span>
+        </div>
       </div>
 
       {/* 进度条 */}
@@ -329,9 +557,25 @@ export default function SpellingGame() {
           ref={inputRef}
           type="text"
           value={userInput}
-          onChange={e => setUserInput(e.target.value)}
+          onChange={e => {
+            const nextValue = e.target.value
+            if (isCorrect !== null || lastAttempt) {
+              setIsCorrect(null)
+              setLastAttempt('')
+            }
+            setUserInput(nextValue)
+          }}
           onKeyDown={e => {
+            if (status === 'playing' && soundEnabled) {
+              if (e.key === 'Backspace') {
+                playTypingSound('backspace')
+              } else if (/^[a-zA-Z]$/.test(e.key)) {
+                playTypingSound(e.key)
+              }
+            }
             if (e.key === 'Enter') {
+              e.preventDefault()
+              e.stopPropagation()
               if (status === 'checking') handleNext()
               else handleSubmit()
             }
@@ -345,10 +589,10 @@ export default function SpellingGame() {
         />
 
         {/* 检查状态下显示逐字对比 */}
-        {status === 'checking' && renderLetterComparison()}
+        {(status === 'checking' || isCorrect === false) && renderLetterComparison()}
 
         {/* 正确/错误提示 */}
-        {status === 'checking' && (
+        {(status === 'checking' || isCorrect === false) && (
           <div className={`mt-3 p-3 rounded-[var(--radius-sm)] flex items-center justify-center gap-2 ${
             isCorrect
               ? 'bg-[var(--color-success)]/10 text-[var(--color-success)]'
@@ -356,34 +600,61 @@ export default function SpellingGame() {
           }`}>
             {isCorrect ? <Check size={16} /> : <X size={16} />}
             <span className="text-[14px] font-semibold">
-              {isCorrect ? '拼写正确!' : `正确答案: ${currentWord?.english}`}
+              {isCorrect
+                ? queuedRetryForCurrentWord
+                  ? '本次已纠正，但因出现过错误，已加入后续重新拼写'
+                  : '拼写正确，按回车进入下一题'
+                : '拼错了，请重新拼写直到成功'}
             </span>
+          </div>
+        )}
+
+        {showCorrectSpelling && currentWord && (
+          <div className="mt-3 rounded-[var(--radius-sm)] bg-[var(--color-primary-light)]/80 px-4 py-3 text-center">
+            <p className="text-[12px] text-[var(--color-muted)]">正确拼写</p>
+            <p className="mt-1 text-[20px] font-bold tracking-[0.22em] text-[var(--color-primary)]">
+              {currentWord.english.toUpperCase()}
+            </p>
+            <p className="mt-2 text-[12px] text-[var(--color-muted)]">
+              已查看答案，仍需自己重新完整拼对，才算通过今天这次复习。
+            </p>
           </div>
         )}
       </div>
 
       {/* 提示按钮行 */}
       {status === 'playing' && (
-        <div className="mx-5 mb-4 flex gap-2">
+        <div className="mx-5 mb-4 grid grid-cols-2 gap-2 md:grid-cols-4">
           <button
             onClick={handleSpeak}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 bg-[var(--color-background-secondary)] rounded-[var(--radius-sm)] text-[12px] text-[var(--color-foreground)]"
+            className="flex items-center justify-center gap-1.5 py-2.5 bg-[var(--color-background-secondary)] rounded-[var(--radius-sm)] text-[12px] text-[var(--color-foreground)]"
           >
             <Volume2 size={14} /> 听发音
           </button>
           <button
             onClick={() => { setShowFirstLetter(true); setHintUsed(true) }}
             disabled={showFirstLetter}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 bg-[var(--color-background-secondary)] rounded-[var(--radius-sm)] text-[12px] text-[var(--color-foreground)] disabled:opacity-40"
+            className="flex items-center justify-center gap-1.5 py-2.5 bg-[var(--color-background-secondary)] rounded-[var(--radius-sm)] text-[12px] text-[var(--color-foreground)] disabled:opacity-40"
           >
             <Eye size={14} /> 首字母
           </button>
           <button
             onClick={() => { setShowLength(true); setHintUsed(true) }}
             disabled={showLength}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 bg-[var(--color-background-secondary)] rounded-[var(--radius-sm)] text-[12px] text-[var(--color-foreground)] disabled:opacity-40"
+            className="flex items-center justify-center gap-1.5 py-2.5 bg-[var(--color-background-secondary)] rounded-[var(--radius-sm)] text-[12px] text-[var(--color-foreground)] disabled:opacity-40"
           >
             <HelpCircle size={14} /> 显示长度
+          </button>
+          <button
+            onClick={() => {
+              setShowCorrectSpelling(true)
+              setHintUsed(true)
+              window.setTimeout(() => inputRef.current?.focus(), 30)
+            }}
+            disabled={showCorrectSpelling}
+            className="flex items-center justify-center gap-1.5 py-2.5 bg-[var(--color-background-secondary)] rounded-[var(--radius-sm)] text-[12px] text-[var(--color-foreground)] disabled:opacity-40"
+          >
+            <Eye size={14} /> 正确拼写
           </button>
         </div>
       )}
@@ -396,7 +667,11 @@ export default function SpellingGame() {
             disabled={!userInput.trim()}
             className="w-full py-3.5 bg-[var(--color-primary)] rounded-[var(--radius-sm)] text-[16px] font-semibold text-white disabled:opacity-50 active:scale-[0.98] transition-transform"
           >
-            确认提交
+            {hasMistypedCurrentWord || showCorrectSpelling
+              ? '重新拼写并提交'
+              : isCorrect === false
+                ? '重新提交'
+                : '确认提交'}
           </button>
         ) : status === 'checking' ? (
           <button

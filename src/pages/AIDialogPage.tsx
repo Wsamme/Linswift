@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
   ChevronLeft, Mic, MicOff, Send, Coffee, Loader2, AlertCircle,
 } from 'lucide-react'
 import { chat as geminiChat } from '../services/gemini'
 import { useSTT } from '../hooks/useSTT'
+import { useLogicalBack } from '../hooks/useLogicalBack'
 
 /**
  * AI 场景对话 —— 口语模块（Gemini + STT 语音输入）
@@ -38,7 +38,7 @@ const suggestions = [
 ]
 
 export default function AIDialogPage() {
-  const navigate = useNavigate()
+  const goBack = useLogicalBack('/scene-select')
   const [messages, setMessages] = useState<Message[]>(initialMessages)
   const [inputText, setInputText] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -147,20 +147,23 @@ tip: 简短的中文提示
   }
 
   return (
-    <div className="min-h-screen bg-[var(--color-background)] flex flex-col">
+    <div className="glass-page relative flex min-h-screen flex-col overflow-hidden">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-[250px] bg-[radial-gradient(circle_at_top_right,rgba(255,132,0,0.16),transparent_44%),radial-gradient(circle_at_left_top,rgba(255,225,198,0.5),transparent_42%)]" />
       {/* ===== Header ===== */}
-      <div className="flex items-center gap-3 px-5 py-4 border-b border-[var(--color-border)]">
-        <button onClick={() => navigate(-1)} className="p-1">
-          <ChevronLeft size={24} className="text-[var(--color-foreground)]" />
-        </button>
-        <div className="flex-1">
-          <h1 className="text-[16px] font-bold text-[var(--color-foreground)] font-secondary">AI 场景对话</h1>
-          <p className="text-[11px] text-[var(--color-muted)]">☕ 咖啡店点单 · Powered by Gemini</p>
+      <div className="relative z-10 px-5 pt-5">
+        <div className="glass-card flex items-center gap-3 rounded-[28px] px-4 py-4">
+          <button onClick={goBack} className="glass-card-soft flex h-10 w-10 items-center justify-center rounded-2xl">
+            <ChevronLeft size={20} className="text-[var(--color-foreground)]" />
+          </button>
+          <div className="flex-1">
+            <h1 className="font-secondary text-[16px] font-bold text-[var(--color-foreground)]">AI 场景对话</h1>
+            <p className="text-[11px] text-[var(--color-muted)]">Coffee shop roleplay · Powered by Gemini</p>
+          </div>
         </div>
       </div>
 
       {/* ===== 场景 Banner ===== */}
-      <div className="mx-5 mt-3 mb-2 p-3 rounded-[var(--radius-sm)] bg-[var(--color-primary-light)] flex items-center gap-3">
+      <div className="glass-card-soft relative z-10 mx-5 mb-2 mt-3 flex items-center gap-3 rounded-[22px] p-3">
         <Coffee size={20} className="text-[var(--color-primary)] shrink-0" />
         <p className="text-[12px] text-[var(--color-foreground)]">
           你正在一家咖啡店，用英语与店员（小林）进行对话练习
@@ -168,15 +171,15 @@ tip: 简短的中文提示
       </div>
 
       {/* ===== 对话区域 ===== */}
-      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+      <div className="relative z-10 flex-1 overflow-y-auto px-5 py-4 space-y-3">
         {messages.map((msg, i) => (
           <div key={i}>
             {/* 消息气泡 */}
             <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[80%] px-4 py-3 rounded-[16px] ${
                 msg.role === 'user'
-                  ? 'bg-[var(--color-primary)] text-white rounded-br-[4px]'
-                  : 'bg-[var(--color-background-secondary)] text-[var(--color-foreground)] rounded-bl-[4px]'
+                  ? 'bg-[var(--color-primary)] text-white rounded-br-[4px] shadow-[0_18px_36px_rgba(255,132,0,0.24)]'
+                  : 'glass-card-soft text-[var(--color-foreground)] rounded-bl-[4px]'
               }`}>
                 <p className="text-[14px] leading-relaxed">{msg.text}</p>
               </div>
@@ -184,7 +187,7 @@ tip: 简短的中文提示
 
             {/* 纠错卡片 */}
             {msg.correction && (
-              <div className="mt-2 ml-0 p-3 bg-[var(--color-error)]/5 border border-[var(--color-error)]/15 rounded-[var(--radius-sm)]">
+              <div className="glass-card-soft mt-2 ml-0 rounded-[20px] border border-[var(--color-error)]/15 p-3">
                 <div className="flex items-center gap-1.5 mb-1.5">
                   <AlertCircle size={12} className="text-[var(--color-error)]" />
                   <span className="text-[11px] font-semibold text-[var(--color-error)]">表达优化</span>
@@ -206,7 +209,7 @@ tip: 简短的中文提示
         {/* 加载中指示器 */}
         {isLoading && (
           <div className="flex justify-start">
-            <div className="px-4 py-3 bg-[var(--color-background-secondary)] rounded-[16px] rounded-bl-[4px]">
+            <div className="glass-card-soft rounded-[16px] rounded-bl-[4px] px-4 py-3">
               <Loader2 size={18} className="text-[var(--color-muted)] animate-spin" />
             </div>
           </div>
@@ -218,12 +221,12 @@ tip: 简短的中文提示
 
       {/* ===== 建议回复（对话初期显示） ===== */}
       {messages.length <= 2 && (
-        <div className="px-5 pb-2 flex gap-2 overflow-x-auto">
+        <div className="relative z-10 flex gap-2 overflow-x-auto px-5 pb-2">
           {suggestions.map((s, i) => (
             <button
               key={i}
               onClick={() => sendMessage(s)}
-              className="shrink-0 px-3 py-2 bg-[var(--color-background-secondary)] rounded-full text-[12px] text-[var(--color-foreground)] active:bg-[var(--color-primary-light)] transition-colors"
+              className="glass-pill shrink-0 rounded-full px-3 py-2 text-[12px] text-[var(--color-foreground)] transition-colors"
             >
               {s}
             </button>
@@ -233,7 +236,7 @@ tip: 简短的中文提示
 
       {/* ===== STT 错误提示 ===== */}
       {sttError && (
-        <div className="mx-5 mb-1 p-2 bg-[var(--color-error)]/5 rounded-[var(--radius-xs)] flex items-center gap-2">
+        <div className="glass-card-soft relative z-10 mx-5 mb-1 flex items-center gap-2 rounded-[18px] border border-[var(--color-error)]/15 p-2">
           <AlertCircle size={12} className="text-[var(--color-error)] shrink-0" />
           <p className="text-[11px] text-[var(--color-error)]">{sttError}</p>
         </div>
@@ -241,7 +244,7 @@ tip: 简短的中文提示
 
       {/* ===== 正在识别状态提示 ===== */}
       {isListening && (
-        <div className="mx-5 mb-1 px-3 py-1.5 bg-[var(--color-primary-light)] rounded-[var(--radius-xs)] flex items-center gap-2">
+        <div className="glass-card-soft relative z-10 mx-5 mb-1 flex items-center gap-2 rounded-[18px] px-3 py-1.5">
           <div className="w-2 h-2 bg-[var(--color-error)] rounded-full animate-pulse" />
           <p className="text-[11px] text-[var(--color-primary)]">
             正在听你说话...{interimTranscript && <span className="text-[var(--color-muted)]"> {interimTranscript}</span>}
@@ -250,7 +253,7 @@ tip: 简短的中文提示
       )}
 
       {/* ===== 底部输入栏 ===== */}
-      <div className="px-5 py-3 border-t border-[var(--color-border)] flex items-center gap-3 bg-[var(--color-card)]">
+      <div className="glass-bottom-bar relative z-10 flex items-center gap-3 px-5 py-3">
         {/* 麦克风按钮 —— 点击开始/停止语音输入 */}
         <button
           onClick={handleMicClick}
@@ -258,7 +261,7 @@ tip: 简短的中文提示
           className={`p-2.5 rounded-full shrink-0 transition-all ${
             isListening
               ? 'bg-[var(--color-error)] animate-pulse shadow-lg shadow-red-200'
-              : 'bg-[var(--color-primary-light)]'
+              : 'glass-card-soft'
           } disabled:opacity-40`}
         >
           {isListening
@@ -273,14 +276,14 @@ tip: 简短的中文提示
           onChange={(e) => setInputText(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') sendMessage(inputText) }}
           placeholder={isListening ? '正在识别...' : 'Type your reply...'}
-          className="flex-1 bg-[var(--color-background-secondary)] rounded-full px-4 py-2.5 text-[14px] text-[var(--color-foreground)] placeholder:text-[var(--color-muted-light)] outline-none"
+          className="glass-input-shell flex-1 rounded-full px-4 py-2.5 text-[14px] text-[var(--color-foreground)] placeholder:text-[var(--color-muted-light)] outline-none"
         />
 
         {/* 发送按钮 */}
         <button
           onClick={() => sendMessage(inputText)}
           disabled={!inputText.trim() || isLoading}
-          className="p-2.5 rounded-full bg-[var(--color-primary)] disabled:opacity-50 shrink-0 active:scale-95 transition-transform"
+          className="glass-card-interactive shrink-0 rounded-full bg-[var(--color-primary)] p-2.5 disabled:opacity-50"
         >
           <Send size={16} className="text-white" />
         </button>

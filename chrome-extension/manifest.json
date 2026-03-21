@@ -1,0 +1,49 @@
+{
+  "manifest_version": 3,
+  "name": "Linswift 网页生词雷达",
+  "version": "0.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnNLOlROk9O88SdYW0UOur4ChN2qTEGvMrNPgztyv0feh5iDE59GlXAZ+1Wpjx5Pzi+ZqE/fa51ZmomQmiXeXDgBg0PfVifHGxg7QFF7yevR/foMN14a2t0JCrxw5FfzmywSC1jemwXCl0bKUzk69J0cuU0ajpf1dvFo9hsqZYOsajkHh+iVRVslsvw9YipQsxGIrVaTgqi3EV+G3ras0JebGncJjhtfUrWg0kGYjbvBkfyGz5X86fw6UqaOD9csakSPcGbOpvSQ44wgC+NAesawO2aDEtxSxIgpDqwcvOOJFHNwONcbqS8qkK/An82DNH7aw1qldiF3AZNyXq7PE/wIDAQAB",
+  "description": "一键识别当前网页里你可能不会的英文单词，支持高亮定位、已掌握标记与本地生词收藏。",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*",
+    "https://api.dictionaryapi.dev/*",
+    "https://api.moonshot.cn/*",
+    "https://xdhnerwnceeubijpuiqv.supabase.co/*"
+  ],
+  "action": {
+    "default_title": "Linswift 网页生词雷达"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content-script.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "youtube-page-bridge.js"
+      ],
+      "matches": [
+        "https://www.youtube.com/*",
+        "https://m.youtube.com/*"
+      ]
+    }
+  ]
+}

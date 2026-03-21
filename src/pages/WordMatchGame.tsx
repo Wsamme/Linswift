@@ -11,10 +11,10 @@ import {
   calcCorrectScore,
   calcWrongPenalty,
   calcTimeBonus,
-  saveGameRecord,
-  getHighScore,
-  FALLBACK_WORDS,
 } from '../lib/gameEngine'
+import { supabase } from '../lib/supabase'
+import { useAuth } from '../contexts/AuthContext'
+import { useLogicalBack } from '../hooks/useLogicalBack'
 
 /**
  * 单词连连看游戏
@@ -44,10 +44,12 @@ interface Card {
 
 export default function WordMatchGame() {
   const navigate = useNavigate()
-  const { vocabulary, fetchVocabulary } = useVocabulary()
+  const goBack = useLogicalBack('/vocab-game')
+  const { user } = useAuth()
+  const { vocabulary, fetchVocabulary, loading: vocabLoading } = useVocabulary()
 
   // ===== 游戏状态 =====
-  const [status, setStatus] = useState<'loading' | 'playing' | 'finished'>('loading')
+  const [status, setStatus] = useState<'loading' | 'playing' | 'finished' | 'empty'>('loading')
   const [leftCards, setLeftCards] = useState<Card[]>([])    // 左列（英文）
   const [rightCards, setRightCards] = useState<Card[]>([])  // 右列（中文）
   const [selectedLeft, setSelectedLeft] = useState<string | null>(null)   // 选中的左列 ID
@@ -58,7 +60,8 @@ export default function WordMatchGame() {
   const [matchedCount, setMatchedCount] = useState(0)
   const [totalPairs, setTotalPairs] = useState(0)
   const [elapsed, setElapsed] = useState(0)   // 游戏用时（秒）
-  const [highScore] = useState(() => getHighScore('word-match'))
+  const [highScore, setHighScore] = useState(0)
+  const savedRef = useRef(false)
 
   // 计时器
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -71,6 +74,7 @@ export default function WordMatchGame() {
   // 当词库数据准备好后，初始化游戏
   useEffect(() => {
     if (status !== 'loading') return
+    if (vocabLoading) return
 
     // 将用户词库转换为 WordPair
     const userWords: WordPair[] = vocabulary
@@ -82,14 +86,34 @@ export default function WordMatchGame() {
         phonetic: v.phonetic || '',
       }))
 
-    // 如果用户词库不够，使用备用词库
-    const source = userWords.length >= PAIRS_PER_ROUND ? userWords : FALLBACK_WORDS
-    initGame(source)
-  }, [vocabulary, status])
+    if (userWords.length < 2) {
+      setStatus('empty')
+      return
+    }
+
+    initGame(userWords)
+  }, [vocabulary, status, vocabLoading])
+
+  useEffect(() => {
+    async function loadHighScore() {
+      if (!user) return
+      const { data, error } = await supabase
+        .from('game_scores')
+        .select('score')
+        .eq('user_id', user.id)
+        .eq('game_type', 'match')
+        .order('score', { ascending: false })
+        .limit(1)
+      if (!error && data && data.length > 0) {
+        setHighScore(data[0].score || 0)
+      }
+    }
+    loadHighScore()
+  }, [user])
 
   // ===== 初始化游戏 =====
   const initGame = (source: WordPair[]) => {
-    const pairs = generatePairs(source, PAIRS_PER_ROUND)
+    const pairs = generatePairs(source, Math.min(PAIRS_PER_ROUND, source.length))
     setTotalPairs(pairs.length)
 
     // 生成左列卡片（英文，乱序）
@@ -126,6 +150,7 @@ export default function WordMatchGame() {
     setSelectedLeft(null)
     setSelectedRight(null)
     setStatus('playing')
+    savedRef.current = false
 
     // 启动计时器
     if (timerRef.current) clearInterval(timerRef.current)
@@ -216,19 +241,31 @@ export default function WordMatchGame() {
 
   // ===== 游戏结束时保存记录 =====
   useEffect(() => {
-    if (status === 'finished') {
+    if (status === 'finished' && !savedRef.current) {
+      savedRef.current = true
       const timeBonus = calcTimeBonus(totalPairs * 15, elapsed)
-      setScore(prev => prev + timeBonus)
-      saveGameRecord({
-        gameType: 'word-match',
-        score: score + calcTimeBonus(totalPairs * 15, elapsed),
-        date: new Date().toISOString(),
-        maxCombo,
-        correctCount: matchedCount,
-        totalCount: totalPairs,
-      })
+      const finalScore = score + timeBonus
+      setScore(finalScore)
+
+      if (user) {
+        supabase.from('game_scores').insert({
+          user_id: user.id,
+          game_type: 'match',
+          score: finalScore,
+          duration_seconds: elapsed,
+          words_practiced: [],
+        }).then(({ error }) => {
+          if (error) {
+            console.error('[game_scores] match insert failed:', error.message)
+            return
+          }
+          if (finalScore > highScore) {
+            setHighScore(finalScore)
+          }
+        })
+      }
     }
-  }, [status]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [status, totalPairs, elapsed, score, maxCombo, matchedCount, user, highScore])
 
   // ===== 格式化时间 =====
   const formatTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
@@ -241,6 +278,21 @@ export default function WordMatchGame() {
           <div className="w-12 h-12 border-4 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
           <p className="text-[14px] text-[var(--color-muted)]">正在加载词库...</p>
         </div>
+      </div>
+    )
+  }
+
+  if (status === 'empty') {
+    return (
+      <div className="min-h-screen bg-[var(--color-background)] flex flex-col items-center justify-center px-8 text-center">
+        <p className="text-[18px] font-bold text-[var(--color-foreground)] mb-2">词库不足，无法开始游戏</p>
+        <p className="text-[13px] text-[var(--color-muted)] mb-5">请先在翻译或阅读中收集至少 2 个词汇</p>
+        <button
+          onClick={() => navigate('/app/vocab')}
+          className="px-6 py-3 bg-[var(--color-primary)] text-white rounded-[var(--radius-sm)] text-[14px] font-semibold"
+        >
+          前往词库
+        </button>
       </div>
     )
   }
@@ -280,7 +332,7 @@ export default function WordMatchGame() {
 
         {/* 操作按钮 */}
         <div className="flex gap-3 w-full max-w-[300px]">
-          <button onClick={() => navigate(-1)} className="flex-1 py-3 bg-[var(--color-background-secondary)] rounded-[var(--radius-sm)] text-[14px] font-semibold text-[var(--color-foreground)]">
+          <button onClick={goBack} className="flex-1 py-3 bg-[var(--color-background-secondary)] rounded-[var(--radius-sm)] text-[14px] font-semibold text-[var(--color-foreground)]">
             返回
           </button>
           <button onClick={handleRestart} className="flex-1 py-3 bg-[var(--color-primary)] rounded-[var(--radius-sm)] text-[14px] font-semibold text-white flex items-center justify-center gap-2">
@@ -296,7 +348,7 @@ export default function WordMatchGame() {
     <div className="min-h-screen bg-[var(--color-background)] flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-4">
-        <button onClick={() => navigate(-1)} className="p-1">
+        <button onClick={goBack} className="p-1">
           <ChevronLeft size={24} className="text-[var(--color-foreground)]" />
         </button>
         <h1 className="text-[18px] font-bold text-[var(--color-foreground)] font-secondary">单词连连看</h1>

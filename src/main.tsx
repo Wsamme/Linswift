@@ -1,10 +1,13 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter } from 'react-router-dom'
+import { BrowserRouter, HashRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import '@fontsource/noto-sans-sc/chinese-simplified-400.css'
+import '@fontsource/noto-sans-sc/latin-400.css'
 import { AuthProvider } from './contexts/AuthContext'
 import './globals.css'
 import App from './App'
+import { applyThemeSettings, loadThemeSettings } from './lib/theme'
 
 /**
  * 全局 React Query 客户端
@@ -25,9 +28,17 @@ const queryClient = new QueryClient({
   },
 })
 
+// 启动时先应用本地主题，避免首屏闪动
+applyThemeSettings(loadThemeSettings())
+
+const isDesktopShell =
+  window.location.protocol === 'file:' || window.navigator.userAgent.includes('Electron')
+
+const Router = isDesktopShell ? HashRouter : BrowserRouter
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter>
+    <Router>
       {/* QueryClientProvider 为整个应用提供 React Query 缓存能力 */}
       <QueryClientProvider client={queryClient}>
         {/* AuthProvider 包裹整个应用，让所有组件都能访问认证状态 */}
@@ -35,6 +46,6 @@ createRoot(document.getElementById('root')!).render(
           <App />
         </AuthProvider>
       </QueryClientProvider>
-    </BrowserRouter>
+    </Router>
   </StrictMode>,
 )

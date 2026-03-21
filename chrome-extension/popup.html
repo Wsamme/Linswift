@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Linswift 生词雷达</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="hero">
+        <div class="hero__badge">Linswift</div>
+        <h1>网页生词雷达</h1>
+        <p id="pageMeta" class="muted">准备扫描当前网页</p>
+      </header>
+
+      <section class="card controls">
+        <div class="controls__row">
+          <label for="levelSelect">你的词汇阶段</label>
+          <select id="levelSelect">
+            <option value="beginner">初级</option>
+            <option value="intermediate" selected>中级</option>
+            <option value="advanced">高级</option>
+          </select>
+        </div>
+        <div class="controls__row controls__row--tight">
+          <button id="scanButton" class="primary">识别本页不会词</button>
+          <button id="showSavedButton" class="ghost">收藏夹</button>
+        </div>
+        <details class="settings">
+          <summary>AI 设置（可选）</summary>
+          <p class="muted">配置 Moonshot API Key 后，扫描结果会自动补中文释义。</p>
+          <label for="apiKeyInput" class="settings__label">Moonshot API Key</label>
+          <input id="apiKeyInput" type="password" placeholder="sk-..." />
+          <button id="saveSettingsButton" class="ghost ghost--block">保存设置</button>
+        </details>
+      </section>
+
+      <section class="card stats">
+        <div class="stat">
+          <span class="stat__label">扫描词数</span>
+          <strong id="tokenCount">0</strong>
+        </div>
+        <div class="stat">
+          <span class="stat__label">候选生词</span>
+          <strong id="candidateCount">0</strong>
+        </div>
+        <div class="stat">
+          <span class="stat__label">已掌握</span>
+          <strong id="knownCount">0</strong>
+        </div>
+      </section>
+
+      <p id="status" class="status">点击按钮开始扫描当前网页。</p>
+
+      <section id="resultsSection" class="list"></section>
+      <section id="savedSection" class="list list--hidden"></section>
+    </div>
+
+    <script type="module" src="./popup.js"></script>
+  </body>
+  </html>

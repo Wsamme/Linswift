@@ -21,23 +21,90 @@ import { useState, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase, type UserVocabulary } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
+import { normalizeVocabWord } from '../lib/text'
 
 // 新词汇的输入参数类型
 export interface AddWordInput {
   word: string
+  language_code?: string
+  language_label?: string
   phonetic?: string
   meaning?: string
   example_sentence?: string
   source?: 'translate' | 'reading' | 'manual' | 'test' | 'ai'
 }
 
+interface BulkReviewInput {
+  vocabularyId: number
+  result: 'known' | 'fuzzy' | 'unknown'
+  reviewType: string
+}
+
+interface BulkNextReviewInput {
+  id: number
+  nextReviewAt: string | null
+  reviewCount: number
+  masteryLevel: number
+}
+
 // 筛选条件
-export type VocabFilter = 'all' | 'starred' | 'ai_classify'
+export type VocabFilter =
+  | 'all'
+  | 'new'
+  | 'mastered'
+  | 'starred'
+  | 'ai_classify'
+  | 'due'
+  | 'today'
+
+function normalizeLanguageCode(languageCode?: string) {
+  const value = String(languageCode || '').trim().toLowerCase()
+  if (!value) return 'en'
+  if (value === 'zh' || value === 'zh-cn' || value === 'zh-hans') return 'zh-CN'
+  if (value === 'zh-tw' || value === 'zh-hk' || value === 'zh-hant') return 'zh-TW'
+  if (value === 'ja' || value === 'ja-jp') return 'ja'
+  if (value === 'ko' || value === 'ko-kr') return 'ko'
+  if (value === 'en' || value.startsWith('en-')) return 'en'
+  return languageCode?.trim() || 'en'
+}
+
+function normalizeLanguageLabel(languageLabel?: string, languageCode?: string) {
+  const label = String(languageLabel || '').trim()
+  if (label) return label
+
+  const normalizedCode = normalizeLanguageCode(languageCode).toLowerCase()
+  if (normalizedCode === 'zh' || normalizedCode === 'zh-cn') return '简中'
+  if (normalizedCode === 'zh-tw' || normalizedCode === 'zh-hk') return '繁中'
+  if (normalizedCode === 'ja') return '日本語'
+  if (normalizedCode === 'ko') return '한국어'
+  return 'English'
+}
+
+function buildVocabularyRow(userId: string, input: AddWordInput) {
+  const languageCode = normalizeLanguageCode(input.language_code)
+  return {
+    user_id: userId,
+    word: normalizeVocabWord(input.word),
+    language_code: languageCode,
+    language_label: normalizeLanguageLabel(input.language_label, languageCode),
+    phonetic: input.phonetic || null,
+    meaning: input.meaning || null,
+    example_sentence: input.example_sentence || null,
+    source: input.source || 'manual',
+  }
+}
+
+function isVocabularyLanguageSchemaMissing(message: string) {
+  const normalized = String(message || '').toLowerCase()
+  return normalized.includes('language_code')
+    || normalized.includes('language_label')
+    || normalized.includes('user_id,word,language_code')
+}
 
 export function useVocabulary() {
   const { user } = useAuth()
   const queryClient = useQueryClient()
-  const [filter, setFilter] = useState<VocabFilter>('all')
+  const [filter, setFilter] = useState<VocabFilter>('new')
 
   // ===== 读取词汇列表（React Query 自动缓存） =====
   const {
@@ -49,22 +116,68 @@ export function useVocabulary() {
     queryFn: async () => {
       if (!user) return []
 
+      const getTomorrowStartIso = () => {
+        const todayStart = new Date()
+        todayStart.setHours(0, 0, 0, 0)
+        const tomorrowStart = new Date(todayStart)
+        tomorrowStart.setDate(tomorrowStart.getDate() + 1)
+        return tomorrowStart.toISOString()
+      }
+
       let query = supabase
         .from('user_vocabulary')
         .select('*')
         .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
 
       if (filter === 'starred') {
         query = query.eq('starred', true)
       }
+      if (filter === 'mastered') {
+        query = query.gte('mastery_level', 5)
+      }
       if (filter === 'ai_classify') {
         query = query.not('scene_tags', 'is', null)
+      }
+      if (filter === 'new') {
+        // “不会/未掌握”：所有尚未完成艾宾浩斯周期的词
+        query = query.lt('mastery_level', 5)
+      }
+      if (filter === 'due') {
+        const nowIso = new Date().toISOString()
+        query = query
+          .lt('mastery_level', 5)
+          .or(`next_review_at.is.null,next_review_at.lte.${nowIso}`)
+          .order('next_review_at', { ascending: true, nullsFirst: true })
+          .order('created_at', { ascending: false })
+      } else if (filter === 'today') {
+        query = query
+          .lt('mastery_level', 5)
+          .order('review_count', { ascending: true })
+          .order('next_review_at', { ascending: true, nullsFirst: true })
+          .order('created_at', { ascending: false })
+      } else {
+        query = query.order('created_at', { ascending: false })
       }
 
       const { data, error } = await query
       if (error) throw new Error(error.message)
-      return data || []
+
+      const rows = data || []
+      if (filter !== 'today') return rows
+
+      const tomorrowStart = new Date(getTomorrowStartIso())
+      return rows.filter((item) => {
+        const reviewCount = Number(item.review_count || 0)
+        if (reviewCount <= 0) {
+          return true
+        }
+
+        if (!item.next_review_at) {
+          return true
+        }
+
+        return new Date(item.next_review_at) < tomorrowStart
+      })
     },
     enabled: !!user,
     staleTime: 5 * 60 * 1000, // 5 分钟缓存
@@ -89,21 +202,40 @@ export function useVocabulary() {
     async (input: AddWordInput) => {
       if (!user) return { error: '未登录' }
 
-      const { data, error: err } = await supabase
+      const nextRow = buildVocabularyRow(user.id, input)
+
+      let data = null
+      let err = null as { message: string } | null
+
+      const nextResult = await supabase
         .from('user_vocabulary')
-        .upsert(
-          {
-            user_id: user.id,
-            word: input.word.toLowerCase().trim(),
-            phonetic: input.phonetic || null,
-            meaning: input.meaning || null,
-            example_sentence: input.example_sentence || null,
-            source: input.source || 'manual',
-          },
-          { onConflict: 'user_id,word' }
-        )
+        .upsert(nextRow, { onConflict: 'user_id,word,language_code' })
         .select()
         .single()
+
+      data = nextResult.data
+      err = nextResult.error
+
+      if (err && isVocabularyLanguageSchemaMissing(err.message)) {
+        const legacyResult = await supabase
+          .from('user_vocabulary')
+          .upsert(
+            {
+              user_id: user.id,
+              word: normalizeVocabWord(input.word),
+              phonetic: input.phonetic || null,
+              meaning: input.meaning || null,
+              example_sentence: input.example_sentence || null,
+              source: input.source || 'manual',
+            },
+            { onConflict: 'user_id,word' }
+          )
+          .select()
+          .single()
+
+        data = legacyResult.data
+        err = legacyResult.error
+      }
 
       if (err) {
         console.error('添加词汇失败:', err.message)
@@ -121,18 +253,31 @@ export function useVocabulary() {
     async (words: AddWordInput[]) => {
       if (!user || words.length === 0) return { error: '无词汇可添加' }
 
-      const rows = words.map(w => ({
-        user_id: user.id,
-        word: w.word.toLowerCase().trim(),
-        phonetic: w.phonetic || null,
-        meaning: w.meaning || null,
-        example_sentence: w.example_sentence || null,
-        source: w.source || 'translate',
+      const rows = words.map((word) => buildVocabularyRow(user.id, {
+        ...word,
+        source: word.source || 'translate',
       }))
 
-      const { error: err } = await supabase
+      let { error: err } = await supabase
         .from('user_vocabulary')
-        .upsert(rows, { onConflict: 'user_id,word' })
+        .upsert(rows, { onConflict: 'user_id,word,language_code' })
+
+      if (err && isVocabularyLanguageSchemaMissing(err.message)) {
+        const legacyRows = words.map((word) => ({
+          user_id: user.id,
+          word: normalizeVocabWord(word.word),
+          phonetic: word.phonetic || null,
+          meaning: word.meaning || null,
+          example_sentence: word.example_sentence || null,
+          source: word.source || 'translate',
+        }))
+
+        const legacyResult = await supabase
+          .from('user_vocabulary')
+          .upsert(legacyRows, { onConflict: 'user_id,word' })
+
+        err = legacyResult.error
+      }
 
       if (err) {
         console.error('批量添加失败:', err.message)
@@ -203,7 +348,7 @@ export function useVocabulary() {
 
   // ===== 更新下次复习时间（艾宾浩斯） =====
   const updateNextReview = useCallback(
-    async (id: number, nextReviewAt: string, reviewCount: number, masteryLevel: number) => {
+    async (id: number, nextReviewAt: string | null, reviewCount: number, masteryLevel: number) => {
       const { error: err } = await supabase
         .from('user_vocabulary')
         .update({
@@ -232,6 +377,54 @@ export function useVocabulary() {
     [user]
   )
 
+  // ===== 批量写入复习记录 =====
+  const addReviewsBulk = useCallback(
+    async (items: BulkReviewInput[]) => {
+      if (!user || items.length === 0) return
+      const rows = items.map(item => ({
+        user_id: user.id,
+        vocabulary_id: item.vocabularyId,
+        result: item.result,
+        review_type: item.reviewType,
+      }))
+      const { error: err } = await supabase.from('vocabulary_reviews').insert(rows)
+      if (err) {
+        console.error('批量写入复习记录失败:', err.message)
+      }
+    },
+    [user]
+  )
+
+  // ===== 批量更新下次复习时间 =====
+  const updateNextReviewBulk = useCallback(
+    async (items: BulkNextReviewInput[]) => {
+      if (!user || items.length === 0) return
+      const results = await Promise.all(
+        items.map(async (item) => {
+          const { error } = await supabase
+            .from('user_vocabulary')
+            .update({
+              next_review_at: item.nextReviewAt,
+              review_count: item.reviewCount,
+              mastery_level: item.masteryLevel,
+            })
+            .eq('id', item.id)
+            .eq('user_id', user.id)
+          return error
+        })
+      )
+
+      const firstError = results.find(Boolean)
+      if (firstError) {
+        console.error('批量更新复习进度失败:', firstError.message)
+        return
+      }
+
+      invalidateVocab()
+    },
+    [user, invalidateVocab]
+  )
+
   return {
     vocabulary,
     loading,
@@ -244,5 +437,7 @@ export function useVocabulary() {
     updateMastery,
     updateNextReview,
     addReview,
+    addReviewsBulk,
+    updateNextReviewBulk,
   }
 }

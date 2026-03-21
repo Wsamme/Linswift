@@ -11,6 +11,14 @@
  *    - 页面始终可用，不会因 API 问题白屏
  */
 
+import {
+  buildFallbackLongSentenceAnalysis,
+  isLongSentenceRole,
+  type LongSentenceAnalysis,
+  type LongSentenceConnector,
+  type LongSentenceSegment,
+} from '../lib/longSentence'
+
 // ===== Moonshot API 配置 =====
 const API_KEY = import.meta.env.VITE_MOONSHOT_API_KEY as string
 const API_BASE = 'https://api.moonshot.cn/v1'
@@ -51,6 +59,39 @@ export interface DailyRecommendation {
   motivationalQuote: string
   quoteTranslation: string
   todayTip: string
+}
+
+export interface BatchTranslationResult {
+  lines: string[]
+  batchCount: number
+  requestedCount: number
+  apiTranslatedCount: number
+  fallbackCount: number
+  changedCount: number
+  fallbackUsed: boolean
+  failureReason: string | null
+}
+
+interface RawLongSentenceAnalysis {
+  translation?: string
+  summary?: string
+  segments?: Array<{
+    text?: string
+    role?: LongSentenceSegment['role']
+    note?: string
+  }>
+  clauses?: Array<{
+    label?: string
+    text?: string
+    function?: string
+    simplified?: string
+  }>
+  grammarPoints?: string[]
+  connectors?: Array<{
+    text?: string
+    function?: string
+  }>
+  simpleRewrites?: string[]
 }
 
 // ===== Moonshot API 调用封装 =====
@@ -128,7 +169,7 @@ function fallbackTranslate(text: string, targetLang: string): TranslateResult {
     }
   } else {
     return {
-      translatedText: `[AI 离线] 原文翻译：「${text}」`,
+      translatedText: `[AI 离线] ${targetLang}翻译：「${text}」`,
       unfamiliarWords: [],
     }
   }
@@ -148,29 +189,110 @@ function fallbackWordDetail(word: string): WordDetail {
   }
 }
 
+const STATIC_DAILY_QUOTES: Array<{ q: string; t: string }> = [
+  { q: '"The limits of my language mean the limits of my world." — Ludwig Wittgenstein', t: '我语言的极限意味着我世界的极限。' },
+  { q: '"To have another language is to possess a second soul." — Charlemagne', t: '掌握另一门语言就是拥有第二个灵魂。' },
+  { q: '"Learning never exhausts the mind." — Leonardo da Vinci', t: '学习从不会让心智枯竭。' },
+  { q: '"Well begun is half done." — Aristotle', t: '好的开始是成功的一半。' },
+  { q: '"Knowledge is power." — Francis Bacon', t: '知识就是力量。' },
+  { q: '"Practice makes perfect." — Proverb', t: '熟能生巧。' },
+  { q: '"Little by little, one travels far." — J.R.R. Tolkien', t: '积少成多，终能远行。' },
+  { q: '"Action is the foundational key to all success." — Pablo Picasso', t: '行动是所有成功的根本钥匙。' },
+  { q: '"Discipline is the bridge between goals and accomplishment." — Jim Rohn', t: '自律是目标与成就之间的桥梁。' },
+  { q: '"Small steps every day." — Proverb', t: '每天一小步，长期一大步。' },
+  { q: '"Do what you can, with what you have, where you are." — Theodore Roosevelt', t: '在你所在之处，用你拥有的，做你能做的。' },
+  { q: '"If you can dream it, you can do it." — Walt Disney', t: '能想到，就有机会做到。' },
+  { q: '"Success is the sum of small efforts repeated day in and day out." — Robert Collier', t: '成功是日复一日小努力的总和。' },
+  { q: '"No pain, no gain." — Proverb', t: '不劳无获。' },
+  { q: '"Done is better than perfect." — Proverb', t: '完成比完美更重要。' },
+  { q: '"Today a reader, tomorrow a leader." — Margaret Fuller', t: '今天阅读，明天引领。' },
+  { q: '"He who has a why can bear almost any how." — Friedrich Nietzsche', t: '有目标的人，几乎能承受任何过程。' },
+  { q: '"Stay hungry, stay foolish." — Steve Jobs', t: '求知若饥，虚心若愚。' },
+  { q: '"Great things are done by a series of small things." — Vincent van Gogh', t: '伟大由一连串小事构成。' },
+  { q: '"The secret of getting ahead is getting started." — Mark Twain', t: '领先的秘诀是开始行动。' },
+  { q: '"Quality is not an act, it is a habit." — Aristotle', t: '优秀不是一次行为，而是一种习惯。' },
+  { q: '"Fall seven times and stand up eight." — Japanese Proverb', t: '跌倒七次，站起来八次。' },
+  { q: '"You are what you do, not what you say you will do." — Carl Jung', t: '你是谁，取决于你做了什么，而非你说什么。' },
+  { q: '"Believe you can and you are halfway there." — Theodore Roosevelt', t: '相信自己，你已成功一半。' },
+  { q: '"Simplicity is the ultimate sophistication." — Leonardo da Vinci', t: '简洁是最高级的复杂。' },
+  { q: '"The best time to plant a tree was 20 years ago. The second best time is now." — Proverb', t: '种树最好的时间是二十年前，其次是现在。' },
+  { q: '"What gets measured gets improved." — Peter Drucker', t: '可衡量，才可改进。' },
+  { q: '"Success is not final, failure is not fatal: it is the courage to continue that counts." — Winston Churchill', t: '成功非终点，失败非终局，重要的是继续前行的勇气。' },
+  { q: '"Don’t watch the clock; do what it does. Keep going." — Sam Levenson', t: '别盯着时钟看，像它一样持续前进。' },
+  { q: '"A little progress each day adds up to big results." — Proverb', t: '每天一点进步，终会汇成巨大成果。' },
+  { q: '"Energy and persistence conquer all things." — Benjamin Franklin', t: '精力与坚持可以征服一切。' },
+  { q: '"Learning is a treasure that will follow its owner everywhere." — Chinese Proverb', t: '学问是跟随主人走遍天涯的财富。' },
+  { q: '"Never too old to learn." — Proverb', t: '活到老，学到老。' },
+  { q: '"Fortune favors the prepared mind." — Louis Pasteur', t: '机会总是眷顾有准备的人。' },
+  { q: '"One day or day one. You decide." — Proverb', t: '总有一天，还是就是今天，由你决定。' },
+  { q: '"Keep your eyes on the stars and your feet on the ground." — Theodore Roosevelt', t: '仰望星空，脚踏实地。' },
+  { q: '"The harder you work, the luckier you get." — Gary Player', t: '越努力，越幸运。' },
+  { q: '"Be so good they cannot ignore you." — Steve Martin', t: '把自己做到足够好，让人无法忽视。' },
+  { q: '"You miss 100% of the shots you do not take." — Wayne Gretzky', t: '不出手，就没有命中。' },
+  { q: '"Doubt kills more dreams than failure ever will." — Suzy Kassem', t: '扼杀梦想最多的不是失败，而是怀疑。' },
+  { q: '"Success usually comes to those who are too busy to be looking for it." — Henry David Thoreau', t: '成功常属于那些专注做事而非追逐成功的人。' },
+  { q: '"In learning you will teach, and in teaching you will learn." — Phil Collins', t: '学习中你会教人，教学中你会更会学。' },
+  { q: '"The beautiful thing about learning is nobody can take it away from you." — B.B. King', t: '学习最美之处在于，没有人能夺走它。' },
+  { q: '"It always seems impossible until it is done." — Nelson Mandela', t: '事情在做成之前，总显得不可能。' },
+  { q: '"The journey of a thousand miles begins with one step." — Lao Tzu', t: '千里之行，始于足下。' },
+  { q: '"Progress, not perfection." — Proverb', t: '追求进步，而非完美。' },
+  { q: '"Consistency beats intensity." — Proverb', t: '持续胜过爆发。' },
+  { q: '"Focus on the process and the results will come." — Proverb', t: '专注过程，结果自会到来。' },
+  { q: '"You do not have to be great to start, but you have to start to be great." — Zig Ziglar', t: '不必很厉害才开始，开始了才会变厉害。' },
+  { q: '"One language sets you in a corridor for life. Two languages open every door along the way." — Frank Smith', t: '一种语言让你走在走廊里，两种语言为你打开沿途每一扇门。' },
+]
+
+const STATIC_DAILY_TIPS = [
+  '先做 10 分钟复习，再学新词。',
+  '今天先听后说，输入再输出。',
+  '每个新词造 1 句自己的例句。',
+  '先攻克 5 个高频词，再加量。',
+  '复习旧词优先于盲目加新词。',
+  '用 2 分钟回顾昨天错词。',
+  '今天多读一句完整英文句子。',
+  '听歌时抓 3 个关键词。',
+  '学完马上测，记忆更稳。',
+  '今晚睡前再看一遍今日词汇。',
+]
+
+let lastQuoteIndex = -1
+let lastTipIndex = -1
+
+function drawIndex(total: number, last: number): number {
+  if (total <= 1) return 0
+  let idx = Math.floor(Math.random() * total)
+  if (idx === last) idx = (idx + 1) % total
+  return idx
+}
+
+function normalizeComparableText(text: string) {
+  return text.replace(/\s+/g, ' ').trim()
+}
+
+function hasTranslatableContent(text: string) {
+  return /[A-Za-z\u3400-\u9fff]/.test(text)
+}
+
 function fallbackDailyRecommendation(): DailyRecommendation {
   const hour = new Date().getHours()
   const greetings = [
-    { greeting: 'Good Morning! ☀️', tip: '早起学习效率最高，先来 10 分钟词汇复习吧！' },
-    { greeting: 'Good Afternoon! 🌤️', tip: '午后来一段英语听力，提神又学习！' },
-    { greeting: 'Good Evening! 🌙', tip: '睡前复习一下今天学的单词吧！' },
+    'Good Morning! ☀️',
+    'Good Afternoon! 🌤️',
+    'Good Evening! 🌙',
   ]
   const timeSlot = hour < 12 ? 0 : hour < 18 ? 1 : 2
 
-  const quotes = [
-    { q: '"The limits of my language mean the limits of my world." — Ludwig Wittgenstein', t: '我语言的极限意味着我世界的极限。' },
-    { q: '"One language sets you in a corridor for life. Two languages open every door along the way." — Frank Smith', t: '一种语言让你走在走廊里，两种语言为你打开沿途每一扇门。' },
-    { q: '"To have another language is to possess a second soul." — Charlemagne', t: '掌握另一门语言就是拥有第二个灵魂。' },
-    { q: '"Learning is a treasure that will follow its owner everywhere." — Chinese Proverb', t: '学问是跟随主人走遍天涯的财富。' },
-    { q: '"The best time to plant a tree was 20 years ago. The second best time is now." — Chinese Proverb', t: '种一棵树最好的时间是二十年前，其次是现在。' },
-  ]
-  const randomQuote = quotes[Math.floor(Math.random() * quotes.length)]
+  const quoteIdx = drawIndex(STATIC_DAILY_QUOTES.length, lastQuoteIndex)
+  const tipIdx = drawIndex(STATIC_DAILY_TIPS.length, lastTipIndex)
+  lastQuoteIndex = quoteIdx
+  lastTipIndex = tipIdx
+  const randomQuote = STATIC_DAILY_QUOTES[quoteIdx]
 
   return {
-    greeting: greetings[timeSlot].greeting,
+    greeting: greetings[timeSlot],
     motivationalQuote: randomQuote.q,
     quoteTranslation: randomQuote.t,
-    todayTip: greetings[timeSlot].tip,
+    todayTip: STATIC_DAILY_TIPS[tipIdx],
   }
 }
 
@@ -234,10 +356,20 @@ export async function translateText(
   sourceLang: string = '中文',
   targetLang: string = 'English'
 ): Promise<TranslateResult> {
+  const involvesEnglish = sourceLang.toLowerCase().includes('en')
+    || targetLang.toLowerCase().includes('en')
+    || sourceLang === 'English'
+    || targetLang === 'English'
+
+  const taskBlock = involvesEnglish
+    ? `1. 将以下${sourceLang}文本翻译成${targetLang}
+2. 如果文本中包含英语内容，请找出 B1 及以上难度的英语词汇（对中国英语学习者来说可能陌生的词），给出中文释义和音标`
+    : `1. 将以下${sourceLang}文本翻译成${targetLang}
+2. unfamiliarWords 返回空数组`
+
   const prompt = `你是一个英语学习助手。请完成以下任务：
 
-1. 将以下${sourceLang}文本翻译成${targetLang}
-2. 从翻译结果中找出 B1 及以上难度的英语词汇（对中国英语学习者来说可能陌生的词），给出中文释义和音标
+${taskBlock}
 
 输入文本：
 "${text}"
@@ -300,27 +432,7 @@ export async function getWordDetail(word: string): Promise<WordDetail> {
  * 生成每日学习推荐
  */
 export async function getDailyRecommendation(): Promise<DailyRecommendation> {
-  const hour = new Date().getHours()
-  const timeOfDay = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'
-
-  const prompt = `你是 Linswift 英语学习APP的AI助手。现在是${timeOfDay}，请生成今日的学习激励内容。
-
-请严格按以下 JSON 格式返回（不要包含 markdown 标记）：
-{
-  "greeting": "一个简短的英文问候语（3-8个单词，包含emoji）",
-  "motivationalQuote": "一句关于学习或成长的英文名言（真实名言，注明作者）",
-  "quoteTranslation": "该名言的中文翻译",
-  "todayTip": "一个简短的英语学习小贴士（中文，20字以内）"
-}
-
-注意：greeting 要根据时间段变化；名言不要太长；返回合法 JSON`
-
-  const raw = await callMoonshot([{ role: 'user', content: prompt }])
-  if (raw) {
-    const parsed = parseJSON<DailyRecommendation>(raw)
-    if (parsed) return parsed
-  }
-
+  // 使用本地静态抽签池（50 条语录）确保“刷新”稳定可用、不依赖外部接口。
   return fallbackDailyRecommendation()
 }
 
@@ -404,47 +516,112 @@ export async function analyzeUnfamiliarWords(
 export async function translateBatch(
   lines: string[],
   targetLang: string = '中文'
-): Promise<string[]> {
-  if (lines.length === 0) return []
+): Promise<BatchTranslationResult> {
+  if (lines.length === 0) {
+    return {
+      lines: [],
+      batchCount: 0,
+      requestedCount: 0,
+      apiTranslatedCount: 0,
+      fallbackCount: 0,
+      changedCount: 0,
+      fallbackUsed: false,
+      failureReason: null,
+    }
+  }
 
   // 过滤出有实际内容的行（纯数字/标点不翻译）
   const indexedLines = lines.map((l, i) => ({ idx: i, text: l.trim() }))
   const toTranslate = indexedLines.filter(
-    l => l.text.length > 0 && /[a-zA-Z]/.test(l.text)
+    l => l.text.length > 0 && hasTranslatableContent(l.text)
   )
 
-  if (toTranslate.length === 0) return [...lines]
+  if (toTranslate.length === 0) {
+    return {
+      lines: [...lines],
+      batchCount: 0,
+      requestedCount: 0,
+      apiTranslatedCount: 0,
+      fallbackCount: 0,
+      changedCount: 0,
+      fallbackUsed: false,
+      failureReason: null,
+    }
+  }
 
-  // 限制单次请求行数，避免 token 超限
-  const batch = toTranslate.slice(0, 80)
-  const numbered = batch.map(l => `[${l.idx}] ${l.text}`).join('\n')
+  const result = [...lines]
+  const BATCH_SIZE = 24
+  let apiTranslatedCount = 0
+  let fallbackCount = 0
+  let fallbackUsed = false
+  let failureReason: string | null = null
 
-  const prompt = `你是专业翻译。将以下编号英文文本逐行翻译为${targetLang}。
+  for (let start = 0; start < toTranslate.length; start += BATCH_SIZE) {
+    const batch = toTranslate.slice(start, start + BATCH_SIZE)
+    const numbered = batch.map(l => `[${l.idx}] ${l.text}`).join('\n')
+
+    const prompt = `你是专业翻译。将以下编号英文文本逐行翻译为${targetLang}。
 规则：
 - 严格保持原编号，每行格式：[编号] 翻译内容
 - 纯数字、表格数据、专有名词可保留原文
 - 不要添加解释或额外内容
 - 翻译要自然流畅
+- 如果目标语言是中文，返回简体中文
+- 不要返回拼音、注释、括号补充、项目符号或 markdown
+- 不要漏掉任何编号
+- 每个编号只返回一行
 
 ${numbered}`
 
-  const raw = await callMoonshot([{ role: 'user', content: prompt }])
-  const result = [...lines]
+    const raw = await callMoonshot([{ role: 'user', content: prompt }])
+    const parsedIndexes = new Set<number>()
 
-  if (raw) {
-    // 解析 [idx] 翻译内容 格式
-    const lineRegex = /\[(\d+)\]\s*(.+)/g
-    let match
-    while ((match = lineRegex.exec(raw)) !== null) {
-      const idx = parseInt(match[1])
-      const text = match[2].trim()
-      if (idx >= 0 && idx < result.length && text) {
-        result[idx] = text
+    if (raw) {
+      const lineRegex = /\[(\d+)\]\s*([^\n]+)/g
+      let match
+      while ((match = lineRegex.exec(raw)) !== null) {
+        const idx = parseInt(match[1])
+        const text = match[2].trim()
+        if (idx >= 0 && idx < result.length && text) {
+          result[idx] = text
+          parsedIndexes.add(idx)
+        }
       }
     }
+
+    const coverage = parsedIndexes.size / batch.length
+    if (!raw || coverage < 0.6) {
+      fallbackUsed = true
+      failureReason ||= !raw
+        ? (API_KEY ? 'AI 翻译请求失败' : 'AI 翻译服务未配置')
+        : 'AI 翻译结果不完整'
+
+      for (const item of batch) {
+        if (parsedIndexes.has(item.idx)) continue
+        result[item.idx] = item.text
+        fallbackCount += 1
+      }
+    }
+
+    apiTranslatedCount += parsedIndexes.size
   }
 
-  return result
+  const changedCount = toTranslate.reduce((count, item) => (
+    normalizeComparableText(result[item.idx]) !== normalizeComparableText(lines[item.idx])
+      ? count + 1
+      : count
+  ), 0)
+
+  return {
+    lines: result,
+    batchCount: Math.ceil(toTranslate.length / BATCH_SIZE),
+    requestedCount: toTranslate.length,
+    apiTranslatedCount,
+    fallbackCount,
+    changedCount,
+    fallbackUsed,
+    failureReason,
+  }
 }
 
 /**
@@ -474,4 +651,124 @@ export async function classifyVocabulary(
   }
 
   return fallbackClassify(words)
+}
+
+function normalizeLongSentenceAnalysis(
+  sentence: string,
+  raw: RawLongSentenceAnalysis | null
+): LongSentenceAnalysis | null {
+  if (!raw) return null
+
+  const fallback = buildFallbackLongSentenceAnalysis(sentence)
+  let segments = Array.isArray(raw.segments)
+    ? raw.segments
+      .filter((item) => item?.text && item?.role)
+      .map((item) => ({
+        text: item.text!.replace(/\s+/g, ' '),
+        role: isLongSentenceRole(item.role) ? item.role : 'modifier',
+        note: item.note?.trim() || 'AI 标注片段',
+      }))
+    : fallback.segments
+
+  if (segments.length > 0) {
+    const sentenceLower = sentence.toLowerCase()
+    let cursor = 0
+    segments = segments.map((segment) => {
+      const normalizedText = segment.text.trim()
+      const normalizedLower = normalizedText.toLowerCase()
+      const start = normalizedLower ? sentenceLower.indexOf(normalizedLower, cursor) : -1
+      if (start === -1) return segment
+
+      const end = start + normalizedText.length
+      const prefix = sentence.slice(cursor, start)
+      cursor = end
+      return {
+        ...segment,
+        text: `${prefix}${sentence.slice(start, end)}`,
+      }
+    })
+
+    if (cursor < sentence.length) {
+      segments[segments.length - 1] = {
+        ...segments[segments.length - 1],
+        text: `${segments[segments.length - 1].text}${sentence.slice(cursor)}`,
+      }
+    }
+  }
+
+  if (segments.length === 0) return null
+
+  const connectors: LongSentenceConnector[] = Array.isArray(raw.connectors)
+    ? raw.connectors
+      .filter((item) => item?.text && item?.function)
+      .map((item) => ({ text: item.text!.trim(), function: item.function!.trim() }))
+    : fallback.connectors
+
+  return {
+    sentence,
+    translation: raw.translation?.trim() || fallback.translation,
+    summary: raw.summary?.trim() || fallback.summary,
+    segments,
+    clauses: Array.isArray(raw.clauses) && raw.clauses.length > 0
+      ? raw.clauses
+        .filter((item) => item?.text)
+        .map((item, index) => ({
+          label: item.label?.trim() || `意群 ${index + 1}`,
+          text: item.text!.trim(),
+          function: item.function?.trim() || '补充结构说明',
+          simplified: item.simplified?.trim() || item.text!.trim(),
+        }))
+      : fallback.clauses,
+    grammarPoints: Array.isArray(raw.grammarPoints) && raw.grammarPoints.length > 0
+      ? raw.grammarPoints.filter(Boolean).map((item) => item.trim())
+      : fallback.grammarPoints,
+    connectors,
+    simpleRewrites: Array.isArray(raw.simpleRewrites) && raw.simpleRewrites.length > 0
+      ? raw.simpleRewrites.filter(Boolean).map((item) => item.trim())
+      : fallback.simpleRewrites,
+  }
+}
+
+export async function analyzeLongSentence(sentence: string): Promise<LongSentenceAnalysis> {
+  const normalizedSentence = sentence.replace(/\s+/g, ' ').trim()
+  if (!normalizedSentence) {
+    return buildFallbackLongSentenceAnalysis('请输入一句完整的英文长句。')
+  }
+
+  const prompt = `你是一个英语长难句分析老师。请对这句英文做精细语法拆分，输出严格 JSON，不要使用 markdown：
+
+句子：
+"${normalizedSentence}"
+
+输出格式：
+{
+  "translation": "自然中文翻译",
+  "summary": "一句中文总结这句的骨架",
+  "segments": [
+    {"text": "原句中的连续片段，保持原顺序", "role": "subject|verb|object|connector|modifier|adverbial|complement|relative|condition|result", "note": "中文说明"}
+  ],
+  "clauses": [
+    {"label": "如 主句/让步从句/定语从句", "text": "该分句原文", "function": "中文功能说明", "simplified": "把这块改写成更短的英文短句"}
+  ],
+  "grammarPoints": ["3到5条中文语法提醒"],
+  "connectors": [
+    {"text": "连接词或触发结构", "function": "逻辑功能"}
+  ],
+  "simpleRewrites": ["2到4个更短的英文短句"]
+}
+
+要求：
+1. segments 必须按原句顺序覆盖整句，不要乱序。
+2. 尽量细分出主语、谓语、宾语、连接词、修饰语。
+3. 如果有从句，要在 clauses 里明确标出功能。
+4. 返回合法 JSON。`
+
+  const raw = await callMoonshot([{ role: 'user', content: prompt }])
+  if (raw) {
+    const parsed = parseJSON<RawLongSentenceAnalysis>(raw)
+    const normalized = normalizeLongSentenceAnalysis(normalizedSentence, parsed)
+    if (normalized) return normalized
+  }
+
+  return buildFallbackLongSentenceAnalysis(normalizedSentence)
 }

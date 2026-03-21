@@ -2,17 +2,29 @@
   "name": "linswift",
   "private": true,
   "version": "0.0.0",
+  "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+    "prepare:icons": "node scripts/generate-icons.mjs",
+    "prepare:ocr-assets": "node scripts/prepare-ocr-assets.mjs",
+    "prepare:classic-books": "node scripts/prepare-classic-books.mjs",
+    "dev": "npm run prepare:icons && npm run prepare:ocr-assets && npm run prepare:classic-books && vite",
+    "build": "npm run prepare:icons && npm run prepare:ocr-assets && npm run prepare:classic-books && tsc -b && vite build",
+    "build:desktop": "npm run prepare:icons && npm run prepare:ocr-assets && npm run prepare:classic-books && tsc -b && BUILD_TARGET=desktop vite build",
+    "desktop:start": "electron .",
+    "desktop:start:dev": "ELECTRON_START_URL=http://localhost:5173 electron .",
+    "desktop:build": "npm run build:desktop && electron-builder --mac dmg --publish never",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource/noto-sans-sc": "^5.2.9",
     "@supabase/supabase-js": "^2.95.3",
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/react-query": "^5.90.20",
+    "@tesseract.js-data/chi_sim": "^1.0.0",
+    "@tesseract.js-data/chi_tra": "^1.0.0",
+    "@tesseract.js-data/eng": "^1.0.0",
     "gsap": "^3.14.2",
     "lucide-react": "^0.563.0",
     "ogl": "^1.0.11",
@@ -29,6 +41,8 @@
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
+    "electron": "^37.2.0",
+    "electron-builder": "^26.0.12",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
@@ -37,5 +51,29 @@
     "typescript-eslint": "^8.46.4",
     "vite": "^7.2.4",
     "vite-plugin-pwa": "^1.2.0"
+  },
+  "build": {
+    "appId": "com.linswift.desktop",
+    "productName": "Linswift",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "mac": {
+      "category": "public.app-category.education",
+      "target": [
+        "dmg"
+      ],
+      "icon": "build/icon.icns",
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "identity": null
+    }
   }
 }

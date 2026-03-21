@@ -10,7 +10,12 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+release
+build
 *.local
+public/ocr
+chrome-extension.crx
+chrome-extension.pem
 
 # Editor directories and files
 .vscode/*

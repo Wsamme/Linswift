@@ -7,9 +7,10 @@
 
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { User, Mail, Lock, Eye, EyeOff, Loader2, Sparkles, ArrowLeft } from 'lucide-react'
+import { User, Mail, Lock, Eye, EyeOff, Loader2, ArrowLeft } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import Particles from '../components/reactbits/Particles'
+import BrandLogo from '../components/common/BrandLogo'
 
 export default function RegisterPage() {
   const navigate = useNavigate()
@@ -75,12 +76,11 @@ export default function RegisterPage() {
             返回官网
           </button>
 
-        <div className="flex items-center gap-3 mb-8">
-          <div className="w-12 h-12 rounded-2xl bg-[#FF8400]/15 flex items-center justify-center">
-            <Sparkles size={24} className="text-[#FF8400]" />
-          </div>
-          <span className="text-[28px] font-extrabold tracking-tight text-[#1A1A1A]">Linswift</span>
-        </div>
+        <BrandLogo
+          className="mb-8"
+          imageClassName="h-12 w-12"
+          textClassName="text-[28px] font-extrabold tracking-tight text-[#1A1A1A]"
+        />
 
         <h2 className="text-[36px] xl:text-[42px] font-extrabold leading-[1.15] mb-4 text-[#1A1A1A]">
           加入 Linswift<br />开启学习之旅
@@ -196,9 +196,11 @@ export default function RegisterPage() {
               className="absolute -top-16 left-5 w-10 h-10 rounded-full bg-black/5 flex items-center justify-center">
               <ArrowLeft size={20} className="text-[#1A1A1A]" />
             </button>
-            <div className="w-[64px] h-[64px] rounded-full bg-[#FF8400]/15 flex items-center justify-center mb-3">
-              <span className="text-[#FF8400] text-[28px] font-extrabold">L</span>
-            </div>
+            <BrandLogo
+              className="mb-3"
+              imageClassName="h-[64px] w-[64px]"
+              showText={false}
+            />
             <h1 className="text-[#1A1A1A] text-[24px] font-bold tracking-tight">加入 Linswift</h1>
             <p className="text-[#888] text-[13px] mt-1.5">开启你的 AI 英语学习之旅</p>
           </div>

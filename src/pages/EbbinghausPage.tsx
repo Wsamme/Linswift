@@ -3,8 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import {
   ChevronLeft, Brain, Gamepad2, Sparkles, BookOpen, RotateCcw, Plus,
 } from 'lucide-react'
-import { useVocabulary } from '../hooks/useVocabulary'
-import { getWeeklyPlan, isReviewDue } from '../lib/ebbinghaus'
+import { getEbbinghausForecastPlan, normalizeReviewCycleDays, type ReviewCycleDays } from '../lib/ebbinghaus'
+import { useAuth } from '../contexts/AuthContext'
+import { supabase } from '../lib/supabase'
+import { useLogicalBack } from '../hooks/useLogicalBack'
 
 /**
  * 艾宾浩斯记忆规划看板 —— 接入 Supabase
@@ -17,22 +19,112 @@ import { getWeeklyPlan, isReviewDue } from '../lib/ebbinghaus'
 
 export default function EbbinghausPage() {
   const navigate = useNavigate()
-  const { vocabulary, loading, fetchVocabulary } = useVocabulary()
+  const goBack = useLogicalBack('/app/learn')
+  const { user } = useAuth()
+  const [loading, setLoading] = useState(true)
+  const [unmasteredCount, setUnmasteredCount] = useState(0)
+  const [newTodayCount, setNewTodayCount] = useState(0)
+  const [reviewCount, setReviewCount] = useState(0)
+  const [masteredCount, setMasteredCount] = useState(0)
+  const [totalWords, setTotalWords] = useState(0)
+  const [todayDoneCount, setTodayDoneCount] = useState(0)
+  const [weeklyPlan, setWeeklyPlan] = useState<number[]>([0, 0, 0, 0, 0, 0, 0])
+  const [reviewCycleDays, setReviewCycleDays] = useState<ReviewCycleDays>(7)
 
-  // 加载词汇数据
+  function getLocalDayRange() {
+    const todayStart = new Date()
+    todayStart.setHours(0, 0, 0, 0)
+    const tomorrowStart = new Date(todayStart)
+    tomorrowStart.setDate(tomorrowStart.getDate() + 1)
+    return {
+      todayStartIso: todayStart.toISOString(),
+      tomorrowStartIso: tomorrowStart.toISOString(),
+    }
+  }
+
+  // 加载看板统计（聚合计数 + 轻量字段）
   useEffect(() => {
-    fetchVocabulary('all')
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    async function loadBoardStats() {
+      if (!user) {
+        setLoading(false)
+        return
+      }
+      setLoading(true)
+      const { todayStartIso, tomorrowStartIso } = getLocalDayRange()
 
-  // ===== 计算统计数据 =====
-  const todayDueWords = vocabulary.filter(v => isReviewDue(v.next_review_at))
-  const newWords = vocabulary.filter(v => v.review_count === 0)
-  const reviewWords = todayDueWords.filter(v => v.review_count > 0)
-  const masteredWords = vocabulary.filter(v => v.mastery_level >= 4)
+      const [
+        totalRes,
+        unmasteredRes,
+        newTodayRes,
+        reviewRes,
+        masteredRes,
+        planRes,
+        todayReviewsRes,
+        settingsRes,
+      ] = await Promise.all([
+        supabase.from('user_vocabulary').select('id', { count: 'exact', head: true }).eq('user_id', user.id),
+        supabase
+          .from('user_vocabulary')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .lt('mastery_level', 5),
+        supabase
+          .from('user_vocabulary')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .eq('review_count', 0)
+          .lt('mastery_level', 5)
+          .lt('created_at', tomorrowStartIso),
+        supabase
+          .from('user_vocabulary')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .gt('review_count', 0)
+          .lte('mastery_level', 4)
+          .lt('next_review_at', tomorrowStartIso),
+        supabase.from('user_vocabulary').select('id', { count: 'exact', head: true }).eq('user_id', user.id).gte('mastery_level', 5),
+        supabase
+          .from('user_vocabulary')
+          .select('next_review_at, mastery_level')
+          .eq('user_id', user.id)
+          .lte('mastery_level', 5),
+        supabase
+          .from('vocabulary_reviews')
+          .select('vocabulary_id')
+          .eq('user_id', user.id)
+          .gte('created_at', todayStartIso)
+          .lt('created_at', tomorrowStartIso),
+        supabase
+          .from('user_settings')
+          .select('review_cycle_days')
+          .eq('user_id', user.id)
+          .maybeSingle(),
+      ])
 
-  // ===== 7 天计划 =====
-  const weeklyPlan = getWeeklyPlan(vocabulary)
-  const dayNames = ['今天', '明天', '后天', '第4天', '第5天', '第6天', '第7天']
+      const cycleDays = normalizeReviewCycleDays(settingsRes.data?.review_cycle_days)
+      setReviewCycleDays(cycleDays)
+      setTotalWords(totalRes.count || 0)
+      setUnmasteredCount(unmasteredRes.count || 0)
+      setNewTodayCount(newTodayRes.count || 0)
+      setReviewCount(reviewRes.count || 0)
+      setMasteredCount(masteredRes.count || 0)
+      const uniqueReviewedToday = new Set((todayReviewsRes.data || []).map((r: { vocabulary_id: number }) => r.vocabulary_id))
+      setTodayDoneCount(uniqueReviewedToday.size)
+      setWeeklyPlan(getEbbinghausForecastPlan(planRes.data || [], cycleDays, cycleDays))
+      setLoading(false)
+    }
+
+    loadBoardStats().catch(() => {
+      setLoading(false)
+    })
+  }, [user])
+
+  const dayNames = Array.from({ length: reviewCycleDays }, (_, i) => {
+    if (i === 0) return '今天'
+    if (i === 1) return '明天'
+    if (i === 2) return '后天'
+    return `第${i + 1}天`
+  })
 
   // ===== 今日学习清单 =====
   const [todayTasks] = useState(() => [
@@ -41,19 +133,21 @@ export default function EbbinghausPage() {
   ])
 
   const taskCounts = {
-    new: newWords.length,
-    review: reviewWords.length,
+    new: newTodayCount,
+    review: reviewCount,
   }
 
-  // 整体进度
-  const totalWords = vocabulary.length
-  const progressPercent = totalWords > 0 ? Math.round((masteredWords.length / totalWords) * 100) : 0
+  // 今日任务进度（更符合背单词当日学习实际）
+  const todayPlanCount = newTodayCount + reviewCount
+  const progressPercent = todayPlanCount > 0
+    ? Math.min(100, Math.round((todayDoneCount / todayPlanCount) * 100))
+    : 0
 
   return (
     <div className="min-h-screen bg-[var(--color-background)]">
       {/* ===== Header ===== */}
       <div className="flex items-center gap-3 px-5 py-4">
-        <button onClick={() => navigate(-1)} className="p-1">
+        <button onClick={goBack} className="p-1">
           <ChevronLeft size={24} className="text-[var(--color-foreground)]" />
         </button>
         <h1 className="text-[18px] font-bold text-[var(--color-foreground)] font-secondary">背单词</h1>
@@ -61,17 +155,17 @@ export default function EbbinghausPage() {
 
       {/* ===== 统计卡片 ===== */}
       <div className="grid grid-cols-3 gap-3 mx-5 mb-5">
-        <StatBox value={String(newWords.length)} label="今日待学" color="#FF8400" loading={loading} />
-        <StatBox value={String(reviewWords.length)} label="待复习" color="#3B82F6" loading={loading} />
-        <StatBox value={String(masteredWords.length)} label="已掌握" color="#22C55E" loading={loading} />
+        <StatBox value={String(unmasteredCount)} label="不会" color="#EF4444" loading={loading} />
+        <StatBox value={String(todayPlanCount)} label="今日待学" color="#FF8400" loading={loading} />
+        <StatBox value={String(masteredCount)} label="已掌握" color="#22C55E" loading={loading} />
       </div>
 
       {/* ===== 整体进度 ===== */}
       <div className="mx-5 mb-5 p-4 bg-[var(--color-card)] rounded-[var(--radius-md)]" style={{ boxShadow: 'var(--shadow-card)' }}>
         <div className="flex items-center justify-between mb-2">
-          <span className="text-[13px] font-semibold text-[var(--color-foreground)]">学习进度</span>
+          <span className="text-[13px] font-semibold text-[var(--color-foreground)]">今日学习进度</span>
           <span className="text-[13px] text-[var(--color-primary)] font-bold">
-            {masteredWords.length}/{totalWords} 词
+            {todayDoneCount}/{todayPlanCount} 词
           </span>
         </div>
         <div className="h-2.5 bg-[var(--color-background-secondary)] rounded-full overflow-hidden">
@@ -80,11 +174,14 @@ export default function EbbinghausPage() {
             style={{ width: `${progressPercent}%` }}
           />
         </div>
+        <p className="mt-2 text-[11px] text-[var(--color-muted)]">
+          今日计划 = 新学 {newTodayCount} + 到期复习 {reviewCount}；“不会” = 所有未完成完整艾宾浩斯周期的词
+        </p>
       </div>
 
-      {/* ===== 7 天计划看板 ===== */}
+      {/* ===== 复习计划看板 ===== */}
       <div className="mx-5 mb-5">
-        <h3 className="text-[14px] font-bold text-[var(--color-foreground)] mb-3 font-secondary">7 天记忆规划</h3>
+        <h3 className="text-[14px] font-bold text-[var(--color-foreground)] mb-3 font-secondary">{reviewCycleDays} 天记忆规划</h3>
         <div className="flex gap-2 overflow-x-auto pb-2 -mx-5 px-5">
           {weeklyPlan.map((count, i) => (
             <div
@@ -151,7 +248,7 @@ export default function EbbinghausPage() {
           ))}
 
           {/* 若词库为空的提示 */}
-          {!loading && vocabulary.length === 0 && (
+          {!loading && totalWords === 0 && (
             <div className="text-center py-6">
               <p className="text-[13px] text-[var(--color-muted)]">
                 词库为空，去翻译页收录一些词汇吧

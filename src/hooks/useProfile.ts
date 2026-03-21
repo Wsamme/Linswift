@@ -41,19 +41,7 @@ export function useProfile() {
         .single()
 
       if (error) {
-        console.warn('读取 profile 失败:', error.message)
-        // 降级：返回 mock profile
-        return {
-          id: user.id,
-          username: user.user_metadata?.username || user.email?.split('@')[0] || 'User',
-          avatar_url: null,
-          level: 1,
-          total_study_days: 0,
-          total_study_hours: 0,
-          vocabulary_count: 0,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        } as Profile
+        throw new Error(error.message)
       }
 
       return data

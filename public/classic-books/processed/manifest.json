@@ -1,0 +1,82 @@
+{
+  "generatedAt": "2026-03-21T06:33:55.571Z",
+  "books": [
+    {
+      "slug": "alice-in-wonderland",
+      "title": "Alice's Adventures in Wonderland",
+      "author": "Lewis Carroll",
+      "chapterCount": 12,
+      "processedPath": "classic-books/processed/alice-in-wonderland.json"
+    },
+    {
+      "slug": "pride-and-prejudice",
+      "title": "Pride and Prejudice",
+      "author": "Jane Austen",
+      "chapterCount": 61,
+      "processedPath": "classic-books/processed/pride-and-prejudice.json"
+    },
+    {
+      "slug": "sherlock-holmes",
+      "title": "The Adventures of Sherlock Holmes",
+      "author": "Arthur Conan Doyle",
+      "chapterCount": 12,
+      "processedPath": "classic-books/processed/sherlock-holmes.json"
+    },
+    {
+      "slug": "tom-sawyer",
+      "title": "The Adventures of Tom Sawyer",
+      "author": "Mark Twain",
+      "chapterCount": 35,
+      "processedPath": "classic-books/processed/tom-sawyer.json"
+    },
+    {
+      "slug": "frankenstein",
+      "title": "Frankenstein",
+      "author": "Mary Shelley",
+      "chapterCount": 28,
+      "processedPath": "classic-books/processed/frankenstein.json"
+    },
+    {
+      "slug": "dracula",
+      "title": "Dracula",
+      "author": "Bram Stoker",
+      "chapterCount": 27,
+      "processedPath": "classic-books/processed/dracula.json"
+    },
+    {
+      "slug": "jane-eyre",
+      "title": "Jane Eyre",
+      "author": "Charlotte Bronte",
+      "chapterCount": 40,
+      "processedPath": "classic-books/processed/jane-eyre.json"
+    },
+    {
+      "slug": "moby-dick",
+      "title": "Moby-Dick",
+      "author": "Herman Melville",
+      "chapterCount": 139,
+      "processedPath": "classic-books/processed/moby-dick.json"
+    },
+    {
+      "slug": "a-tale-of-two-cities",
+      "title": "A Tale of Two Cities",
+      "author": "Charles Dickens",
+      "chapterCount": 45,
+      "processedPath": "classic-books/processed/a-tale-of-two-cities.json"
+    },
+    {
+      "slug": "dorian-gray",
+      "title": "The Picture of Dorian Gray",
+      "author": "Oscar Wilde",
+      "chapterCount": 20,
+      "processedPath": "classic-books/processed/dorian-gray.json"
+    },
+    {
+      "slug": "anne-of-green-gables",
+      "title": "Anne of Green Gables",
+      "author": "L. M. Montgomery",
+      "chapterCount": 39,
+      "processedPath": "classic-books/processed/anne-of-green-gables.json"
+    }
+  ]
+}

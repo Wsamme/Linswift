@@ -1,21 +1,23 @@
 import { NavLink } from 'react-router-dom'
 import { Languages, BookOpen, Library, User } from 'lucide-react'
+import { t, useAppLanguage } from '../../lib/i18n'
 
 /* 底部 Tab 导航栏配置 */
 const tabs = [
-  { path: '/app/translate', label: '翻译', icon: Languages },
-  { path: '/app/learn', label: '学习', icon: BookOpen },
-  { path: '/app/vocab', label: '词库', icon: Library },
-  { path: '/app/profile', label: '个人', icon: User },
+  { path: '/app/translate', key: 'nav_translate' as const, icon: Languages },
+  { path: '/app/learn', key: 'nav_learn' as const, icon: BookOpen },
+  { path: '/app/vocab', key: 'nav_vocab' as const, icon: Library },
+  { path: '/app/profile', key: 'nav_profile' as const, icon: User },
 ]
 
 export default function BottomNav() {
+  const lang = useAppLanguage()
   return (
     <nav
-      className="flex items-center justify-around bg-[var(--color-card)] border-t border-[var(--color-border)]"
+      className="glass-bottom-bar flex items-center justify-around border-t border-[var(--color-border)] pb-[max(env(safe-area-inset-bottom),8px)]"
       style={{ boxShadow: 'var(--shadow-nav)' }}
     >
-      {tabs.map(({ path, label, icon: Icon }) => (
+      {tabs.map(({ path, key, icon: Icon }) => (
         <NavLink
           key={path}
           to={path}
@@ -29,7 +31,7 @@ export default function BottomNav() {
           }
         >
           <Icon size={22} strokeWidth={1.8} />
-          <span className="text-[11px] font-medium">{label}</span>
+          <span className="text-[11px] font-medium">{t(lang, key)}</span>
         </NavLink>
       ))}
     </nav>

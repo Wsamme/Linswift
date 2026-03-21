@@ -6,6 +6,21 @@ html {
 
 /* ===== 设计变量（从 Pencil 设计稿提取） ===== */
 :root {
+  --font-sans-ui: "Inter", "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-pdf-overlay: "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --glass-panel-bg: rgba(255, 255, 255, 0.42);
+  --glass-panel-strong-bg: rgba(255, 255, 255, 0.58);
+  --glass-panel-soft-bg: rgba(255, 255, 255, 0.34);
+  --glass-panel-elevated-bg: rgba(255, 255, 255, 0.72);
+  --glass-input-bg: rgba(255, 255, 255, 0.52);
+  --glass-list-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.68));
+  --glass-border: rgba(255, 255, 255, 0.46);
+  --glass-shadow: 0 18px 50px rgba(15, 23, 42, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.78);
+  --glass-shadow-soft: 0 10px 28px rgba(15, 23, 42, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  --glass-backdrop: blur(24px) saturate(1.45);
+  --glass-overlay: rgba(15, 23, 42, 0.24);
+  --glass-page-bg: radial-gradient(circle at top right, rgba(255, 132, 0, 0.18), transparent 24%), radial-gradient(circle at left 30%, rgba(255, 211, 170, 0.32), transparent 22%), linear-gradient(135deg, #fff8f0 0%, #fffdf9 52%, #fff3e5 100%);
+
   /* 主色系 */
   --color-primary: #FF8400;
   --color-primary-light: #FFF5EB;
@@ -43,20 +58,209 @@ html {
   --shadow-nav: 0 -2px 10px rgba(0, 0, 0, 0.05);
 }
 
+:root[data-theme='dark'] {
+  --glass-panel-bg: rgba(27, 29, 33, 0.62);
+  --glass-panel-strong-bg: rgba(34, 37, 42, 0.78);
+  --glass-panel-soft-bg: rgba(27, 29, 33, 0.48);
+  --glass-panel-elevated-bg: rgba(34, 37, 42, 0.88);
+  --glass-input-bg: rgba(34, 37, 42, 0.72);
+  --glass-list-bg: linear-gradient(180deg, rgba(34, 37, 42, 0.86), rgba(27, 29, 33, 0.78));
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-shadow: 0 20px 52px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --glass-shadow-soft: 0 12px 32px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --glass-overlay: rgba(3, 4, 6, 0.52);
+  --glass-page-bg: radial-gradient(circle at top right, rgba(255, 132, 0, 0.14), transparent 20%), radial-gradient(circle at left 30%, rgba(255, 176, 102, 0.10), transparent 18%), linear-gradient(145deg, #131518 0%, #16191d 50%, #1b1e24 100%);
+  --color-foreground: #F5F5F5;
+  --color-muted: #A3A3A3;
+  --color-muted-light: #888888;
+
+  --color-background: #111214;
+  --color-background-secondary: #1B1D21;
+  --color-card: #1A1C20;
+
+  --color-border: #2A2D33;
+  --color-border-dark: #383C44;
+
+  --color-primary-foreground: #FFFFFF;
+  --shadow-card: 0 2px 10px rgba(0, 0, 0, 0.35);
+  --shadow-nav: 0 -2px 10px rgba(0, 0, 0, 0.35);
+}
+
 /* ===== 字体定义 ===== */
 @layer base {
   /* 确保整个页面可撑满高度 */
-  html, body {
+  html, body, #root {
     height: 100%;
+    min-height: 100%;
+    background: var(--color-background);
+    color: var(--color-foreground);
+  }
+
+  body {
+    min-height: 100dvh;
   }
 
   /* 英文/数字字体 */
   .font-primary {
-    font-family: "Inter", "PingFang SC", "Noto Sans SC", sans-serif;
+    font-family: var(--font-sans-ui);
   }
 
   /* 中文字体 */
   .font-secondary {
-    font-family: "PingFang SC", "Noto Sans SC", "Inter", sans-serif;
+    font-family: var(--font-sans-ui);
+  }
+}
+
+@layer components {
+  .glass-page {
+    min-height: 100%;
+    min-height: 100dvh;
+    background: var(--glass-page-bg);
+  }
+
+  .glass-panel {
+    background: var(--glass-panel-bg);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+    -webkit-backdrop-filter: var(--glass-backdrop);
+    backdrop-filter: var(--glass-backdrop);
+  }
+
+  .glass-panel-strong {
+    background: var(--glass-panel-strong-bg);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+    -webkit-backdrop-filter: var(--glass-backdrop);
+    backdrop-filter: var(--glass-backdrop);
+  }
+
+  .glass-panel-soft {
+    background: var(--glass-panel-soft-bg);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow-soft);
+    -webkit-backdrop-filter: blur(18px) saturate(1.35);
+    backdrop-filter: blur(18px) saturate(1.35);
+  }
+
+  .glass-input {
+    background: var(--glass-input-bg);
+    border: 1px solid var(--glass-border);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+    -webkit-backdrop-filter: blur(16px) saturate(1.25);
+    backdrop-filter: blur(16px) saturate(1.25);
+  }
+
+  .glass-pill {
+    background: rgba(255, 255, 255, 0.46);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow-soft);
+    -webkit-backdrop-filter: blur(14px) saturate(1.2);
+    backdrop-filter: blur(14px) saturate(1.2);
+  }
+
+  .glass-card {
+    background: var(--glass-panel-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 26px;
+    box-shadow: var(--glass-shadow);
+    -webkit-backdrop-filter: var(--glass-backdrop);
+    backdrop-filter: var(--glass-backdrop);
+  }
+
+  .glass-card-strong {
+    background: var(--glass-panel-strong-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 30px;
+    box-shadow: var(--glass-shadow);
+    -webkit-backdrop-filter: blur(28px) saturate(1.52);
+    backdrop-filter: blur(28px) saturate(1.52);
+  }
+
+  .glass-card-soft {
+    background: var(--glass-panel-soft-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 22px;
+    box-shadow: var(--glass-shadow-soft);
+    -webkit-backdrop-filter: blur(18px) saturate(1.35);
+    backdrop-filter: blur(18px) saturate(1.35);
+  }
+
+  .glass-card-elevated {
+    background: var(--glass-panel-elevated-bg);
+    border: 1px solid rgba(255, 255, 255, 0.52);
+    border-radius: 24px;
+    box-shadow: 0 18px 42px rgba(15, 23, 42, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    -webkit-backdrop-filter: blur(24px) saturate(1.4);
+    backdrop-filter: blur(24px) saturate(1.4);
+  }
+
+  .glass-list-item {
+    background: var(--glass-list-bg);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.76);
+    -webkit-backdrop-filter: blur(22px) saturate(1.35);
+    backdrop-filter: blur(22px) saturate(1.35);
+  }
+
+  .glass-danger-rail {
+    background: linear-gradient(180deg, rgba(239, 68, 68, 0.92), rgba(220, 38, 38, 0.96));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.26);
+  }
+
+  .glass-card-interactive {
+    transition: transform 180ms ease, box-shadow 180ms ease, background-color 180ms ease, border-color 180ms ease;
+    will-change: transform;
+  }
+
+  .glass-card-interactive:active {
+    transform: scale(0.985);
+  }
+
+  .glass-input-shell {
+    min-height: 48px;
+    background: var(--glass-input-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 22px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+    -webkit-backdrop-filter: blur(16px) saturate(1.25);
+    backdrop-filter: blur(16px) saturate(1.25);
+  }
+
+  .glass-modal-backdrop {
+    background: var(--glass-overlay);
+    -webkit-backdrop-filter: blur(10px) saturate(1.05);
+    backdrop-filter: blur(10px) saturate(1.05);
+  }
+
+  .glass-modal-sheet {
+    background: var(--glass-panel-strong-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 30px 30px 0 0;
+    box-shadow: 0 28px 72px rgba(15, 23, 42, 0.20), inset 0 1px 0 rgba(255, 255, 255, 0.62);
+    -webkit-backdrop-filter: blur(28px) saturate(1.52);
+    backdrop-filter: blur(28px) saturate(1.52);
+  }
+
+  .glass-modal-sheet-desktop {
+    border-radius: 30px;
+  }
+
+  .glass-bottom-bar {
+    background: var(--glass-panel-strong-bg);
+    border-top: 1px solid var(--glass-border);
+    box-shadow: 0 -16px 40px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.55);
+    -webkit-backdrop-filter: blur(24px) saturate(1.42);
+    backdrop-filter: blur(24px) saturate(1.42);
+  }
+
+  :root[data-theme='dark'] .glass-pill {
+    background: rgba(34, 37, 42, 0.74);
+  }
+
+  @media (hover: hover) {
+    .glass-card-interactive:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 22px 56px rgba(15, 23, 42, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.78);
+    }
   }
 }

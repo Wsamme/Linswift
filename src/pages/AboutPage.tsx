@@ -7,21 +7,39 @@
  * 3. 底部版权信息
  */
 
-import { useNavigate } from 'react-router-dom'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { useLogicalBack } from '../hooks/useLogicalBack'
+import BrandLogo from '../components/common/BrandLogo'
 
-// 菜单项数据
-const menuItems = [
-  { icon: '🔄', label: '检查更新', value: '已是最新版', valueColor: 'text-[var(--color-success)]' },
-  { icon: '📄', label: '用户协议', link: true },
-  { icon: '🔒', label: '隐私政策', link: true },
-  { icon: '💬', label: '帮助与反馈', link: true },
-  { icon: '⭐', label: '给我们评分', link: true },
-  { icon: '📧', label: '联系我们', link: true },
-]
+interface MenuItem {
+  icon: string
+  label: string
+  value?: string
+  valueColor?: string
+  action?: () => void
+}
 
 export default function AboutPage() {
   const navigate = useNavigate()
+  const goBack = useLogicalBack('/app/profile')
+
+  const openMailto = (email: string, subject: string) => {
+    window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}`
+  }
+
+  const openExternal = (url: string) => {
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  const menuItems: MenuItem[] = [
+    { icon: '🔄', label: '检查更新', value: '已是最新版', valueColor: 'text-[var(--color-success)]' },
+    { icon: '📄', label: '用户协议', action: () => navigate('/legal/user-agreement') },
+    { icon: '🔒', label: '隐私政策', action: () => navigate('/legal/privacy-policy') },
+    { icon: '💬', label: '帮助与反馈', action: () => openMailto('support@linswift.com', 'Linswift 帮助与反馈') },
+    { icon: '⭐', label: '给我们评分', action: () => openMailto('hello@linswift.com', 'Linswift 产品评分与建议') },
+    { icon: '📧', label: '联系我们', action: () => openExternal('mailto:hello@linswift.com') },
+  ]
 
   return (
     <div className="h-full flex justify-center bg-[var(--color-background-secondary)]">
@@ -29,7 +47,7 @@ export default function AboutPage() {
         {/* ===== 顶部导航 ===== */}
         <div className="flex items-center gap-3 px-5 py-4">
           <button
-            onClick={() => navigate(-1)}
+            onClick={goBack}
             className="w-9 h-9 rounded-full bg-[var(--color-card)] flex items-center justify-center active:scale-95 transition-transform"
           >
             <ChevronLeft size={20} className="text-[var(--color-foreground)]" />
@@ -45,9 +63,7 @@ export default function AboutPage() {
           {/* ----- App 信息卡片 ----- */}
           <div className="bg-[var(--color-card)] rounded-[var(--radius-lg)] p-6 flex flex-col items-center gap-2.5" style={{ boxShadow: 'var(--shadow-card)' }}>
             {/* App Logo */}
-            <div className="w-16 h-16 rounded-[var(--radius-md)] bg-[var(--color-primary)] flex items-center justify-center">
-              <span className="text-white text-[28px] font-bold font-secondary">L</span>
-            </div>
+            <BrandLogo imageClassName="h-16 w-16" showText={false} />
             {/* App 名称 */}
             <h2 className="text-[20px] font-bold text-[var(--color-foreground)]">Linswift</h2>
             {/* 版本号 */}
@@ -61,7 +77,11 @@ export default function AboutPage() {
             {menuItems.map((item, i) => (
               <div key={item.label}>
                 {i > 0 && <div className="h-px bg-[var(--color-border)] mx-4" />}
-                <button className="w-full flex items-center justify-between px-5 py-3.5 active:bg-[var(--color-background-secondary)] transition-colors">
+                <button
+                  onClick={item.action}
+                  disabled={!item.action}
+                  className="w-full flex items-center justify-between px-5 py-3.5 active:bg-[var(--color-background-secondary)] transition-colors disabled:cursor-default"
+                >
                   <div className="flex items-center gap-3">
                     <span className="text-[18px]">{item.icon}</span>
                     <span className="text-[15px] text-[var(--color-foreground)]">{item.label}</span>

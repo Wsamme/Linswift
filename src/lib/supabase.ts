@@ -62,6 +62,8 @@ export interface UserVocabulary {
   id: number
   user_id: string
   word: string
+  language_code: string | null
+  language_label: string | null
   phonetic: string | null
   meaning: string | null
   example_sentence: string | null
@@ -96,6 +98,7 @@ export interface UserBook {
   title: string
   author: string | null
   cover_emoji: string
+  shared_book_slug: string | null
   file_path: string | null
   /** PDF 提取的全文内容（纯文本） */
   content_text: string | null
@@ -167,12 +170,37 @@ export interface UserTranslation {
 }
 
 /**
+ * 词汇量测试结果
+ */
+export interface VocabTestResult {
+  id: number
+  user_id: string
+  estimated_vocabulary: number
+  test_type: 'reading_comprehension' | 'flashcard' | 'mixed'
+  score: Record<string, unknown> | null
+  created_at: string
+}
+
+/**
+ * AI 速记收藏
+ */
+export interface SavedMnemonic {
+  id: number
+  user_id: string
+  target_words: string[]
+  story: string
+  image_url: string | null
+  created_at: string
+}
+
+/**
  * 用户设置
  */
 export interface UserSettings {
   id: number
   user_id: string
   daily_goal_minutes: number
+  review_cycle_days: 7 | 15
   reminder_time: string
   notification_enabled: boolean
   auto_translate: boolean

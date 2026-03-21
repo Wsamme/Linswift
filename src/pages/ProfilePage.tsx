@@ -19,6 +19,8 @@ import { useAuth } from '../contexts/AuthContext'
 import { useProfile } from '../hooks/useProfile'
 import { useStudyRecords } from '../hooks/useStudyRecords'
 import { useVocabulary } from '../hooks/useVocabulary'
+import { useThemeSettings } from '../hooks/useThemeSettings'
+import { t, useAppLanguage } from '../lib/i18n'
 
 // 设置菜单项 —— 学习设置已集成到 PDF 阅读器中
 const menuItems = [
@@ -29,11 +31,19 @@ const menuItems = [
 
 export default function ProfilePage() {
   const navigate = useNavigate()
+  const lang = useAppLanguage()
   const { user, signOut } = useAuth()
   const { profile, fetchProfile } = useProfile()
   const { getStreakDays } = useStudyRecords()
   const { vocabulary, fetchVocabulary } = useVocabulary()
+  const { settings } = useThemeSettings()
   const [streakDays, setStreakDays] = useState(0)
+
+  const themeDesc = settings.mode === 'system'
+    ? (lang === 'en' ? 'System' : lang === 'ja' ? 'システム' : '跟随系统')
+    : settings.mode === 'dark'
+      ? (lang === 'en' ? 'Dark' : lang === 'ja' ? 'ダーク' : '深色模式')
+      : (lang === 'en' ? 'Light' : lang === 'ja' ? 'ライト' : '浅色模式')
 
   // ===== 页面挂载 + 每次聚焦时刷新数据（确保头像同步） =====
   useEffect(() => {
@@ -68,7 +78,7 @@ export default function ProfilePage() {
   }
 
   // 显示名称 / 邮箱 / 头像首字母
-  const displayName = profile?.username || user?.user_metadata?.username || user?.email?.split('@')[0] || 'Linswift 用户'
+  const displayName = profile?.username || user?.user_metadata?.username || user?.email?.split('@')[0] || t(lang, 'profile_user_fallback')
   const displayEmail = user?.email || ''
   const avatarLetter = displayName.charAt(0).toUpperCase()
 
@@ -76,7 +86,7 @@ export default function ProfilePage() {
     <div className="flex flex-col h-full">
       {/* ===== Header ===== */}
       <div className="px-5 py-4">
-        <h1 className="text-[20px] font-bold text-[var(--color-foreground)] font-secondary">个人</h1>
+        <h1 className="text-[20px] font-bold text-[var(--color-foreground)] font-secondary">{t(lang, 'profile_title')}</h1>
       </div>
 
       {/* ===== 用户信息卡片（点击可编辑） ===== */}
@@ -89,7 +99,7 @@ export default function ProfilePage() {
         {profile?.avatar_url ? (
           <img
             src={profile.avatar_url}
-            alt="头像"
+            alt={t(lang, 'profile_avatar_alt')}
             className="w-[64px] h-[64px] rounded-full object-cover shrink-0"
           />
         ) : (
@@ -104,7 +114,7 @@ export default function ProfilePage() {
           {/* 等级徽章 */}
           <div className="mt-2">
             <span className="text-[12px] px-3 py-1 rounded-full bg-[var(--color-primary-light)] text-[var(--color-primary)] font-semibold">
-              🏅 {profile?.level && profile.level >= 3 ? '高级学员' : profile?.level === 2 ? '中级学员' : '初级学员'}
+              🏅 {profile?.level && profile.level >= 3 ? t(lang, 'profile_advanced') : profile?.level === 2 ? t(lang, 'profile_intermediate') : t(lang, 'profile_beginner')}
             </span>
           </div>
         </div>
@@ -113,14 +123,14 @@ export default function ProfilePage() {
 
       {/* ===== 学习统计 ===== */}
       <div className="grid grid-cols-3 gap-2.5 mx-5 mb-5">
-        <StatCard value={String(streakDays)} label="学习天数" color="#FF8400" bgColor="#FFF5EB" />
-        <StatCard value={vocabulary.length.toLocaleString()} label="已学单词" color="#8B5CF6" bgColor="#F5F3FF" />
-        <StatCard value={`${profile?.total_study_hours || 0}h`} label="学习时长" color="#3B82F6" bgColor="#EFF6FF" />
+        <StatCard value={String(streakDays)} label={t(lang, 'profile_days')} color="#FF8400" bgColor="#FFF5EB" />
+        <StatCard value={vocabulary.length.toLocaleString()} label={t(lang, 'profile_words')} color="#8B5CF6" bgColor="#F5F3FF" />
+        <StatCard value={`${profile?.total_study_hours || 0}h`} label={t(lang, 'profile_hours')} color="#3B82F6" bgColor="#EFF6FF" />
       </div>
 
       {/* ===== 设置区标题 ===== */}
       <div className="px-5 mb-2">
-        <h3 className="text-[18px] font-bold text-[var(--color-foreground)] font-secondary">设置</h3>
+        <h3 className="text-[18px] font-bold text-[var(--color-foreground)] font-secondary">{t(lang, 'profile_settings')}</h3>
       </div>
 
       {/* ===== 设置菜单 ===== */}
@@ -134,7 +144,16 @@ export default function ProfilePage() {
             >
               <span className="text-[18px] shrink-0">{item.icon}</span>
               <div className="flex-1 min-w-0">
-                <p className="text-[15px] font-medium text-[var(--color-foreground)]">{item.label}</p>
+                <p className="text-[15px] font-medium text-[var(--color-foreground)]">
+                  {item.path === '/notification-settings' ? t(lang, 'profile_menu_notif')
+                    : item.path === '/theme-settings' ? t(lang, 'profile_menu_theme')
+                      : t(lang, 'profile_menu_about')}
+                </p>
+                <p className="text-[12px] text-[var(--color-muted)]">
+                  {item.path === '/notification-settings' ? t(lang, 'profile_menu_notif_desc')
+                    : item.path === '/theme-settings' ? themeDesc
+                      : 'Linswift v2.1.0'}
+                </p>
               </div>
               <ChevronRight size={16} className="text-[var(--color-muted)] shrink-0" />
             </div>
@@ -150,7 +169,7 @@ export default function ProfilePage() {
           style={{ boxShadow: 'var(--shadow-card)' }}
         >
           <LogOut size={16} />
-          退出登录
+          {t(lang, 'profile_logout')}
         </button>
       </div>
     </div>

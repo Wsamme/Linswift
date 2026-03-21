@@ -7,9 +7,10 @@
 
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Mail, Lock, Eye, EyeOff, Loader2, Sparkles, ArrowLeft } from 'lucide-react'
+import { Mail, Lock, Eye, EyeOff, Loader2, ArrowLeft } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import Particles from '../components/reactbits/Particles'
+import BrandLogo from '../components/common/BrandLogo'
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -72,12 +73,11 @@ export default function LoginPage() {
             返回官网
           </button>
 
-        <div className="flex items-center gap-3 mb-8">
-          <div className="w-12 h-12 rounded-2xl bg-[#FF8400]/15 flex items-center justify-center">
-            <Sparkles size={24} className="text-[#FF8400]" />
-          </div>
-          <span className="text-[28px] font-extrabold tracking-tight text-[#1A1A1A]">Linswift</span>
-        </div>
+        <BrandLogo
+          className="mb-8"
+          imageClassName="h-12 w-12"
+          textClassName="text-[28px] font-extrabold tracking-tight text-[#1A1A1A]"
+        />
 
         <h2 className="text-[36px] xl:text-[42px] font-extrabold leading-[1.15] mb-4 text-[#1A1A1A]">
           AI 驱动的<br />智能英语学习
@@ -198,9 +198,11 @@ export default function LoginPage() {
             />
           </div>
           <div className="relative z-10 flex flex-col items-center">
-            <div className="w-[72px] h-[72px] rounded-full bg-[#FF8400]/15 flex items-center justify-center mb-4">
-              <span className="text-[#FF8400] text-[32px] font-extrabold">L</span>
-            </div>
+            <BrandLogo
+              className="mb-4"
+              imageClassName="h-[72px] w-[72px]"
+              showText={false}
+            />
             <h1 className="text-[#1A1A1A] text-[28px] font-bold tracking-tight">Linswift</h1>
             <p className="text-[#888] text-[14px] mt-2">AI 驱动的智能英语学习</p>
           </div>

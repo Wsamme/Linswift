@@ -9,6 +9,7 @@ export const SAMPLE_BOOKS: UserBook[] = [
     title: 'Alice in Wonderland (Sample)',
     author: 'Lewis Carroll',
     cover_emoji: '🐇',
+    shared_book_slug: null,
     file_path: null,
     content_text: `Alice was beginning to get very tired of sitting by her sister on the bank.
 
@@ -30,6 +31,7 @@ Alice ran after it with great curiosity and reached the rabbit-hole.`,
     title: 'The Little Prince (Sample)',
     author: 'Antoine de Saint-Exupéry',
     cover_emoji: '🪐',
+    shared_book_slug: null,
     file_path: null,
     content_text: `When I was six years old, I saw a picture of a boa constrictor in a book.
 
@@ -51,6 +53,7 @@ My drawing was not a hat. It was a boa constrictor digesting an elephant.`,
     title: 'Pride and Prejudice (Sample)',
     author: 'Jane Austen',
     cover_emoji: '💌',
+    shared_book_slug: null,
     file_path: null,
     content_text: `It is a truth universally acknowledged, that a single man in possession of a good fortune, must be in want of a wife.
 

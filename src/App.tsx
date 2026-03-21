@@ -38,6 +38,12 @@ import SceneSelectPage from './pages/SceneSelectPage'
 
 // ===== Phase 4: 语法 + 词汇测试 =====
 import GrammarTreePage from './pages/GrammarTreePage'
+import GrammarLessonPage from './pages/GrammarLessonPage'
+import LongSentenceHubPage from './pages/LongSentenceHubPage'
+import LongSentenceReadingPage from './pages/LongSentenceReadingPage'
+import LongSentenceWritingPage from './pages/LongSentenceWritingPage'
+import LongSentenceAnalyzePage from './pages/LongSentenceAnalyzePage'
+import LongSentenceCollectionPage from './pages/LongSentenceCollectionPage'
 import ReadingTestPage from './pages/ReadingTestPage'
 import VocabTestPage from './pages/VocabTestPage'
 import AIClassifyPage from './pages/AIClassifyPage'
@@ -49,10 +55,14 @@ import PronunciationSettingsPage from './pages/PronunciationSettingsPage'
 import NotificationSettingsPage from './pages/NotificationSettingsPage'
 import ThemeSettingsPage from './pages/ThemeSettingsPage'
 import AboutPage from './pages/AboutPage'
+import UserAgreementPage from './pages/UserAgreementPage'
+import PrivacyPolicyPage from './pages/PrivacyPolicyPage'
 
 // ===== Phase 6 (V2): 词汇游戏 =====
 import WordMatchGame from './pages/WordMatchGame'
 import SpellingGame from './pages/SpellingGame'
+import ListenIdentifyGame from './pages/ListenIdentifyGame'
+import LightningGame from './pages/LightningGame'
 
 // ===== Phase 7 (V3): PDF 阅读器 =====
 import PDFReaderPage from './pages/PDFReaderPage'
@@ -79,6 +89,8 @@ export default function App() {
       <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/legal/user-agreement" element={<UserAgreementPage />} />
+      <Route path="/legal/privacy-policy" element={<PrivacyPolicyPage />} />
 
       {/* ===== 受保护路由 —— 主应用（带导航）===== */}
       <Route
@@ -124,6 +136,12 @@ export default function App() {
 
         {/* 语法 + 测试 */}
         <Route path="/grammar" element={<GrammarTreePage />} />
+        <Route path="/grammar/lesson" element={<GrammarLessonPage />} />
+        <Route path="/grammar/long-sentence" element={<LongSentenceHubPage />} />
+        <Route path="/grammar/long-sentence/reading" element={<LongSentenceReadingPage />} />
+        <Route path="/grammar/long-sentence/writing" element={<LongSentenceWritingPage />} />
+        <Route path="/grammar/long-sentence/analyze" element={<LongSentenceAnalyzePage />} />
+        <Route path="/grammar/long-sentence/collection" element={<LongSentenceCollectionPage />} />
         <Route path="/reading-test" element={<ReadingTestPage />} />
         <Route path="/vocab-test" element={<VocabTestPage />} />
         <Route path="/ai-classify" element={<AIClassifyPage />} />
@@ -141,6 +159,8 @@ export default function App() {
         {/* V2: 词汇游戏 */}
         <Route path="/word-match" element={<WordMatchGame />} />
         <Route path="/spelling-game" element={<SpellingGame />} />
+        <Route path="/listen-identify-game" element={<ListenIdentifyGame />} />
+        <Route path="/lightning-game" element={<LightningGame />} />
       </Route>
     </Routes>
   )

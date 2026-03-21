@@ -1,0 +1,274 @@
+:root {
+  color-scheme: light;
+  --bg: #fff9f2;
+  --panel: rgba(255, 255, 255, 0.86);
+  --panel-strong: rgba(255, 255, 255, 0.96);
+  --border: rgba(255, 132, 0, 0.14);
+  --text: #1f1a16;
+  --muted: #7d7268;
+  --primary: #ff8400;
+  --primary-soft: rgba(255, 132, 0, 0.12);
+  --danger: #d64545;
+  --shadow: 0 18px 45px rgba(104, 73, 37, 0.14);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  width: 380px;
+  min-height: 560px;
+  font-family: Inter, "Noto Sans SC", "PingFang SC", sans-serif;
+  background:
+    radial-gradient(circle at top right, rgba(255, 132, 0, 0.18), transparent 26%),
+    linear-gradient(180deg, #fff9f2 0%, #fffdf9 100%);
+  color: var(--text);
+}
+
+.app {
+  padding: 16px;
+}
+
+.hero,
+.card,
+.result-card,
+.saved-card {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  backdrop-filter: blur(18px);
+  box-shadow: var(--shadow);
+}
+
+.hero {
+  border-radius: 24px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.hero__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.hero h1 {
+  margin: 10px 0 6px;
+  font-size: 26px;
+  line-height: 1.1;
+}
+
+.muted {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.card {
+  border-radius: 22px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+.controls__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.controls__row--tight {
+  margin-bottom: 0;
+}
+
+label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+select,
+input {
+  width: 100%;
+  border: 1px solid rgba(255, 132, 0, 0.18);
+  background: var(--panel-strong);
+  color: var(--text);
+  border-radius: 14px;
+  padding: 10px 12px;
+  font-size: 13px;
+  outline: none;
+}
+
+button {
+  border: 0;
+  border-radius: 14px;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.primary {
+  flex: 1;
+  background: linear-gradient(135deg, #ff8400, #ff9d2f);
+  color: white;
+}
+
+.ghost {
+  background: var(--panel-strong);
+  color: var(--text);
+  border: 1px solid rgba(255, 132, 0, 0.12);
+}
+
+.ghost--block {
+  margin-top: 10px;
+  width: 100%;
+}
+
+.settings {
+  margin-top: 12px;
+  border-top: 1px solid rgba(255, 132, 0, 0.12);
+  padding-top: 10px;
+}
+
+.settings summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.settings__label {
+  display: block;
+  margin-top: 10px;
+  margin-bottom: 6px;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.stat {
+  padding: 10px;
+  border-radius: 16px;
+  background: var(--panel-strong);
+  border: 1px solid rgba(255, 132, 0, 0.1);
+}
+
+.stat__label {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.stat strong {
+  font-size: 22px;
+}
+
+.status {
+  margin: 10px 2px 12px;
+  font-size: 12px;
+  color: var(--muted);
+  min-height: 20px;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.list--hidden {
+  display: none;
+}
+
+.result-card,
+.saved-card {
+  border-radius: 20px;
+  padding: 12px;
+}
+
+.result-card__top,
+.saved-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.result-card__word {
+  font-size: 20px;
+  font-weight: 800;
+  margin: 0 0 4px;
+}
+
+.result-card__meta,
+.saved-card__meta {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.result-card__snippet,
+.result-card__meaning,
+.saved-card__meaning {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.result-card__note {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.result-card__actions,
+.saved-card__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.result-card__actions button,
+.saved-card__actions button {
+  flex: 1;
+  padding: 9px 10px;
+  font-size: 12px;
+}
+
+.action--danger {
+  color: var(--danger);
+}
+
+.empty-state {
+  border-radius: 18px;
+  padding: 16px;
+  border: 1px dashed rgba(255, 132, 0, 0.18);
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.62);
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.6;
+}

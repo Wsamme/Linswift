@@ -23,6 +23,7 @@ import {
 import SpotlightCard from '../components/reactbits/SpotlightCard'
 import AuroraCSS from '../components/reactbits/AuroraCSS'
 import { useAuth } from '../contexts/AuthContext'
+import BrandLogo from '../components/common/BrandLogo'
 
 export default function LandingPage() {
   const navigate = useNavigate()
@@ -109,12 +110,10 @@ function Navbar({ onLogin, onRegister }: { onLogin: () => void; onRegister: () =
       style={scrolled ? { WebkitBackdropFilter: 'blur(24px) saturate(1.6)' } : undefined}>
       <div className="max-w-[1200px] mx-auto px-6 h-[72px] flex items-center justify-between">
         {/* Logo */}
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#FF8400] to-[#FF9E33] flex items-center justify-center">
-            <Sparkles size={18} className="text-white" />
-          </div>
-          <span className="text-[22px] font-bold tracking-tight">Linswift</span>
-        </div>
+        <BrandLogo
+          imageClassName="h-9 w-9"
+          textClassName="text-[22px] font-bold tracking-tight"
+        />
 
         {/* 桌面导航 */}
         <nav className="hidden md:flex items-center gap-8">
@@ -285,10 +284,10 @@ function CoreFeatures() {
       id: 'feature-reading',
       tag: '智能阅读',
       title: '沉浸式阅读 + PDF 阅读器',
-      desc: '导入任何 PDF 或选择推荐书籍，生词标注、一键查词、OCR 识别扫描件。读到哪，学到哪。',
+      desc: '导入任何 PDF 或选择推荐书籍，生词标注、一键查词、自动保存阅读进度。读到哪，学到哪。',
       icon: BookOpen,
       color: '#8B5CF6',
-      highlights: ['PDF 原文渲染', 'OCR 扫描识别', '选词即查', '自动保存进度'],
+      highlights: ['PDF 原文渲染', '选词即查', '阅读进度同步', '自动保存进度'],
     },
     {
       id: 'feature-memory',
@@ -371,7 +370,7 @@ function FeatureGrid() {
     { icon: BookOpenText, label: '语法知识树', desc: '系统化语法树，逐级解锁', color: '#22C55E' },
     { icon: Brain, label: '艾宾浩斯复习', desc: '科学间隔重复，对抗遗忘曲线', color: '#FF8400' },
     { icon: BarChart3, label: '学习数据', desc: '热度图 + 连续天数 + 成就追踪', color: '#EF4444' },
-    { icon: FileText, label: 'PDF 阅读器', desc: '导入 PDF，OCR 扫描件识别', color: '#F59E0B' },
+    { icon: FileText, label: 'PDF 阅读器', desc: '导入 PDF，保留原版排版阅读', color: '#F59E0B' },
     { icon: Globe, label: '多语言翻译', desc: '支持中英日韩等多语种切换', color: '#06B6D4' },
     { icon: Shield, label: '数据安全', desc: 'Supabase 加密存储，隐私优先', color: '#8B5CF6' },
   ]
@@ -437,7 +436,7 @@ function PricingSection({ onGetStarted }: { onGetStarted: () => void }) {
       features: [
         'AI 翻译无限次',
         '完整词库 + AI 分类',
-        '无限 PDF 导入 + OCR',
+        '无限 PDF 导入',
         '全部听力 & 口语模块',
         '艾宾浩斯智能复习',
         'AI 场景对话',
@@ -655,8 +654,8 @@ function Footer() {
   ]
 
   const legalLinks = [
-    { label: '服务条款', href: '#terms' },
-    { label: '隐私政策', href: '#privacy' },
+    { label: '服务条款', href: '/legal/user-agreement' },
+    { label: '隐私政策', href: '/legal/privacy-policy' },
     { label: '联系我们', href: 'mailto:hello@linswift.com' },
   ]
 
@@ -671,12 +670,11 @@ function Footer() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-10">
           {/* 品牌 */}
           <div className="col-span-2 md:col-span-1">
-            <div className="flex items-center gap-2 mb-4">
-              <div className="w-8 h-8 rounded-lg bg-[#FF8400] flex items-center justify-center">
-                <Sparkles size={16} className="text-white" />
-              </div>
-              <span className="text-[18px] font-bold">Linswift</span>
-            </div>
+            <BrandLogo
+              className="mb-4"
+              imageClassName="h-8 w-8"
+              textClassName="text-[18px] font-bold text-white"
+            />
             <p className="text-[13px] text-white/50 leading-relaxed">
               AI 驱动的智能英语学习平台<br />
               让每个人都能高效学英语

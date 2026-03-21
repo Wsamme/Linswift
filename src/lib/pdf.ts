@@ -26,6 +26,8 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 // 使用 Vite 打包后的本地 worker URL，避免依赖外网 CDN 导致加载失败
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
+const activeCanvasRenderTasks = new WeakMap<HTMLCanvasElement, { cancel: () => void; promise: Promise<unknown> }>()
+
 // ========== 类型定义 ==========
 
 /** PDF 元数据 */
@@ -347,28 +349,54 @@ export async function renderPageToCanvas(
   pdf: PDFDocumentProxy,
   pageNum: number,
   canvas: HTMLCanvasElement,
-  scale: number = 1.5
+  scale: number = 1.5,
+  options?: { pixelRatio?: number },
 ): Promise<{ width: number; height: number; originalWidth: number; originalHeight: number }> {
   const page = await pdf.getPage(pageNum)
   const viewport = page.getViewport({ scale })
 
+  const previousTask = activeCanvasRenderTasks.get(canvas)
+  if (previousTask) {
+    previousTask.cancel()
+    try {
+      await previousTask.promise
+    } catch {
+      // pdf.js cancels the in-flight render by rejecting the promise.
+    }
+  }
+
   // 设置 Canvas 尺寸（考虑设备像素比以获得清晰渲染）
-  const dpr = window.devicePixelRatio || 1
+  const dpr = Math.max(1, options?.pixelRatio ?? (window.devicePixelRatio || 1))
   canvas.width = viewport.width * dpr
   canvas.height = viewport.height * dpr
   canvas.style.width = `${viewport.width}px`
   canvas.style.height = `${viewport.height}px`
 
   const ctx = canvas.getContext('2d')!
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
   ctx.scale(dpr, dpr)
 
   // 渲染页面到 Canvas
   // pdfjs-dist v5+ 需要同时传 canvas 和 canvasContext
-  await page.render({
+  const renderTask = page.render({
     canvasContext: ctx,
     viewport,
     canvas,
-  } as any).promise
+  } as any)
+  activeCanvasRenderTasks.set(canvas, {
+    cancel: () => renderTask.cancel(),
+    promise: renderTask.promise,
+  })
+
+  try {
+    await renderTask.promise
+  } finally {
+    const activeTask = activeCanvasRenderTasks.get(canvas)
+    if (activeTask?.promise === renderTask.promise) {
+      activeCanvasRenderTasks.delete(canvas)
+    }
+  }
 
   // 返回尺寸信息
   const originalViewport = page.getViewport({ scale: 1 })
@@ -431,43 +459,12 @@ export async function ocrPageWithLayout(
   canvas: HTMLCanvasElement,
   lang: string = 'eng'
 ): Promise<OCRLayoutResult> {
-  const { createWorker } = await import('tesseract.js')
-  const worker = await createWorker(lang)
-
+  const { createOCRSession, recognizeCanvasWithLayout } = await import('./ocr')
+  const session = await createOCRSession(lang)
   try {
-    const imageData = canvas.toDataURL('image/png')
-    const { data } = await worker.recognize(imageData)
-
-    // Tesseract.js v7 的结构: data.blocks → paragraphs → lines → words
-    // 使用 any 绕过 TS 类型限制，运行时 Tesseract 会返回完整的嵌套结构
-    const rawData = data as any
-    const rawLines: any[] = rawData.lines || []
-
-    // 如果 data.lines 不直接可用，从 blocks → paragraphs → lines 路径提取
-    const flatLines: any[] = rawLines.length > 0
-      ? rawLines
-      : (rawData.blocks || []).flatMap((block: any) =>
-          (block.paragraphs || []).flatMap((para: any) => para.lines || [])
-        )
-
-    const lines: OCRLineItem[] = flatLines.map((line: any) => ({
-      text: (line.text || '').trim(),
-      bbox: line.bbox || { x0: 0, y0: 0, x1: 0, y1: 0 },
-      words: (line.words || []).map((word: any) => ({
-        text: word.text || '',
-        bbox: word.bbox || { x0: 0, y0: 0, x1: 0, y1: 0 },
-        confidence: word.confidence || 0,
-      })),
-    })).filter((line: OCRLineItem) => line.text.length > 0)
-
-    return {
-      text: data.text || '',
-      lines,
-      imageWidth: canvas.width,
-      imageHeight: canvas.height,
-    }
+    return await recognizeCanvasWithLayout(canvas, session)
   } finally {
-    await worker.terminate()
+    await session.terminate()
   }
 }
 
@@ -576,35 +573,18 @@ export async function ocrExtractFromPDF(
   onProgress?: (percent: number, page: number, total: number) => void
 ): Promise<string> {
   const pdf = await loadPDFDocument(file)
-  const totalPages = pdf.numPages
-  const pageTexts: string[] = []
-
-  // 动态导入 tesseract.js
-  const { createWorker } = await import('tesseract.js')
-  const worker = await createWorker(lang)
-
+  const { createOCRSession, recognizePdfDocument } = await import('./ocr')
+  const session = await createOCRSession(lang)
   try {
-    for (let i = 1; i <= totalPages; i++) {
-      // 通知进度
-      onProgress?.(Math.round((i - 1) / totalPages * 100), i, totalPages)
-
-      // 创建临时 Canvas
-      const tempCanvas = document.createElement('canvas')
-      await renderPageToCanvas(pdf, i, tempCanvas, 2.0) // 用 2x 缩放提高 OCR 准确度
-
-      // 对这一页执行 OCR
-      const imageData = tempCanvas.toDataURL('image/png')
-      const { data } = await worker.recognize(imageData)
-      pageTexts.push(data.text || '')
-
-      // 通知本页完成
-      onProgress?.(Math.round(i / totalPages * 100), i, totalPages)
-    }
+    const result = await recognizePdfDocument(pdf, session, (update) => {
+      if (update.page && update.totalPages) {
+        onProgress?.(update.progress ?? 0, update.page, update.totalPages)
+      }
+    })
+    return result.text
   } finally {
-    await worker.terminate()
+    await session.terminate()
   }
-
-  return pageTexts.join('\n\n')
 }
 
 /**

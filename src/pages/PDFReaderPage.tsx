@@ -2,26 +2,31 @@ import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ChevronLeft, ZoomIn, ZoomOut, ChevronRight, Volume2,
-  Settings, Loader2, BookOpen, ScanSearch, ArrowLeft, ArrowRight,
-  Maximize2, X, Check, Languages,
+  Settings, Loader2, BookOpen, ArrowLeft, ArrowRight,
+  Maximize2, X, Check, Languages, AlertTriangle, RefreshCcw,
 } from 'lucide-react'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import {
   loadPDFDocument,
   renderPageToCanvas,
   isScannedPDF,
-  ocrPageWithLayout,
   renderNativeTextLayer,
   extractTextFromPDF,
   getPDFMetadata,
   sanitizeText,
   type OCRLayoutResult,
 } from '../lib/pdf'
-import { translateBatch } from '../services/gemini'
+import {
+  buildOverlayRegions,
+  fitTranslatedRegionText,
+  type OverlayRegion,
+} from '../lib/ocr'
+import { translateBatch, type BatchTranslationResult } from '../services/gemini'
 import { speakEnglish, speakAuto } from '../lib/tts'
 import { supabase, uploadFile, type UserBook } from '../lib/supabase'
 import { useVocabulary } from '../hooks/useVocabulary'
 import { useAuth } from '../contexts/AuthContext'
+import { useLogicalBack } from '../hooks/useLogicalBack'
 
 // ===== 阅读器设置类型 =====
 const READER_SETTINGS_KEY = 'linswift_reader_settings'
@@ -29,7 +34,7 @@ const READER_SETTINGS_KEY = 'linswift_reader_settings'
 interface ReaderSettings {
   // 语言设置
   ttsLang: string          // TTS 朗读语言
-  ocrLang: string          // OCR 识别语言
+  ocrLang: string          // 内部兼容字段，前台不再暴露
   translateTo: string      // 翻译目标语言
   // 学习设置
   dailyGoal: number        // 每日新学单词数
@@ -43,9 +48,18 @@ interface ReaderSettings {
   fontSize: number         // 文本模式字体大小
 }
 
+interface PageTranslationSummary {
+  source: 'ocr' | 'text-layer'
+  regionCount: number
+  requestedCount: number
+  apiTranslatedCount: number
+  fallbackCount: number
+  changedCount: number
+}
+
 const DEFAULT_READER_SETTINGS: ReaderSettings = {
   ttsLang: 'en-US',
-  ocrLang: 'eng',
+  ocrLang: 'eng+chi_sim',
   translateTo: 'zh-CN',
   dailyGoal: 20,
   learningMode: 'read',
@@ -62,27 +76,9 @@ type OverlayMode = 'off' | 'select' | 'debug' | 'cover' | 'translate'
 
 // TTS 语言选项
 const TTS_LANG_OPTIONS = [
-  { value: 'en-US', label: '🇺🇸 美式英语' },
-  { value: 'en-GB', label: '🇬🇧 英式英语' },
-  { value: 'en-AU', label: '🇦🇺 澳洲英语' },
+  { value: 'en-US', label: '🇺🇸 英语' },
   { value: 'zh-CN', label: '🇨🇳 简体中文' },
   { value: 'ja-JP', label: '🇯🇵 日语' },
-  { value: 'ko-KR', label: '🇰🇷 韩语' },
-  { value: 'fr-FR', label: '🇫🇷 法语' },
-  { value: 'de-DE', label: '🇩🇪 德语' },
-  { value: 'es-ES', label: '🇪🇸 西班牙语' },
-]
-
-// OCR 语言选项
-const OCR_LANG_OPTIONS = [
-  { value: 'eng', label: '🇬🇧 English' },
-  { value: 'chi_sim', label: '🇨🇳 简体中文' },
-  { value: 'chi_tra', label: '🇹🇼 繁体中文' },
-  { value: 'jpn', label: '🇯🇵 日本語' },
-  { value: 'kor', label: '🇰🇷 한국어' },
-  { value: 'fra', label: '🇫🇷 Français' },
-  { value: 'deu', label: '🇩🇪 Deutsch' },
-  { value: 'spa', label: '🇪🇸 Español' },
 ]
 
 // 翻译目标语言选项
@@ -90,10 +86,6 @@ const TRANSLATE_LANG_OPTIONS = [
   { value: 'zh-CN', label: '🇨🇳 中文' },
   { value: 'en', label: '🇺🇸 English' },
   { value: 'ja', label: '🇯🇵 日本語' },
-  { value: 'ko', label: '🇰🇷 한국어' },
-  { value: 'fr', label: '🇫🇷 Français' },
-  { value: 'de', label: '🇩🇪 Deutsch' },
-  { value: 'es', label: '🇪🇸 Español' },
 ]
 
 // 每日目标选项
@@ -131,11 +123,10 @@ function saveReaderSettings(s: ReaderSettings) {
  *
  * 功能：
  *  1. 用 Canvas 渲染 PDF 原始页面（保留排版、图片等）
- *  2. 自动检测扫描版 PDF → 提供 OCR 文字识别
+ *  2. 自动检测扫描版 PDF
  *  3. 翻页（上一页/下一页）+ 页码跳转
  *  4. 缩放（放大/缩小/适应屏幕）
  *  5. 文本选择 → 查词释义 + TTS 朗读
- *  6. OCR 模式：逐页识别并显示提取文本
  *  7. 阅读进度自动保存到数据库
  *  8. 支持两种来源：
  *     - bookId 参数 → 从数据库加载（file_path 或 content_text）
@@ -143,15 +134,15 @@ function saveReaderSettings(s: ReaderSettings) {
  *
  * 技术方案：
  *  - pdfjs-dist 渲染 PDF Canvas
- *  - tesseract.js 做 OCR（按需动态加载）
  *  - Canvas + 文本层叠加做选词
  */
 
 // ===== 阅读模式 =====
-type ReadMode = 'pdf' | 'text' | 'ocr'
+type ReadMode = 'pdf' | 'text'
 
 export default function PDFReaderPage() {
   const navigate = useNavigate()
+  const goBack = useLogicalBack('/bookshelf')
   const [searchParams] = useSearchParams()
   const bookId = searchParams.get('bookId')
   const { user } = useAuth()
@@ -172,18 +163,19 @@ export default function PDFReaderPage() {
   const [loading, setLoading] = useState(true)
   const [rendering, setRendering] = useState(false)
   const [readMode, setReadMode] = useState<ReadMode>('pdf')
-  const [isScanned, setIsScanned] = useState(false)
 
-  // ===== OCR 状态 =====
-  const [ocrText, setOcrText] = useState('')
-  const [ocrLoading, setOcrLoading] = useState(false)
-  const [ocrProgress, setOcrProgress] = useState(0)
-  const [ocrPageText, setOcrPageText] = useState('')
+  // ===== OCR 叠加层状态 =====
+  const [ocrOverlayDebug, setOcrOverlayDebug] = useState(false)
 
   // ===== 文本叠加层状态 =====
   const textLayerRef = useRef<HTMLDivElement>(null)
+  const [pageViewport, setPageViewport] = useState({ w: 0, h: 0 })
   const [textLayerViewport, setTextLayerViewport] = useState({ w: 0, h: 0 })
   const [ocrLayoutData, setOcrLayoutData] = useState<OCRLayoutResult | null>(null)
+  const [ocrTranslatedLines, setOcrTranslatedLines] = useState<string[]>([])
+  const [translationStatusText, setTranslationStatusText] = useState('')
+  const [translationError, setTranslationError] = useState<string | null>(null)
+  const [translationSummary, setTranslationSummary] = useState<PageTranslationSummary | null>(null)
 
   // 叠加层显示模式
   const [overlayMode, setOverlayMode] = useState<OverlayMode>('select')
@@ -204,7 +196,6 @@ export default function PDFReaderPage() {
       return next
     })
   }
-
   // ===== UI 状态 =====
   const [showSettings, setShowSettings] = useState(false)
   const [settingsTab, setSettingsTab] = useState<'display' | 'language' | 'learning'>('display')
@@ -227,9 +218,6 @@ export default function PDFReaderPage() {
   const overlayWrapperRef = useRef<HTMLDivElement>(null)
   // 叠加层缩放比例：实际显示宽度 / 原始坐标系宽度
   // textLayerScale 不再需要——TextLayer 尺寸通过 CSS 与 canvas 完全同步
-  // 用于追踪canvas ref是否已经触发过首次渲染
-  const hasTriggeredFirstRender = useRef(false)
-
   // 解析 user_books.file_path，兼容历史 URL 与新路径格式
   const extractStoragePath = (rawPath: string): string | null => {
     if (!rawPath) return null
@@ -248,6 +236,37 @@ export default function PDFReaderPage() {
     return null
   }
 
+  const resetOCRState = useCallback(() => {
+    setOcrLayoutData(null)
+    setOcrTranslatedLines([])
+    setTranslationStatusText('')
+    setTranslationError(null)
+    setTranslationSummary(null)
+    setPageTranslated(false)
+  }, [])
+
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas || readMode !== 'pdf') return
+
+    const syncViewportFromCanvas = () => {
+      const width = parseFloat(canvas.style.width) || canvas.clientWidth || 0
+      const height = parseFloat(canvas.style.height) || canvas.clientHeight || 0
+      if (width > 0 && height > 0) {
+        setPageViewport((prev) => (
+          Math.abs(prev.w - width) < 0.5 && Math.abs(prev.h - height) < 0.5
+            ? prev
+            : { w: width, h: height }
+        ))
+      }
+    }
+
+    syncViewportFromCanvas()
+    const ro = new ResizeObserver(syncViewportFromCanvas)
+    ro.observe(canvas)
+    return () => ro.disconnect()
+  }, [readMode, currentPage, scale, rendering])
+
   // ================================================================
   // 加载 PDF（从数据库或本地文件）
   // ================================================================
@@ -257,6 +276,8 @@ export default function PDFReaderPage() {
         setLoading(false)
         return
       }
+
+      resetOCRState()
 
       const parsedBookId = parseInt(bookId, 10)
       if (Number.isNaN(parsedBookId)) {
@@ -335,49 +356,34 @@ export default function PDFReaderPage() {
     }
 
     loadFromDB()
-  }, [bookId])
+  }, [bookId, resetOCRState])
 
   // ================================================================
   // 本地文件导入（没有 bookId 时可以直接选文件阅读）
   // ================================================================
   const handleLocalFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    console.log('[DEBUG] handleLocalFile called')
     const file = e.target.files?.[0]
-    console.log('[DEBUG] file:', file?.name, file?.size)
     if (!file) {
-      console.log('[DEBUG] No file selected')
       return
     }
 
     setLoading(true)
     setSavedToShelf(false)
+    resetOCRState()
     try {
-      console.log('[DEBUG] Loading PDF document...')
       const pdf = await loadPDFDocument(file)
-      console.log('[DEBUG] PDF loaded, numPages:', pdf.numPages)
       setPdfDoc(pdf)
       setTotalPages(pdf.numPages)
       setCurrentPage(1)
       setHasAutoFitted(false)
       setReadMode('pdf')
       setLocalFile(file) // 保存文件引用，用于后续"保存到书架"
-      hasTriggeredFirstRender.current = false // 重置标志，允许新PDF触发渲染
-      console.log('[DEBUG] PDF state updated')
-
-      // 检测是否是扫描版
-      try {
-        const scanned = await isScannedPDF(file)
-        setIsScanned(scanned)
-        if (scanned) setShowSettings(true)
-      } catch {
-        // 扫描检测失败不影响阅读
-      }
+      void isScannedPDF(file).catch(() => {})
     } catch (err: any) {
-      console.error('[DEBUG] PDF load error:', err)
+      console.error('PDF load error:', err)
       alert(`打开 PDF 失败: ${err.message || '格式不支持'}`)
     }
     setLoading(false)
-    console.log('[DEBUG] handleLocalFile completed')
   }
 
   // ================================================================
@@ -443,14 +449,17 @@ export default function PDFReaderPage() {
   // 渲染当前页到 Canvas + 用 pdf.js TextLayer 渲染文本层
   // ================================================================
   const renderCurrentPage = useCallback(async () => {
-    if (!pdfDoc || !canvasRef.current || readMode !== 'pdf') return
+    if (loading || !pdfDoc || !canvasRef.current || readMode !== 'pdf') return
 
     const taskId = ++renderTaskRef.current
     setRendering(true)
-    setPageTranslated(false)
 
     try {
-      await renderPageToCanvas(pdfDoc, currentPage, canvasRef.current, scale)
+      const renderedPage = await renderPageToCanvas(pdfDoc, currentPage, canvasRef.current, scale)
+      if (taskId === renderTaskRef.current) {
+        setPageViewport({ w: renderedPage.width, h: renderedPage.height })
+        setTextLayerViewport({ w: renderedPage.width, h: renderedPage.height })
+      }
 
       // 用 pdf.js 原生 TextLayer 渲染——定位精度由 pdf.js 内部保证
       if (textLayerRef.current) {
@@ -460,40 +469,26 @@ export default function PDFReaderPage() {
           )
           if (taskId === renderTaskRef.current) {
             setTextLayerViewport({ w: viewportWidth, h: viewportHeight })
-            setPageTranslated(false)
           }
         } catch (e) {
           console.warn('TextLayer 渲染失败:', e)
         }
       }
     } catch (err) {
-      console.error('渲染页面失败:', err)
+      if (!(err instanceof Error && /cancel/i.test(err.message))) {
+        console.error('渲染页面失败:', err)
+      }
     }
 
     if (taskId === renderTaskRef.current) {
       setRendering(false)
     }
-  }, [pdfDoc, currentPage, scale, readMode])
+  }, [loading, pdfDoc, currentPage, scale, readMode])
 
   // 每次页码或缩放变化时重新渲染
   useEffect(() => {
     renderCurrentPage()
   }, [renderCurrentPage])
-
-  // 当canvas元素首次可用且有PDF文档时，触发渲染
-  // 这解决了PDF加载时canvas还未渲染到DOM的时序问题
-  // 使用useLayoutEffect确保在DOM更新后立即执行，此时ref已经被设置
-  useLayoutEffect(() => {
-    console.log('[DEBUG] useLayoutEffect triggered', {
-      hasPdfDoc: !!pdfDoc,
-      hasCanvas: !!canvasRef.current,
-      readMode
-    })
-    if (pdfDoc && canvasRef.current && readMode === 'pdf') {
-      console.log('[DEBUG] Canvas available in useLayoutEffect, triggering render')
-      renderCurrentPage()
-    }
-  }, [pdfDoc, readMode, renderCurrentPage])
 
   // ================================================================
   // 翻页操作
@@ -501,9 +496,7 @@ export default function PDFReaderPage() {
   const goToPage = useCallback((page: number) => {
     const safePage = Math.max(1, Math.min(page, totalPages))
     setCurrentPage(safePage)
-    setOcrLayoutData(null)
-    setOcrPageText('')
-    setPageTranslated(false)
+    resetOCRState()
 
     if (bookId && user && totalPages > 0) {
       const parsedBookId = parseInt(bookId, 10)
@@ -515,7 +508,7 @@ export default function PDFReaderPage() {
         .eq('id', parsedBookId)
         .then(() => {})
     }
-  }, [totalPages, bookId, user])
+  }, [totalPages, bookId, user, resetOCRState])
 
   const prevPage = useCallback(() => goToPage(currentPage - 1), [currentPage, goToPage])
   const nextPage = useCallback(() => goToPage(currentPage + 1), [currentPage, goToPage])
@@ -560,12 +553,12 @@ export default function PDFReaderPage() {
   useEffect(() => {
     const wrapper = overlayWrapperRef.current
     const container = containerRef.current
-    if (!wrapper || !container || textLayerViewport.w <= 0) return
+    if (!wrapper || !container || pageViewport.w <= 0) return
 
     const calcScale = () => {
       const availW = container.clientWidth - 24
-      if (availW > 0 && textLayerViewport.w > availW) {
-        setWrapperScale(availW / textLayerViewport.w)
+      if (availW > 0 && pageViewport.w > availW) {
+        setWrapperScale(availW / pageViewport.w)
       } else {
         setWrapperScale(1)
       }
@@ -575,7 +568,89 @@ export default function PDFReaderPage() {
     const ro = new ResizeObserver(calcScale)
     ro.observe(container)
     return () => ro.disconnect()
-  }, [textLayerViewport.w])
+  }, [pageViewport.w])
+
+  const ocrOverlayModel = ocrLayoutData ? buildOverlayRegions(ocrLayoutData) : null
+  const hasSuspiciousTranslationAnchors = (regions: OverlayRegion[]) => {
+    if (regions.length === 0) return true
+
+    const meaningful = regions.filter((region) => (
+      sanitizeText(region.text).replace(/\s+/g, '').length > 0
+    ))
+    if (meaningful.length === 0) return true
+
+    const originAnchored = meaningful.filter((region) => region.bbox.x0 <= 2 && region.bbox.y0 <= 2).length
+    const wideBoxes = meaningful.filter((region) => (
+      (region.bbox.x1 - region.bbox.x0) >= ocrLayoutData!.imageWidth * 0.58
+    )).length
+    const uniqueAnchors = new Set(
+      meaningful.map((region) => `${Math.round(region.bbox.x0 / 24)}:${Math.round(region.bbox.y0 / 24)}`),
+    ).size
+
+    return originAnchored / meaningful.length > 0.34
+      || wideBoxes / meaningful.length > 0.4
+      || uniqueAnchors < Math.max(8, Math.round(meaningful.length * 0.12))
+  }
+  const ocrTranslateRegions = ocrOverlayModel
+    ? (() => {
+        const groupedRegions = ocrOverlayModel.translationRegions.filter((region) => sanitizeText(region.text).trim().length > 0)
+        const fallbackRegions = ocrOverlayModel.regions.filter((region) => sanitizeText(region.text).trim().length > 0)
+        const lineFallbackRegions: OverlayRegion[] = ocrOverlayModel.lines
+          .filter((line) => sanitizeText(line.text).trim().length > 0)
+          .map((line) => ({
+            id: `line-region-fallback-${line.id}`,
+            text: line.text,
+            bbox: line.bbox,
+            availableX0: Math.max(0, line.bbox.x0 - Math.max(6, (line.bbox.x1 - line.bbox.x0) * 0.06)),
+            availableX1: Math.min(ocrLayoutData!.imageWidth, line.bbox.x1 + Math.max(6, (line.bbox.x1 - line.bbox.x0) * 0.08)),
+            maxY1: Math.min(ocrLayoutData!.imageHeight, line.bbox.y1 + Math.max(18, (line.bbox.y1 - line.bbox.y0) * 1.9)),
+            confidence: line.confidence,
+            lineIndex: line.lineIndex,
+            rowIndex: line.rowIndex,
+            columnIndex: line.columnIndex,
+            words: line.words,
+          }))
+        const safeGrouped = hasSuspiciousTranslationAnchors(groupedRegions) ? [] : groupedRegions
+        const safeFallback = hasSuspiciousTranslationAnchors(fallbackRegions) ? [] : fallbackRegions
+
+        if (safeGrouped.length > 0) {
+          return safeGrouped
+        }
+        if (safeFallback.length > 0 && safeFallback.length <= Math.max(140, lineFallbackRegions.length)) {
+          return safeFallback
+        }
+        return lineFallbackRegions
+      })()
+    : []
+  const ocrOverlayRenderKey = ocrOverlayModel
+    ? `${currentPage}-${scale}-${pageViewport.w}-${pageViewport.h}-${overlayMode}-${ocrTranslatedLines.join('|').length}`
+    : 'no-ocr-overlay'
+
+  const applyTranslationResult = useCallback((
+    source: 'ocr' | 'text-layer',
+    regionCount: number,
+    batchResult: BatchTranslationResult,
+    changedCount: number,
+  ) => {
+    const scopeLabel = source === 'ocr' ? 'OCR 区域' : '文本层'
+    setTranslationSummary({
+      source,
+      regionCount,
+      requestedCount: batchResult.requestedCount,
+      apiTranslatedCount: batchResult.apiTranslatedCount,
+      fallbackCount: batchResult.fallbackCount,
+      changedCount,
+    })
+
+    const status = changedCount > 0
+      ? `翻译已改写 ${changedCount}/${regionCount} 个${scopeLabel}${batchResult.fallbackUsed ? '，部分使用离线回退' : ''}`
+      : batchResult.requestedCount === 0
+        ? `当前页没有可翻译的${scopeLabel}`
+        : `翻译未改写任何${scopeLabel}`
+
+    setTranslationStatusText(status)
+    setTranslationError(changedCount > 0 ? null : (batchResult.failureReason || `翻译未改写任何${scopeLabel}`))
+  }, [])
 
   // ================================================================
   // 文本选择 → 查词功能
@@ -590,54 +665,26 @@ export default function PDFReaderPage() {
   }
 
   // ================================================================
-  // 当前页 OCR 识别 —— 带布局保留
-  // ================================================================
-  const handleOCRCurrentPage = async () => {
-    if (!canvasRef.current) return
-
-    setOcrLoading(true)
-    setOcrPageText('')
-    setOcrLayoutData(null)
-
-    try {
-      // 使用带布局的 OCR，返回每行每词的位置信息
-      const result = await ocrPageWithLayout(canvasRef.current, readerSettings.ocrLang)
-      setOcrPageText(result.text)
-      setOcrLayoutData(result)
-      // 保持 PDF 模式，切换到遮盖叠加
-      setOverlayMode('cover')
-    } catch (err: any) {
-      alert(`OCR 识别失败: ${err.message || '未知错误'}`)
-    }
-
-    setOcrLoading(false)
-  }
-
-  // ================================================================
   // 翻译当前页——直接操作 TextLayer 的 span 元素
   // ================================================================
   const handleTranslatePage = async () => {
     const container = textLayerRef.current
-    if (!container) return
+    const spans = container
+      ? Array.from(container.querySelectorAll('span')).filter(s => s.textContent && s.textContent.trim().length > 0)
+      : []
+    const ocrRegions = ocrTranslateRegions
+    const useOcrFallback = spans.length === 0 && ocrRegions.length > 0
 
-    const spans = Array.from(container.querySelectorAll('span'))
-      .filter(s => s.textContent && s.textContent.trim().length > 0)
-
-    if (spans.length === 0) {
-      alert('当前页没有可翻译的文本。如果是扫描版 PDF，请先 OCR 识别。')
+    if (spans.length === 0 && !useOcrFallback) {
+      setTranslationStatusText('当前页没有可翻译文本')
+      setTranslationError('当前页没有可用文本层，请切换到有文本内容的页面后再试。')
       return
     }
 
     setTranslating(true)
+    setTranslationError(null)
+    setTranslationSummary(null)
     try {
-      // 收集所有 span 的原始文本
-      const origTexts = spans.map(s => s.textContent || '')
-
-      // 先存储原文到 data 属性（用于 hover 还原）
-      spans.forEach((s, i) => {
-        s.setAttribute('data-orig', origTexts[i])
-      })
-
       const targetLang = readerSettings.translateTo === 'zh-CN' ? '中文'
         : readerSettings.translateTo === 'en' ? 'English'
         : readerSettings.translateTo === 'ja' ? '日语'
@@ -647,22 +694,54 @@ export default function PDFReaderPage() {
         : readerSettings.translateTo === 'es' ? '西班牙语'
         : '中文'
 
-      const results = await translateBatch(origTexts, targetLang)
-
-      // 直接替换 span 文本内容 + 存储翻译结果
-      spans.forEach((s, i) => {
-        if (results[i] && results[i] !== origTexts[i]) {
-          s.textContent = results[i]
-          s.setAttribute('data-translated', results[i])
-        } else {
-          s.setAttribute('data-translated', origTexts[i])
+      if (useOcrFallback) {
+        const origTexts = ocrRegions.map((region) => region.text)
+        setTranslationStatusText(`正在翻译 ${ocrRegions.length} 个 OCR 区域`)
+        const batchResult = await translateBatch(origTexts, targetLang)
+        const translatedLines = batchResult.lines.map((result, i) => sanitizeText(result || origTexts[i]).trim() || origTexts[i])
+        const changedCount = translatedLines.reduce((count, line, index) => (
+          sanitizeText(line).trim() !== sanitizeText(origTexts[index]).trim() ? count + 1 : count
+        ), 0)
+        setOcrTranslatedLines(translatedLines)
+        applyTranslationResult('ocr', ocrRegions.length, batchResult, changedCount)
+        if (changedCount === 0) {
+          throw new Error(batchResult.failureReason || '翻译结果未改变当前页 OCR 内容')
         }
-      })
+      } else {
+        const origTexts = spans.map(s => s.textContent || '')
+
+        spans.forEach((s, i) => {
+          s.setAttribute('data-orig', origTexts[i])
+        })
+
+        setTranslationStatusText(`正在翻译 ${spans.length} 个文本层片段`)
+        const batchResult = await translateBatch(origTexts, targetLang)
+        let changedCount = 0
+
+        spans.forEach((s, i) => {
+          const translated = batchResult.lines[i] || origTexts[i]
+          if (translated && translated !== origTexts[i]) {
+            s.textContent = translated
+            s.setAttribute('data-translated', translated)
+            changedCount += 1
+          } else {
+            s.setAttribute('data-translated', origTexts[i])
+          }
+        })
+
+        applyTranslationResult('text-layer', spans.length, batchResult, changedCount)
+        if (changedCount === 0) {
+          throw new Error(batchResult.failureReason || '翻译结果未改变当前页文本')
+        }
+      }
 
       setPageTranslated(true)
       setOverlayMode('translate')
     } catch (err: any) {
-      alert(`翻译失败: ${err.message || '未知错误'}`)
+      setPageTranslated(false)
+      setOverlayMode(ocrLayoutData ? 'cover' : 'select')
+      setTranslationError(err?.message || '翻译失败')
+      setTranslationStatusText('翻译失败')
     }
     setTranslating(false)
   }
@@ -706,57 +785,6 @@ export default function PDFReaderPage() {
   }, [overlayMode])
 
   // ================================================================
-  // 全书 OCR 提取
-  // ================================================================
-  const handleFullOCR = async () => {
-    if (!pdfDoc) return
-
-    // 需要从原始文件触发，因为 pdfDoc 已经在内存中
-    setOcrLoading(true)
-    setOcrText('')
-    setOcrProgress(0)
-
-    try {
-      // 使用临时 canvas 逐页渲染 + OCR
-      const { createWorker } = await import('tesseract.js')
-      const worker = await createWorker(readerSettings.ocrLang)
-      const pageTexts: string[] = []
-
-      for (let i = 1; i <= pdfDoc.numPages; i++) {
-        setOcrProgress(Math.round(((i - 1) / pdfDoc.numPages) * 100))
-
-        // 临时 Canvas
-        const tempCanvas = document.createElement('canvas')
-        await renderPageToCanvas(pdfDoc, i, tempCanvas, 2.0)
-
-        const imageData = tempCanvas.toDataURL('image/png')
-        const { data } = await worker.recognize(imageData)
-        pageTexts.push(data.text || '')
-
-        setOcrProgress(Math.round((i / pdfDoc.numPages) * 100))
-      }
-
-      await worker.terminate()
-      const fullText = pageTexts.join('\n\n')
-      setOcrText(fullText)
-      setContentText(fullText)
-      setReadMode('ocr')
-
-      // 保存 OCR 文本到数据库
-      if (bookId) {
-        await supabase
-          .from('user_books')
-          .update({ content_text: fullText.slice(0, 500000) })
-          .eq('id', parseInt(bookId))
-      }
-    } catch (err: any) {
-      alert(`OCR 提取失败: ${err.message || '未知错误'}`)
-    }
-
-    setOcrLoading(false)
-  }
-
-  // ================================================================
   // 键盘导航
   // ================================================================
   useEffect(() => {
@@ -778,7 +806,6 @@ export default function PDFReaderPage() {
 
   // ===== 加载中 =====
   if (loading) {
-    console.log('[DEBUG] Rendering loading screen')
     return (
       <div className="min-h-screen bg-[var(--color-background)] flex flex-col items-center justify-center gap-3">
         <Loader2 size={32} className="text-[var(--color-primary)] animate-spin" />
@@ -789,12 +816,11 @@ export default function PDFReaderPage() {
 
   // ===== 没有 PDF 且没有 bookId → 本地文件选择 =====
   if (!pdfDoc && !book) {
-    console.log('[DEBUG] Rendering file selection screen')
     return (
       <div className="min-h-screen bg-[var(--color-background)] flex flex-col">
         {/* Header */}
         <div className="flex items-center gap-3 px-5 py-4">
-          <button onClick={() => navigate(-1)} className="p-1">
+          <button onClick={goBack} className="p-1">
             <ChevronLeft size={24} className="text-[var(--color-foreground)]" />
           </button>
           <h1 className="text-[18px] font-bold text-[var(--color-foreground)] font-secondary">PDF 阅读器</h1>
@@ -814,7 +840,7 @@ export default function PDFReaderPage() {
           </div>
           <h2 className="text-[20px] font-bold text-[var(--color-foreground)] mb-2">打开 PDF 文件</h2>
           <p className="text-[13px] text-[var(--color-muted)] text-center mb-6">
-            支持标准 PDF 和扫描版 PDF（OCR 识别）<br />
+            支持常见 PDF 阅读与导入<br />
             <span className="text-[11px]">打开后可一键保存到书架</span>
           </p>
           <button
@@ -839,7 +865,7 @@ export default function PDFReaderPage() {
     return (
       <div className="min-h-screen bg-[var(--color-background)] flex flex-col">
         <div className="flex items-center gap-3 px-5 py-4">
-          <button onClick={() => navigate(-1)} className="p-1">
+          <button onClick={goBack} className="p-1">
             <ChevronLeft size={24} className="text-[var(--color-foreground)]" />
           </button>
           <h1 className="text-[18px] font-bold text-[var(--color-foreground)] font-secondary">PDF 阅读器</h1>
@@ -873,7 +899,7 @@ export default function PDFReaderPage() {
       <div className="min-h-screen bg-[var(--color-background)] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--color-border)]">
-          <button onClick={() => navigate(-1)} className="p-1">
+          <button onClick={goBack} className="p-1">
             <ChevronLeft size={24} className="text-[var(--color-foreground)]" />
           </button>
           <div className="text-center flex-1 min-w-0 px-2">
@@ -913,18 +939,12 @@ export default function PDFReaderPage() {
   }
 
   // ===== PDF 渲染模式 =====
-  console.log('[DEBUG] Rendering PDF reader interface', {
-    hasPdfDoc: !!pdfDoc,
-    hasBook: !!book,
-    readMode,
-    loading
-  })
   return (
     <div className="h-full min-h-screen bg-[#333] flex flex-col">
       {/* ===== 顶部工具栏 ===== */}
       <div className="flex items-center justify-between px-4 py-3 bg-[#222] text-white">
         {/* 左侧：返回 */}
-        <button onClick={() => navigate(-1)} className="p-1 active:scale-90 transition-transform">
+        <button onClick={goBack} className="p-1 active:scale-90 transition-transform">
           <ChevronLeft size={22} className="text-white/80" />
         </button>
 
@@ -964,18 +984,6 @@ export default function PDFReaderPage() {
               : <Languages size={18} className={overlayMode === 'translate' ? 'text-blue-400' : 'text-white/70'} />
             }
           </button>
-          {/* OCR 识别 */}
-          <button
-            onClick={handleOCRCurrentPage}
-            disabled={ocrLoading}
-            className={`p-1.5 active:scale-90 transition-transform ${ocrLayoutData ? 'bg-orange-500/30 rounded' : ''}`}
-            title="OCR 识别当前页"
-          >
-            {ocrLoading
-              ? <Loader2 size={18} className="text-white/60 animate-spin" />
-              : <ScanSearch size={18} className={ocrLayoutData ? 'text-orange-400' : 'text-white/70'} />
-            }
-          </button>
           {/* 设置 */}
           <button
             onClick={() => setShowSettings(!showSettings)}
@@ -985,6 +993,51 @@ export default function PDFReaderPage() {
           </button>
         </div>
       </div>
+
+      {(translationStatusText || translationError || translationSummary) && (
+        <div className={`px-4 py-2 border-b ${
+          translationError
+            ? 'bg-red-500/10 border-red-500/30'
+            : 'bg-blue-500/10 border-blue-500/30'
+        }`}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                {translating
+                  ? <Loader2 size={14} className="text-blue-300 animate-spin" />
+                  : translationError
+                    ? <AlertTriangle size={14} className="text-red-300" />
+                    : <Languages size={14} className="text-blue-300" />}
+                <p className="text-[12px] font-semibold text-white/90">
+                  {translationStatusText || '翻译已就绪'}
+                </p>
+              </div>
+              {translationError && (
+                <p className="mt-1 text-[12px] text-white/70">
+                  {translationError}
+                </p>
+              )}
+              {translationSummary && (
+                <p className="mt-1 text-[11px] text-white/55">
+                  {translationSummary.source === 'ocr' ? 'OCR 区域' : '文本层'} {translationSummary.regionCount} 块，
+                  提交 {translationSummary.requestedCount} 块，改写 {translationSummary.changedCount} 块，
+                  API 成功 {translationSummary.apiTranslatedCount} 块
+                  {translationSummary.fallbackCount > 0 ? `，回退 ${translationSummary.fallbackCount} 块` : ''}
+                </p>
+              )}
+            </div>
+            {!translating && (
+              <button
+                onClick={handleTranslatePage}
+                className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white/10 px-3 py-1 text-[11px] text-white/80"
+              >
+                <RefreshCcw size={11} />
+                重试翻译
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ===== 设置抽屉面板 ===== */}
       {showSettings && (
@@ -1064,16 +1117,6 @@ export default function PDFReaderPage() {
                           {mode === 'pdf' ? 'PDF 原版' : '纯文本'}
                         </button>
                       ))}
-                      {(ocrText || ocrPageText) && (
-                        <button
-                          onClick={() => setReadMode('ocr')}
-                          className={`flex-1 py-2 rounded-lg text-[13px] font-medium transition-colors ${
-                            readMode === 'ocr' ? 'bg-orange-500 text-white' : 'bg-white/10 text-white/60'
-                          }`}
-                        >
-                          OCR
-                        </button>
-                      )}
                     </div>
                   </div>
 
@@ -1098,30 +1141,6 @@ export default function PDFReaderPage() {
                     </p>
                   </div>
 
-                  {/* OCR 工具 + 叠加层控制 */}
-                  <div>
-                    <p className="text-[12px] text-white/50 mb-2 uppercase tracking-wide">OCR 识别</p>
-                    <button
-                      onClick={() => { handleOCRCurrentPage(); setShowSettings(false) }}
-                      disabled={ocrLoading}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 bg-white/10 rounded-lg text-[13px] text-white/70 active:scale-95 disabled:opacity-50 mb-2"
-                    >
-                      <ScanSearch size={14} /> 识别当前页（保留布局）
-                    </button>
-                    {isScanned && (
-                      <button
-                        onClick={() => { handleFullOCR(); setShowSettings(false) }}
-                        disabled={ocrLoading}
-                        className="w-full flex items-center justify-center gap-2 py-2.5 bg-orange-500/80 rounded-lg text-[13px] text-white active:scale-95 disabled:opacity-50"
-                      >
-                        {ocrLoading
-                          ? <><Loader2 size={14} className="animate-spin" /> OCR 中 {ocrProgress}%</>
-                          : <><ScanSearch size={14} /> 全书 OCR 识别</>
-                        }
-                      </button>
-                    )}
-                  </div>
-
                   {/* 文本叠加层模式 */}
                   <div>
                     <p className="text-[12px] text-white/50 mb-2 uppercase tracking-wide">叠加层模式</p>
@@ -1129,6 +1148,7 @@ export default function PDFReaderPage() {
                       {([
                         { key: 'off' as const, label: '关闭', desc: '无叠加' },
                         { key: 'select' as const, label: '可选', desc: '透明可选文字' },
+                        { key: 'debug' as const, label: '调试', desc: '显示原始/区域框' },
                         { key: 'cover' as const, label: '遮盖', desc: '白底覆盖原文' },
                         { key: 'translate' as const, label: '翻译', desc: '翻译覆盖原文' },
                       ] as const).map(m => (
@@ -1140,6 +1160,7 @@ export default function PDFReaderPage() {
                               restoreOriginalText()
                             }
                             setOverlayMode(m.key)
+                            setOcrOverlayDebug(m.key === 'debug')
                             if (m.key === 'translate' && !pageTranslated) {
                               handleTranslatePage()
                             }
@@ -1159,11 +1180,6 @@ export default function PDFReaderPage() {
                     {textLayerViewport.w > 0 && (
                       <p className="mt-2 text-[10px] text-blue-300/70">
                         文本层已加载{pageTranslated ? '（已翻译）' : ''}
-                      </p>
-                    )}
-                    {ocrLayoutData && (
-                      <p className="mt-1 text-[10px] text-orange-300/70">
-                        OCR 已识别 {ocrLayoutData.lines.length} 行
                       </p>
                     )}
                   </div>
@@ -1204,29 +1220,6 @@ export default function PDFReaderPage() {
                           className={`py-2 px-2.5 rounded-lg text-[12px] text-left transition-colors ${
                             readerSettings.ttsLang === opt.value
                               ? 'bg-[var(--color-primary)] text-white'
-                              : 'bg-white/10 text-white/60'
-                          }`}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* OCR 识别语言 */}
-                  <div>
-                    <div className="flex items-center gap-2 mb-2">
-                      <ScanSearch size={14} className="text-white/50" />
-                      <p className="text-[12px] text-white/50 uppercase tracking-wide">OCR 识别语言</p>
-                    </div>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {OCR_LANG_OPTIONS.map(opt => (
-                        <button
-                          key={opt.value}
-                          onClick={() => updateReaderSettings({ ocrLang: opt.value })}
-                          className={`py-2 px-2.5 rounded-lg text-[12px] text-left transition-colors ${
-                            readerSettings.ocrLang === opt.value
-                              ? 'bg-orange-500 text-white'
                               : 'bg-white/10 text-white/60'
                           }`}
                         >
@@ -1354,8 +1347,8 @@ export default function PDFReaderPage() {
               让父 flex 容器知道实际占用空间，从而正确居中和滚动。
             */}
             <div style={{
-              width: textLayerViewport.w > 0 ? textLayerViewport.w * wrapperScale : undefined,
-              height: textLayerViewport.h > 0 ? textLayerViewport.h * wrapperScale + 8 : undefined,
+              width: pageViewport.w > 0 ? pageViewport.w * wrapperScale : undefined,
+              height: pageViewport.h > 0 ? pageViewport.h * wrapperScale + 8 : undefined,
             }}>
             {/*
               核心 wrapper: canvas + TextLayer + 覆盖层用完全相同的 viewport 尺寸。
@@ -1365,8 +1358,8 @@ export default function PDFReaderPage() {
               ref={overlayWrapperRef}
               className="relative shadow-lg"
               style={{
-                width: textLayerViewport.w || undefined,
-                height: textLayerViewport.h || undefined,
+                width: pageViewport.w || undefined,
+                height: pageViewport.h || undefined,
                 transformOrigin: '0 0',
                 transform: wrapperScale < 1 ? `scale(${wrapperScale})` : undefined,
               }}
@@ -1374,10 +1367,6 @@ export default function PDFReaderPage() {
               <canvas
                 ref={(el) => {
                   canvasRef.current = el
-                  if (el && pdfDoc && readMode === 'pdf' && !hasTriggeredFirstRender.current) {
-                    hasTriggeredFirstRender.current = true
-                    setTimeout(() => renderCurrentPage(), 0)
-                  }
                 }}
                 className="block"
               />
@@ -1396,6 +1385,193 @@ export default function PDFReaderPage() {
                 }}
                 onMouseUp={handleTextSelect}
               />
+
+              {/* OCR 覆盖层：扫描版常没有原生 textLayer，需用 OCR bbox 自行覆盖 */}
+              {ocrOverlayModel && overlayMode !== 'off' && (
+                <div
+                  key={ocrOverlayRenderKey}
+                  className={`ocrOverlay ocr-overlay-mode-${overlayMode}`}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: pageViewport.w || '100%',
+                    height: pageViewport.h || '100%',
+                    zIndex: 3,
+                    pointerEvents: rendering ? 'none' : 'auto',
+                    opacity: rendering ? 0 : 1,
+                    transition: 'opacity 120ms ease-out',
+                  }}
+                  onMouseUp={handleTextSelect}
+                >
+                  {(() => {
+                    const baseW = pageViewport.w || canvasRef.current?.clientWidth || 1
+                    const baseH = pageViewport.h || canvasRef.current?.clientHeight || 1
+                    const sx = baseW / Math.max(1, ocrOverlayModel.imageWidth)
+                    const sy = baseH / Math.max(1, ocrOverlayModel.imageHeight)
+                    const translatedMode = overlayMode === 'translate' && ocrTranslatedLines.length > 0 && ocrTranslateRegions.length > 0
+
+                    const translatedEntries = translatedMode
+                      ? ocrTranslateRegions.map((region, index) => {
+                          const fitted = fitTranslatedRegionText(
+                            {
+                              ...region,
+                              bbox: {
+                                x0: region.bbox.x0 * sx,
+                                y0: region.bbox.y0 * sy,
+                                x1: region.bbox.x1 * sx,
+                                y1: region.bbox.y1 * sy,
+                              },
+                              availableX0: region.availableX0 * sx,
+                              availableX1: region.availableX1 * sx,
+                              maxY1: region.maxY1 * sy,
+                            },
+                            ocrTranslatedLines[index] || region.text,
+                          )
+
+                          return {
+                            key: region.id,
+                            left: fitted.left,
+                            top: region.bbox.y0 * sy,
+                            width: fitted.width,
+                            height: fitted.height,
+                            fontSize: fitted.fontSize,
+                            lineHeight: fitted.lineHeight,
+                            paddingX: fitted.paddingX,
+                            paddingY: fitted.paddingY,
+                            lines: fitted.lines,
+                            isCjk: fitted.isCjk,
+                            confidence: region.confidence,
+                          }
+                        })
+                      : []
+
+                    if (translatedEntries.length > 1) {
+                      for (let i = 1; i < translatedEntries.length; i += 1) {
+                        const prev = translatedEntries[i - 1]
+                        const current = translatedEntries[i]
+                        if (Math.abs(current.fontSize - prev.fontSize) > 3) {
+                          const smoothed = Math.round(((current.fontSize + prev.fontSize) / 2) * 10) / 10
+                          current.fontSize = smoothed
+                          prev.fontSize = smoothed
+                        }
+                      }
+                    }
+
+                    const debugGroups = [
+                      ...ocrOverlayModel.words.map((word) => ({
+                        key: `debug-word-${word.id}`,
+                        className: 'ocr-debug-word',
+                        text: word.text,
+                        left: word.bbox.x0 * sx,
+                        top: word.bbox.y0 * sy,
+                        width: Math.max(4, (word.bbox.x1 - word.bbox.x0) * sx),
+                        height: Math.max(8, (word.bbox.y1 - word.bbox.y0) * sy),
+                        confidence: word.confidence,
+                      })),
+                      ...ocrOverlayModel.lines.map((line) => ({
+                        key: `debug-line-${line.id}`,
+                        className: 'ocr-debug-line',
+                        text: line.text,
+                        left: line.bbox.x0 * sx,
+                        top: line.bbox.y0 * sy,
+                        width: Math.max(8, (line.bbox.x1 - line.bbox.x0) * sx),
+                        height: Math.max(10, (line.bbox.y1 - line.bbox.y0) * sy),
+                        confidence: line.confidence,
+                      })),
+                      ...ocrOverlayModel.regions.map((region) => ({
+                        key: `debug-region-${region.id}`,
+                        className: 'ocr-debug-region',
+                        text: region.text,
+                        left: region.bbox.x0 * sx,
+                        top: region.bbox.y0 * sy,
+                        width: Math.max(8, (region.bbox.x1 - region.bbox.x0) * sx),
+                        height: Math.max(12, (region.bbox.y1 - region.bbox.y0) * sy),
+                        confidence: region.confidence,
+                      })),
+                    ]
+
+                    const coverEntries = ocrOverlayModel.coverBoxes.map((box) => ({
+                      key: box.id,
+                      text: box.text,
+                      left: box.bbox.x0 * sx,
+                      top: box.bbox.y0 * sy,
+                      width: Math.max(4, (box.bbox.x1 - box.bbox.x0) * sx),
+                      height: Math.max(10, (box.bbox.y1 - box.bbox.y0) * sy),
+                      confidence: box.confidence,
+                    }))
+
+                    if (overlayMode === 'debug') {
+                      return debugGroups.map((box) => (
+                        <div
+                          key={box.key}
+                          className={`ocr-debug-box ${box.className}`}
+                          style={{
+                            left: box.left,
+                            top: box.top,
+                            width: box.width,
+                            height: box.height,
+                          }}
+                        >
+                          {ocrOverlayDebug && (
+                            <span className="ocr-debug-label">
+                              {Math.round(box.confidence)}
+                            </span>
+                          )}
+                        </div>
+                      ))
+                    }
+
+                    if (translatedMode) {
+                      return translatedEntries.map((entry) => (
+                        <div
+                          key={entry.key}
+                          className={`ocr-overlay-line ${entry.isCjk ? 'ocr-overlay-line-cjk' : 'ocr-overlay-line-latin'}`}
+                          style={{
+                            position: 'absolute',
+                            left: entry.left,
+                            top: entry.top,
+                            width: entry.width,
+                            height: entry.height,
+                            minHeight: entry.height,
+                            padding: `${entry.paddingY}px ${entry.paddingX}px`,
+                            fontSize: entry.fontSize,
+                            lineHeight: `${entry.lineHeight}px`,
+                            userSelect: 'text',
+                            WebkitUserSelect: 'text',
+                          }}
+                        >
+                          {entry.lines.map((line, lineIndex) => (
+                            <span key={`${entry.key}-line-${lineIndex}`} className="ocr-overlay-line-text">
+                              {line}
+                            </span>
+                          ))}
+                        </div>
+                      ))
+                    }
+
+                    return coverEntries.map((box) => (
+                      <span
+                        key={box.key}
+                        className="ocr-overlay-word"
+                        style={{
+                          position: 'absolute',
+                          left: box.left,
+                          top: box.top,
+                          width: box.width,
+                          height: box.height,
+                          fontSize: Math.max(10, box.height * 0.72),
+                          lineHeight: 1,
+                          userSelect: 'text',
+                          WebkitUserSelect: 'text',
+                        }}
+                      >
+                        {box.text}
+                      </span>
+                    ))
+                  })()}
+                </div>
+              )}
 
               <style>{`
                 .textLayer {
@@ -1430,12 +1606,109 @@ export default function PDFReaderPage() {
                   color: #1a1a1a !important;
                   background: white !important;
                   padding: 0 1px;
+                  font-family: var(--font-pdf-overlay) !important;
                 }
                 /* hover 时显示原文标记 */
                 .overlay-mode-translate span:hover {
                   background: #FFF8E1 !important;
                   border-bottom: 2px solid #FFA000;
                   cursor: pointer;
+                }
+                /* OCR 覆盖层样式 */
+                .ocrOverlay .ocr-overlay-word {
+                  display: flex;
+                  align-items: center;
+                  white-space: nowrap;
+                  overflow: hidden;
+                  box-sizing: border-box;
+                  padding: 0 1px;
+                  border-radius: 2px;
+                }
+                .ocrOverlay .ocr-overlay-line {
+                  display: flex;
+                  flex-direction: column;
+                  align-items: flex-start;
+                  justify-content: flex-start;
+                  white-space: normal;
+                  word-break: break-word;
+                  overflow-wrap: anywhere;
+                  text-wrap: pretty;
+                  overflow: hidden;
+                  box-sizing: border-box;
+                  border-radius: 5px;
+                }
+                .ocrOverlay .ocr-overlay-line-text {
+                  display: block;
+                  width: 100%;
+                }
+                .ocrOverlay .ocr-overlay-word::selection {
+                  background: rgba(59, 130, 246, 0.3);
+                  color: rgba(0, 0, 0, 0.8);
+                }
+                .ocrOverlay .ocr-overlay-line::selection {
+                  background: rgba(59, 130, 246, 0.3);
+                  color: rgba(0, 0, 0, 0.8);
+                }
+                .ocr-overlay-mode-select .ocr-overlay-word {
+                  color: transparent;
+                  background: transparent;
+                }
+                .ocr-overlay-mode-select .ocr-overlay-line {
+                  color: transparent;
+                  background: transparent;
+                }
+                .ocr-overlay-mode-debug .ocr-overlay-word {
+                  color: rgba(0, 80, 255, 0.35);
+                  background: rgba(255, 255, 255, 0.25);
+                  outline: 1px solid rgba(0, 80, 255, 0.35);
+                }
+                .ocr-overlay-mode-debug .ocr-overlay-line {
+                  color: rgba(0, 80, 255, 0.35);
+                  background: rgba(255, 255, 255, 0.25);
+                  outline: 1px solid rgba(0, 80, 255, 0.35);
+                }
+                .ocr-overlay-mode-cover .ocr-overlay-word,
+                .ocr-overlay-mode-translate .ocr-overlay-word {
+                  color: #1a1a1a;
+                  background: #fff;
+                  box-shadow: 0 0 0 1px #fff inset;
+                }
+                .ocr-overlay-mode-cover .ocr-overlay-line,
+                .ocr-overlay-mode-translate .ocr-overlay-line {
+                  color: #1a1a1a;
+                  background: #fff;
+                  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(255, 255, 255, 0.96) inset;
+                  font-family: var(--font-pdf-overlay);
+                }
+                .ocr-overlay-line-cjk { letter-spacing: 0.01em; }
+                .ocr-overlay-line-latin { letter-spacing: 0.005em; }
+                .ocr-debug-box {
+                  position: absolute;
+                  pointer-events: none;
+                  box-sizing: border-box;
+                }
+                .ocr-debug-word {
+                  border: 1px solid rgba(59, 130, 246, 0.5);
+                  background: rgba(59, 130, 246, 0.08);
+                }
+                .ocr-debug-line {
+                  border: 1px solid rgba(249, 115, 22, 0.65);
+                  background: rgba(249, 115, 22, 0.08);
+                }
+                .ocr-debug-region {
+                  border: 1px dashed rgba(34, 197, 94, 0.8);
+                  background: rgba(34, 197, 94, 0.05);
+                }
+                .ocr-debug-label {
+                  position: absolute;
+                  top: -14px;
+                  left: 0;
+                  padding: 1px 4px;
+                  border-radius: 999px;
+                  font-size: 9px;
+                  line-height: 1.2;
+                  color: white;
+                  background: rgba(15, 23, 42, 0.8);
                 }
               `}</style>
             </div>
@@ -1456,40 +1729,9 @@ export default function PDFReaderPage() {
               <div className="text-center py-12">
                 <p className="text-[14px] text-white/50">无文本内容</p>
                 <p className="text-[12px] text-white/30 mt-1">
-                  如果这是扫描版 PDF，请使用 OCR 功能提取文字
+                  当前文件没有可用文本层，请切换回 PDF 原版查看
                 </p>
               </div>
-            )}
-          </div>
-        )}
-
-        {/* OCR 模式（OCR 识别的文本） */}
-        {readMode === 'ocr' && (
-          <div className="w-full max-w-[650px] px-5 py-6">
-            {ocrLoading && (
-              <div className="text-center py-8">
-                <Loader2 size={24} className="text-white/60 animate-spin mx-auto mb-3" />
-                <p className="text-[13px] text-white/60">正在 OCR 识别... {ocrProgress}%</p>
-                <div className="w-48 h-1.5 mx-auto mt-2 bg-white/10 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-orange-400 rounded-full transition-all duration-300"
-                    style={{ width: `${ocrProgress}%` }}
-                  />
-                </div>
-              </div>
-            )}
-            {(ocrPageText || ocrText) && (
-              <>
-                <div className="flex items-center gap-2 mb-4">
-                  <ScanSearch size={16} className="text-orange-400" />
-                  <span className="text-[12px] text-orange-400 font-semibold">OCR 识别结果</span>
-                </div>
-                {(ocrPageText || ocrText).split(/\n+/).map((line, i) => (
-                  <p key={i} className="text-white/90 leading-[1.8] mb-2" style={{ fontSize: `${readerSettings.fontSize}px` }}>
-                    {line.trim() || '\u00A0'}
-                  </p>
-                ))}
-              </>
             )}
           </div>
         )}
