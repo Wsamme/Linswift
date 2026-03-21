@@ -625,14 +625,14 @@ function PricingSection({ onGetStarted }: { onGetStarted: () => void }) {
       name: 'Free',
       nameZh: '免费版',
       price: '¥0',
-      period: '永久免费',
-      desc: '体验核心功能，开启学习之旅',
+      period: '当前开放',
+      desc: '先体验核心能力，建立个人词库与阅读习惯',
       features: [
-        'AI 翻译（每日 20 次）',
-        '基础词库管理',
-        '3 本推荐书籍',
-        '学习热度追踪',
-        '拼写游戏',
+        '网页翻译与经典阅读基础功能',
+        '基础词库管理与今日复习',
+        '公共经典书库与学习仪表盘',
+        '浏览器插件基础翻译能力',
+        '适合作为默认入门层级',
       ],
       cta: '立即注册',
       popular: false,
@@ -640,37 +640,33 @@ function PricingSection({ onGetStarted }: { onGetStarted: () => void }) {
     },
     {
       name: 'Pro',
-      nameZh: '专业版',
-      price: '¥29',
-      period: '/月',
-      desc: '解锁所有功能，高效提升英语',
+      nameZh: 'Pro 内测版',
+      price: '申请开通',
+      period: 'Stripe 上线前',
+      desc: '先用账户身份区分免费与付费用户，由团队人工审核开通',
       features: [
-        'AI 翻译无限次',
-        '完整词库 + AI 分类',
-        '无限 PDF 导入',
-        '全部听力 & 口语模块',
-        '艾宾浩斯智能复习',
-        'AI 场景对话',
-        '语法知识树完整解锁',
-        '优先客服支持',
+        '更高 AI / DeepL 翻译额度',
+        'PDF / OCR / 导入阅读等高消耗能力',
+        '完整语法、听力、口语与 AI 练习路径',
+        '插件、多端与词库的完整云同步体验',
+        '后续 Stripe 上线时平滑迁移权益',
       ],
-      cta: '开始 7 天免费试用',
+      cta: '申请 Pro 内测',
       popular: true,
       color: '#FF8400',
     },
     {
       name: 'Team',
-      nameZh: '团队版',
-      price: '¥99',
-      period: '/月 起',
-      desc: '适合企业培训与教育机构',
+      nameZh: '团队试点',
+      price: '联系确认',
+      period: '按方案开通',
+      desc: '适合学校、训练营和企业培训，先按试点方式落地',
       features: [
-        '包含 Pro 全部功能',
-        '团队管理后台',
-        '学习进度报告',
-        '自定义词库导入',
-        '专属客户经理',
-        'API 接口调用',
+        '以 Pro 权益为基础扩展',
+        '优先支持多账号批量开通',
+        '按场景定制词库、阅读内容与交付方式',
+        '先人工对接，再决定是否进入正式团队版',
+        '适合作为 Stripe 前的 B2B 试点层级',
       ],
       cta: '联系我们',
       popular: false,
@@ -678,13 +674,63 @@ function PricingSection({ onGetStarted }: { onGetStarted: () => void }) {
     },
   ]
 
+  const preStripeSteps = [
+    {
+      title: '所有新用户默认进入免费版',
+      desc: '注册后先使用免费能力，不需要先绑定信用卡，也不会出现隐式自动扣费。',
+    },
+    {
+      title: '付费用户通过申请 + 人工审核开通',
+      desc: '在 Stripe 正式接入前，Pro 不做站内自动收款。用户通过邮箱提交申请，团队按账号开通权益。',
+    },
+    {
+      title: '权益记录绑定到账户身份',
+      desc: '我们会按账号记录层级、开通时间和到期时间，网页端、桌面端和插件端共享同一身份。',
+    },
+    {
+      title: 'Stripe 上线后平滑迁移',
+      desc: '已开通的用户会保留剩余权益与早期支持者身份，再迁移到正式订阅体系。',
+    },
+  ]
+
+  const accessRules = [
+    {
+      label: '免费版',
+      audience: '想先体验产品主流程的个人用户',
+      activation: '注册即得',
+      billing: '不收费',
+      access: '保留翻译、基础词库、经典阅读与基础学习路径',
+    },
+    {
+      label: 'Pro 内测',
+      audience: '高频学习者、重度阅读用户、需要完整 AI 能力的个人用户',
+      activation: '邮件申请后人工开通',
+      billing: 'Stripe 前人工确认，不走站内自动扣费',
+      access: '开放高额度翻译、导入阅读、OCR、完整语法/听说/复习路径',
+    },
+    {
+      label: '团队试点',
+      audience: '学校、企业、训练营或有统一交付需求的组织',
+      activation: '联系团队评估后定制开通',
+      billing: '按试点合作方式确认',
+      access: '以 Pro 为基础，优先处理批量账号与内容交付需求',
+    },
+  ]
+
+  const migrationPromises = [
+    '在 Stripe 上线前，不展示伪“已接入支付”的月付按钮，避免误导用户。',
+    '任何付费开通都先邮件确认，不会出现默认续费或看不懂的扣费路径。',
+    '正式接入 Stripe 后，优先把现有 Pro 用户迁移到标准订阅，并保留剩余权益时长。',
+    '首批付费用户会作为早期支持者处理，后续价格与权益变更会提前在官网公示。',
+  ]
+
   return (
     <section id="pricing" className="py-20 md:py-28 scroll-mt-20">
       <div className="max-w-[1200px] mx-auto px-6">
         <div className="text-center mb-14">
           <span className="text-[13px] font-semibold text-[#FF8400] uppercase tracking-wider">Pricing</span>
-          <h2 className="text-[28px] md:text-[40px] font-extrabold mt-3">简单透明的定价</h2>
-          <p className="text-[16px] text-[#888] mt-3">免费开始，随时升级</p>
+          <h2 className="text-[28px] md:text-[40px] font-extrabold mt-3">先把用户分层跑通，再接 Stripe</h2>
+          <p className="text-[16px] text-[#888] mt-3">当前官网先明确免费版、Pro 内测版和团队试点的边界，Stripe 接入后再切到自动订阅。</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-[960px] mx-auto">
@@ -707,7 +753,7 @@ function PricingSection({ onGetStarted }: { onGetStarted: () => void }) {
               </div>
 
               <div className="flex items-baseline gap-1 mb-2">
-                <span className="text-[40px] font-extrabold">{p.price}</span>
+                <span className="text-[32px] md:text-[40px] font-extrabold">{p.price}</span>
                 <span className="text-[14px] text-[#888]">{p.period}</span>
               </div>
               <p className="text-[14px] text-[#888] mb-6">{p.desc}</p>
@@ -722,7 +768,13 @@ function PricingSection({ onGetStarted }: { onGetStarted: () => void }) {
               </ul>
 
               <button
-                onClick={p.name === 'Team' ? () => window.location.href = 'mailto:aw@linswift.com?subject=团队版咨询' : onGetStarted}
+                onClick={
+                  p.name === 'Free'
+                    ? onGetStarted
+                    : p.name === 'Team'
+                      ? () => { window.location.href = 'mailto:aw@linswift.com?subject=团队试点咨询&body=机构名称：%0A预计账号数：%0A使用场景：' }
+                      : () => { window.location.href = 'mailto:aw@linswift.com?subject=Pro内测申请&body=Linswift账号邮箱：%0A使用场景：%0A最常使用的平台（网页/桌面/插件）：' }
+                }
                 className={`w-full py-3.5 rounded-xl text-[15px] font-bold transition-all ${
                   p.popular
                     ? 'bg-[#FF8400] hover:bg-[#E87600] text-white shadow-lg shadow-[#FF8400]/20'
@@ -732,6 +784,77 @@ function PricingSection({ onGetStarted }: { onGetStarted: () => void }) {
               </button>
             </div>
           ))}
+        </div>
+
+        <div className="mx-auto mt-12 max-w-[960px] rounded-[28px] border border-[#F0E3D3] bg-[#FFF9F3] px-6 py-5 text-[14px] leading-7 text-[#6B6258] md:px-8">
+          当前阶段的重点不是把收费按钮先做出来，而是先把账号身份、功能边界、开通流程和后续迁移承诺讲清楚。也就是说：
+          Stripe 上线前，Pro 是“人工开通的付费层级”，不是“官网里已经自动订阅的月付产品”。
+        </div>
+
+        <div id="pre-stripe-plan" className="mt-20">
+          <div className="max-w-[860px]">
+            <span className="text-[13px] font-semibold text-[#FF8400] uppercase tracking-wider">Pre-Stripe Plan</span>
+            <h3 className="mt-3 text-[28px] md:text-[40px] font-extrabold">Stripe 接入前，免费用户和付费用户怎么区分</h3>
+            <p className="mt-4 text-[16px] leading-8 text-[#666]">
+              在自动支付接入前，我们先按“账户身份 + 权益开通记录”的方式跑通产品分层。这样既能开始服务首批付费用户，也不会把一个尚未接入正式支付系统的状态伪装成已经上线的自动订阅。
+            </p>
+          </div>
+
+          <div className="mt-12 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+            {preStripeSteps.map((step, index) => (
+              <div key={step.title} className="rounded-3xl border border-[#F0F0F0] bg-white p-6">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#FFF1E6] text-[14px] font-bold text-[#FF8400]">
+                  0{index + 1}
+                </div>
+                <h4 className="mt-5 text-[18px] font-bold">{step.title}</h4>
+                <p className="mt-3 text-[14px] leading-7 text-[#666]">{step.desc}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-12 grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+            <div className="overflow-hidden rounded-[28px] border border-[#F0F0F0] bg-white">
+              <div className="overflow-x-auto">
+                <div className="min-w-[920px]">
+                  <div className="grid grid-cols-[160px_repeat(4,minmax(0,1fr))] bg-[#FAFAFA] px-6 py-4 text-[13px] font-semibold text-[#888]">
+                    <div>层级</div>
+                    <div>适合人群</div>
+                    <div>开通方式</div>
+                    <div>当前计费方式</div>
+                    <div>权限边界</div>
+                  </div>
+                  {accessRules.map((rule) => (
+                    <div key={rule.label} className="grid grid-cols-[160px_repeat(4,minmax(0,1fr))] gap-0 border-t border-[#F5F5F5] px-6 py-5 text-[14px] leading-7 text-[#555]">
+                      <div className="font-bold text-[#1A1A1A]">{rule.label}</div>
+                      <div>{rule.audience}</div>
+                      <div>{rule.activation}</div>
+                      <div>{rule.billing}</div>
+                      <div>{rule.access}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-[28px] bg-[#1A1A1A] p-7 text-white">
+              <p className="text-[13px] font-semibold uppercase tracking-[0.16em] text-white/60">Migration Promise</p>
+              <h4 className="mt-3 text-[24px] font-extrabold leading-tight">正式接入 Stripe 后，我们会怎么迁移</h4>
+              <ul className="mt-6 space-y-4">
+                {migrationPromises.map((item) => (
+                  <li key={item} className="flex gap-3 text-[14px] leading-7 text-white/82">
+                    <Check size={16} className="mt-1 shrink-0 text-[#FFB066]" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+              <a
+                href="mailto:aw@linswift.com?subject=Pro内测申请&body=Linswift账号邮箱：%0A使用场景：%0A最关注的能力："
+                className="mt-7 inline-flex rounded-2xl bg-white px-5 py-3 text-[14px] font-bold text-[#1A1A1A] transition-colors hover:bg-[#F6F6F6]"
+              >
+                申请 Pro 内测
+              </a>
+            </div>
+          </div>
         </div>
       </div>
     </section>
