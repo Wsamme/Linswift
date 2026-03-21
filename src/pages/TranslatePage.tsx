@@ -3,10 +3,11 @@ import {
   ArrowLeftRight, Star, Volume2, Copy, X, Sparkles, Loader2, Check, Plus,
 } from 'lucide-react'
 import {
+  type TranslationMode,
   translateText,
   type TranslateResult,
   type UnfamiliarWord,
-} from '../services/gemini'
+} from '../services/translation'
 import { useVocabulary } from '../hooks/useVocabulary'
 import { useTranslations } from '../hooks/useTranslations'
 import { useStudyRecords } from '../hooks/useStudyRecords'
@@ -21,6 +22,40 @@ const LANGUAGE_OPTIONS = [
   { value: '日本語', code: 'ja', shortLabel: '日本語' },
   { value: '한국어', code: 'ko', shortLabel: '한국어' },
 ] as const
+
+const TRANSLATION_MODE_OPTIONS: Array<{
+  value: TranslationMode
+  label: string
+  description: string
+}> = [
+  {
+    value: 'hybrid',
+    label: '混合模式',
+    description: 'DeepL 出主译文，AI 负责陌生词分析',
+  },
+  {
+    value: 'deepl',
+    label: 'DeepL',
+    description: '只保留机器翻译结果，追求稳定速度',
+  },
+  {
+    value: 'ai',
+    label: 'AI',
+    description: '只使用 AI 翻译与提词，表达更灵活',
+  },
+]
+
+const TRANSLATION_PROVIDER_LABELS = {
+  deepl: 'DeepL',
+  moonshot: 'AI',
+  fallback: '离线回退',
+} as const
+
+const VOCABULARY_PROVIDER_LABELS = {
+  moonshot: 'AI',
+  fallback: '离线回退',
+  none: '未启用',
+} as const
 
 type AppTranslateLanguage = (typeof LANGUAGE_OPTIONS)[number]['value']
 type AppTranslateLanguageCode = (typeof LANGUAGE_OPTIONS)[number]['code']
@@ -117,6 +152,12 @@ export default function TranslatePage() {
   const [inputText, setInputText] = useState('')
   const [sourceLang, setSourceLang] = useState<AppTranslateLanguage>('简体中文')
   const [targetLang, setTargetLang] = useState<AppTranslateLanguage>('English')
+  const [translationMode, setTranslationMode] = useState<TranslationMode>(() => {
+    const savedMode = localStorage.getItem('linswift.translate.mode')
+    return savedMode === 'ai' || savedMode === 'deepl' || savedMode === 'hybrid'
+      ? savedMode
+      : 'hybrid'
+  })
   const [isLoading, setIsLoading] = useState(false)
   const [result, setResult] = useState<TranslateResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -127,6 +168,10 @@ export default function TranslatePage() {
   const [isInputFocused, setIsInputFocused] = useState(false)
 
   useEffect(() => { fetchHistory(20) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    localStorage.setItem('linswift.translate.mode', translationMode)
+  }, [translationMode])
 
   const currentHistoryItem = useMemo(
     () => history.find(item => item.id === currentTranslationId) || null,
@@ -254,7 +299,7 @@ export default function TranslatePage() {
     setResult(null)
 
     try {
-      const translateResult = await translateText(inputText, sourceLang, targetLang)
+      const translateResult = await translateText(inputText, sourceLang, targetLang, translationMode)
       setResult(translateResult)
 
       const { data } = await saveTranslation({
@@ -273,7 +318,7 @@ export default function TranslatePage() {
     } finally {
       setIsLoading(false)
     }
-  }, [appendStudy, inputText, saveTranslation, sourceLang, targetLang])
+  }, [appendStudy, inputText, saveTranslation, sourceLang, targetLang, translationMode])
 
   const handleCopy = async () => {
     if (!result) return
@@ -384,6 +429,47 @@ export default function TranslatePage() {
             <option key={lang.value} value={lang.value}>{lang.value}</option>
           ))}
         </select>
+      </div>
+
+      <div className="mb-3 px-5">
+        <div
+          className="rounded-[var(--radius-md)] bg-[var(--color-card)] p-3"
+          style={{ boxShadow: 'var(--shadow-card)' }}
+        >
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[12px] font-medium text-[var(--color-muted)]">翻译模式</span>
+            <span className="text-[11px] text-[var(--color-muted-light)]">
+              可随时切换
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {TRANSLATION_MODE_OPTIONS.map((option) => {
+              const active = translationMode === option.value
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setTranslationMode(option.value)}
+                  className={`rounded-[16px] border px-3 py-2 text-left transition-all active:scale-[0.98] ${
+                    active
+                      ? 'border-[var(--color-primary)] bg-[var(--color-primary-light)]'
+                      : 'border-[var(--color-border)] bg-[var(--color-background-secondary)]'
+                  }`}
+                >
+                  <span className={`block text-[13px] font-semibold ${
+                    active ? 'text-[var(--color-primary)]' : 'text-[var(--color-foreground)]'
+                  }`}
+                  >
+                    {option.label}
+                  </span>
+                  <span className="mt-1 block text-[11px] leading-relaxed text-[var(--color-muted)]">
+                    {option.description}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
       </div>
 
       <div
@@ -502,7 +588,7 @@ export default function TranslatePage() {
                 翻译结果
               </span>
               <span className="mt-0.5 block text-[11px] text-[var(--color-muted-light)]">
-                收藏时会写入 {LANG_SHORT_LABEL_MAP[targetLang]} 词库
+                主翻译：{TRANSLATION_PROVIDER_LABELS[result.translationProvider]} · 生词分析：{VOCABULARY_PROVIDER_LABELS[result.vocabularyProvider]}
               </span>
             </div>
             <button
@@ -515,6 +601,20 @@ export default function TranslatePage() {
           </div>
           <p className="leading-relaxed text-[15px] text-[var(--color-foreground)]">
             {renderHighlightedText(result.translatedText, result.unfamiliarWords)}
+          </p>
+
+          {result.notes.length > 0 && (
+            <div className="mt-3 space-y-2 rounded-[16px] bg-[var(--color-background-secondary)] p-3">
+              {result.notes.map((note, index) => (
+                <p key={`${note}-${index}`} className="text-[12px] leading-relaxed text-[var(--color-muted)]">
+                  {note}
+                </p>
+              ))}
+            </div>
+          )}
+
+          <p className="mt-3 text-[11px] text-[var(--color-muted-light)]">
+            收藏时会写入 {LANG_SHORT_LABEL_MAP[targetLang]} 词库
           </p>
 
           <button
