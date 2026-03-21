@@ -10,8 +10,9 @@
  * 5. 图书馆推荐（跳转到书架页）
  */
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { gsap } from 'gsap'
 import {
   Settings, Flame, BookOpenText, Headphones, Mic, BookOpen,
   Loader2, RefreshCw, Quote,
@@ -53,12 +54,50 @@ export default function LearnPage() {
   const [heatmapLevels, setHeatmapLevels] = useState<number[]>(cachedHeatmapLevels)
   const [streakDays, setStreakDays] = useState(cachedStreakDays)
   const [books, setBooks] = useState<UserBook[]>(cachedBooks)
+  const pageRef = useRef<HTMLDivElement>(null)
 
   const isMounted = useRef(true)
   useEffect(() => {
     isMounted.current = true
     return () => { isMounted.current = false }
   }, [])
+
+  useLayoutEffect(() => {
+    if (!pageRef.current) return
+
+    const ctx = gsap.context(() => {
+      const mm = gsap.matchMedia()
+
+      mm.add('(prefers-reduced-motion: reduce)', () => {
+        gsap.set('.learn-banner, .learn-section-title, .learn-task-card, .learn-book-card, .learn-side-card', { clearProps: 'all' })
+      })
+
+      mm.add('(prefers-reduced-motion: no-preference)', () => {
+        const intro = gsap.timeline({ defaults: { ease: 'power3.out' } })
+
+        intro
+          .from('.learn-banner', { y: 26, autoAlpha: 0, duration: 0.6 })
+          .from('.learn-section-title', { y: 18, autoAlpha: 0, stagger: 0.08, duration: 0.4 }, '-=0.3')
+          .from('.learn-task-card', { y: 24, autoAlpha: 0, stagger: 0.08, duration: 0.5 }, '-=0.2')
+          .from('.learn-book-card', { y: 20, autoAlpha: 0, stagger: 0.08, duration: 0.45 }, '-=0.25')
+          .from('.learn-side-card', { x: 20, autoAlpha: 0, stagger: 0.12, duration: 0.45 }, '-=0.5')
+
+        if (isDesktop) {
+          gsap.to('.learn-banner-quote', {
+            y: -6,
+            duration: 2.8,
+            ease: 'sine.inOut',
+            repeat: -1,
+            yoyo: true,
+          })
+        }
+
+        return () => mm.revert()
+      })
+    }, pageRef)
+
+    return () => ctx.revert()
+  }, [isDesktop])
 
   useEffect(() => {
     if (!user?.id) {
@@ -162,7 +201,7 @@ export default function LearnPage() {
   }
 
   return (
-    <div className={isDesktop ? '' : 'px-5 pb-4'}>
+    <div ref={pageRef} className={isDesktop ? '' : 'px-5 pb-4'}>
       {/* ===== Header（仅移动端显示，桌面端已有侧边导航 logo）===== */}
       {!isDesktop && (
         <div className="flex items-center justify-between py-4">
@@ -187,7 +226,7 @@ export default function LearnPage() {
         <div>
           {/* AI 欢迎 Banner */}
           <div
-            className="rounded-2xl p-5 mb-5 text-white relative overflow-hidden"
+            className="learn-banner rounded-2xl p-5 mb-5 text-white relative overflow-hidden"
             style={{ background: 'linear-gradient(135deg, #FF8400, #FF9E33)' }}
           >
             {isLoadingRec ? (
@@ -206,7 +245,7 @@ export default function LearnPage() {
                   {t(lang, 'learn_ready_title')}
                 </h2>
 
-                <div className="mt-3 p-3 bg-white/15 rounded-xl backdrop-blur-sm">
+                <div className="learn-banner-quote mt-3 p-3 bg-white/15 rounded-xl backdrop-blur-sm will-change-transform">
                   <div className="flex items-start gap-2">
                     <Quote size={14} className="text-white/70 mt-0.5 shrink-0" />
                     <div>
@@ -249,7 +288,7 @@ export default function LearnPage() {
           {/* 今日任务 —— 桌面端 SpotlightCard */}
           <div className="mb-5">
             <h3 className={`${isDesktop ? 'text-[18px]' : 'text-[16px]'} font-bold text-[var(--color-foreground)] mb-3 font-secondary`}>
-              {t(lang, 'learn_today_tasks')}
+              <span className="learn-section-title inline-block">{t(lang, 'learn_today_tasks')}</span>
             </h3>
             <div className={`grid ${isDesktop ? 'grid-cols-4' : 'grid-cols-4'} gap-3`}>
               {isDesktop ? (
@@ -274,7 +313,7 @@ export default function LearnPage() {
           <div className={isDesktop ? 'mb-5' : ''}>
             <div className="flex items-center justify-between mb-3">
               <h3 className={`${isDesktop ? 'text-[18px]' : 'text-[16px]'} font-bold text-[var(--color-foreground)] font-secondary`}>
-                {t(lang, 'learn_library')}
+                <span className="learn-section-title inline-block">{t(lang, 'learn_library')}</span>
               </h3>
               <button onClick={() => navigate('/bookshelf')} className="text-[12px] text-[var(--color-primary)] font-semibold">
                 {t(lang, 'learn_all')}
@@ -290,7 +329,7 @@ export default function LearnPage() {
                 return (
                   <div
                     key={book.id}
-                    className={`${isDesktop ? 'max-w-[220px]' : 'shrink-0 w-[148px]'} glass-card glass-card-interactive w-full rounded-[24px] p-2.5`}
+                    className={`learn-book-card ${isDesktop ? 'max-w-[220px]' : 'shrink-0 w-[148px]'} glass-card glass-card-interactive w-full rounded-[24px] p-2.5`}
                     onClick={() => openLibraryBook(book)}
                   >
                     <div className="mb-3 overflow-hidden rounded-[18px]">
@@ -327,7 +366,7 @@ export default function LearnPage() {
           <div className="flex flex-col gap-5">
             {/* 学习热度卡片 */}
             <SpotlightCard
-              className="bg-[var(--color-card)] border border-[var(--color-border)] !p-5"
+              className="learn-side-card bg-[var(--color-card)] border border-[var(--color-border)] !p-5"
               spotlightColor="rgba(255, 132, 0, 0.12)"
             >
               <div className="flex items-center justify-between mb-3">
@@ -344,7 +383,7 @@ export default function LearnPage() {
 
             {/* 快捷操作卡片 */}
             <SpotlightCard
-              className="bg-[var(--color-card)] border border-[var(--color-border)] !p-5"
+              className="learn-side-card bg-[var(--color-card)] border border-[var(--color-border)] !p-5"
               spotlightColor="rgba(139, 92, 246, 0.12)"
             >
               <h4 className="text-[15px] font-bold text-[var(--color-foreground)] mb-3">{t(lang, 'learn_quick')}</h4>
@@ -379,7 +418,7 @@ export default function LearnPage() {
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <Flame size={18} className="text-[var(--color-primary)]" />
-              <span className="text-[16px] font-bold text-[var(--color-foreground)] font-secondary">{t(lang, 'learn_heat')}</span>
+              <span className="learn-section-title inline-block text-[16px] font-bold text-[var(--color-foreground)] font-secondary">{t(lang, 'learn_heat')}</span>
             </div>
             <span className="text-[12px] text-[var(--color-primary)] font-semibold flex items-center gap-1">
               🔥 {tf(lang, 'learn_streak', { days: streakDays })}
@@ -404,7 +443,7 @@ interface DesktopTaskCardProps {
 function DesktopTaskCard({ icon: Icon, label, desc, color, onClick }: DesktopTaskCardProps) {
   return (
     <SpotlightCard
-      className="bg-[var(--color-card)] border border-[var(--color-border)] !p-0 cursor-pointer hover:scale-[1.02] hover:shadow-lg"
+      className="learn-task-card bg-[var(--color-card)] border border-[var(--color-border)] !p-0 cursor-pointer hover:scale-[1.02] hover:shadow-lg"
       spotlightColor={`${color}25`}
     >
       <div className="flex flex-col items-center gap-2.5 py-5 px-3" onClick={onClick}>
@@ -434,7 +473,7 @@ interface TaskCardProps {
 function TaskCard({ icon: Icon, label, desc, color, iconColor, onClick }: TaskCardProps) {
   return (
     <div
-      className="flex flex-col items-center gap-2 py-4 px-2 rounded-[var(--radius-lg)] bg-[var(--color-card)] cursor-pointer active:scale-[0.96] transition-transform"
+      className="learn-task-card flex flex-col items-center gap-2 py-4 px-2 rounded-[var(--radius-lg)] bg-[var(--color-card)] cursor-pointer active:scale-[0.96] transition-transform"
       style={{ boxShadow: 'var(--shadow-card)' }}
       onClick={onClick}
     >

@@ -14,8 +14,8 @@ export interface LegalDocument {
 }
 
 const operatorName = 'Linswift Team'
-const contactEmail = 'hello@linswift.com'
-const supportEmail = 'support@linswift.com'
+const contactEmail = 'aw@linswift.com'
+const supportEmail = 'aw@linswift.com'
 const dateLabel = '2026年3月20日'
 
 export const userAgreementDocument: LegalDocument = {

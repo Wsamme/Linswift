@@ -36,9 +36,9 @@ export default function AboutPage() {
     { icon: '🔄', label: '检查更新', value: '已是最新版', valueColor: 'text-[var(--color-success)]' },
     { icon: '📄', label: '用户协议', action: () => navigate('/legal/user-agreement') },
     { icon: '🔒', label: '隐私政策', action: () => navigate('/legal/privacy-policy') },
-    { icon: '💬', label: '帮助与反馈', action: () => openMailto('support@linswift.com', 'Linswift 帮助与反馈') },
-    { icon: '⭐', label: '给我们评分', action: () => openMailto('hello@linswift.com', 'Linswift 产品评分与建议') },
-    { icon: '📧', label: '联系我们', action: () => openExternal('mailto:hello@linswift.com') },
+    { icon: '💬', label: '帮助与反馈', action: () => openMailto('aw@linswift.com', 'Linswift 帮助与反馈') },
+    { icon: '⭐', label: '给我们评分', action: () => openMailto('aw@linswift.com', 'Linswift 产品评分与建议') },
+    { icon: '📧', label: '联系我们', action: () => openExternal('mailto:aw@linswift.com') },
   ]
 
   return (

@@ -12,9 +12,10 @@
  * 8. 页脚
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { gsap } from 'gsap'
+import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import {
   Sparkles, Languages, BookOpen, Headphones, Mic, Brain, BookOpenText,
   Gamepad2, BarChart3, FileText, Shield, Zap, Globe, Star, ChevronRight, Puzzle,
@@ -24,6 +25,8 @@ import SpotlightCard from '../components/reactbits/SpotlightCard'
 import AuroraCSS from '../components/reactbits/AuroraCSS'
 import { useAuth } from '../contexts/AuthContext'
 import BrandLogo from '../components/common/BrandLogo'
+
+gsap.registerPlugin(ScrollTrigger)
 
 export default function LandingPage() {
   const navigate = useNavigate()
@@ -48,6 +51,7 @@ export default function LandingPage() {
         onGetStarted={() => navigate('/register')}
         onExtensionGuide={() => navigate('/browser-extension')}
       />
+      <AIWorkflowSection />
       <CoreFeatures />
       <FeatureGrid onExtensionGuide={() => navigate('/browser-extension')} />
       <PricingSection onGetStarted={() => navigate('/register')} />
@@ -316,6 +320,148 @@ function HeroSection({
   )
 }
 
+function AIWorkflowSection() {
+  const sectionRef = useRef<HTMLElement>(null)
+
+  useLayoutEffect(() => {
+    if (!sectionRef.current) return
+
+    const ctx = gsap.context(() => {
+      const mm = gsap.matchMedia()
+
+      mm.add('(prefers-reduced-motion: reduce)', () => {
+        gsap.set('.ai-flow-title, .ai-flow-copy, .ai-flow-line, .ai-flow-step', { clearProps: 'all' })
+      })
+
+      mm.add('(prefers-reduced-motion: no-preference)', () => {
+        gsap.set('.ai-flow-line', { scaleX: 0, transformOrigin: 'left center' })
+
+        const reveal = gsap.timeline({
+          defaults: { ease: 'power3.out' },
+          scrollTrigger: {
+            trigger: sectionRef.current,
+            start: 'top 72%',
+            once: true,
+          },
+        })
+
+        reveal
+          .from('.ai-flow-title', { y: 36, autoAlpha: 0, duration: 0.75 })
+          .from('.ai-flow-copy', { y: 24, autoAlpha: 0, duration: 0.6 }, '-=0.45')
+          .to('.ai-flow-line', { scaleX: 1, duration: 0.8 }, '-=0.2')
+          .from('.ai-flow-step', {
+            y: 46,
+            autoAlpha: 0,
+            scale: 0.96,
+            stagger: 0.12,
+            duration: 0.7,
+          }, '-=0.45')
+          .from('.ai-flow-chip', {
+            y: 12,
+            autoAlpha: 0,
+            stagger: 0.06,
+            duration: 0.35,
+          }, '-=0.35')
+
+        const pulse = gsap.timeline({ repeat: -1, repeatDelay: 0.8, defaults: { ease: 'power2.inOut' } })
+        pulse
+          .to('.ai-flow-orb', { xPercent: 340, duration: 5.2 })
+          .to('.ai-flow-step-badge', { y: -5, stagger: 0.08, duration: 0.35 }, 0)
+          .to('.ai-flow-step-badge', { y: 0, stagger: 0.08, duration: 0.35 }, 0.35)
+
+        return () => {
+          pulse.kill()
+          mm.revert()
+        }
+      })
+    }, sectionRef)
+
+    return () => ctx.revert()
+  }, [])
+
+  const steps = [
+    {
+      badge: '01',
+      title: 'AI 识别输入内容',
+      desc: '读取网页、文章、字幕或 PDF，先判断语言、场景和你当前的学习状态。',
+      chips: ['网页', '字幕', 'PDF'],
+      color: '#FF8400',
+    },
+    {
+      badge: '02',
+      title: '拆词与语境讲解',
+      desc: '不是只给直译，而是同步标出陌生词、语境释义、发音和关键结构。',
+      chips: ['词义', '语法', '发音'],
+      color: '#8B5CF6',
+    },
+    {
+      badge: '03',
+      title: '生成个性化练习',
+      desc: '根据不会的词和难句，自动推送拼写、闪卡、听力和 AI 对话任务。',
+      chips: ['闪卡', '拼写', '对话'],
+      color: '#3B82F6',
+    },
+    {
+      badge: '04',
+      title: '回流到复习闭环',
+      desc: '学习结果进入记忆曲线，第二天开始自动形成新的复习与阅读建议。',
+      chips: ['热度', '复习', '推荐'],
+      color: '#22C55E',
+    },
+  ]
+
+  return (
+    <section ref={sectionRef} className="py-18 md:py-24">
+      <div className="max-w-[1200px] mx-auto px-6">
+        <div className="max-w-[760px]">
+          <span className="ai-flow-title text-[13px] font-semibold text-[#FF8400] uppercase tracking-wider">AI Workflow</span>
+          <h2 className="ai-flow-title text-[28px] md:text-[40px] font-extrabold mt-3">
+            AI 辅助学习，不是单点工具，而是一条持续闭环
+          </h2>
+          <p className="ai-flow-copy text-[16px] text-[#888] mt-4 leading-8">
+            Linswift 把识别、讲解、练习和复习串成同一条链路。你每次阅读、翻译和开口，都会反过来影响下一次学习任务。
+          </p>
+        </div>
+
+        <div className="relative mt-12">
+          <div className="ai-flow-line absolute left-0 right-0 top-5 hidden h-[2px] bg-gradient-to-r from-[#FF8400] via-[#8B5CF6] to-[#22C55E] md:block" />
+          <div className="pointer-events-none absolute left-0 top-2 hidden h-8 w-8 rounded-full bg-[#FF8400]/18 blur-md md:block ai-flow-orb" />
+
+          <div className="grid gap-5 md:grid-cols-4">
+            {steps.map((step) => (
+              <article
+                key={step.badge}
+                className="ai-flow-step relative rounded-[28px] border border-[#F0F0F0] bg-white p-6 shadow-[0_12px_30px_rgba(15,23,42,0.04)]"
+              >
+                <div
+                  className="ai-flow-step-badge flex h-10 w-10 items-center justify-center rounded-2xl text-[13px] font-bold text-white"
+                  style={{ backgroundColor: step.color }}
+                >
+                  {step.badge}
+                </div>
+                <h3 className="mt-5 text-[20px] font-bold leading-tight">{step.title}</h3>
+                <p className="mt-3 text-[14px] leading-7 text-[#666]">{step.desc}</p>
+
+                <div className="mt-5 flex flex-wrap gap-2">
+                  {step.chips.map((chip) => (
+                    <span
+                      key={chip}
+                      className="ai-flow-chip rounded-full px-3 py-1.5 text-[12px] font-semibold"
+                      style={{ backgroundColor: `${step.color}12`, color: step.color }}
+                    >
+                      {chip}
+                    </span>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 /* ============================================================
  * 三大核心功能（图文交替）
  * ============================================================ */
@@ -572,7 +718,7 @@ function PricingSection({ onGetStarted }: { onGetStarted: () => void }) {
               </ul>
 
               <button
-                onClick={p.name === 'Team' ? () => window.location.href = 'mailto:hello@linswift.com?subject=团队版咨询' : onGetStarted}
+                onClick={p.name === 'Team' ? () => window.location.href = 'mailto:aw@linswift.com?subject=团队版咨询' : onGetStarted}
                 className={`w-full py-3.5 rounded-xl text-[15px] font-bold transition-all ${
                   p.popular
                     ? 'bg-[#FF8400] hover:bg-[#E87600] text-white shadow-lg shadow-[#FF8400]/20'
@@ -709,7 +855,7 @@ export function Footer({ linkBase = '' }: { linkBase?: string }) {
   ]
 
   const resourceLinks = [
-    { label: '帮助中心', href: 'mailto:support@linswift.com' },
+    { label: '帮助中心', href: 'mailto:aw@linswift.com' },
     { label: '插件安装教程', href: '/browser-extension' },
     { label: '下载浏览器插件', href: '/downloads/linswift-browser-extension.zip' },
     { label: '使用教程', href: `${linkBase}#features` },
@@ -718,12 +864,7 @@ export function Footer({ linkBase = '' }: { linkBase?: string }) {
   const legalLinks = [
     { label: '服务条款', href: '/legal/user-agreement' },
     { label: '隐私政策', href: '/legal/privacy-policy' },
-    { label: '联系我们', href: 'mailto:hello@linswift.com' },
-  ]
-
-  const socialLinks = [
-    { label: 'GitHub', href: 'https://github.com/icecream-melting/Linswift' },
-    { label: 'Twitter', href: 'https://twitter.com' },
+    { label: '联系我们', href: 'mailto:aw@linswift.com' },
   ]
 
   return (
@@ -741,7 +882,7 @@ export function Footer({ linkBase = '' }: { linkBase?: string }) {
               AI 驱动的智能英语学习平台<br />
               让每个人都能高效学英语
             </p>
-            <p className="text-[12px] text-white/30 mt-3">hello@linswift.com</p>
+            <p className="text-[12px] text-white/30 mt-3">aw@linswift.com</p>
           </div>
 
           {/* 产品 */}
@@ -775,14 +916,9 @@ export function Footer({ linkBase = '' }: { linkBase?: string }) {
           </div>
         </div>
 
-        <div className="pt-8 border-t border-white/10 flex flex-col md:flex-row items-center justify-between gap-4">
+        <div className="pt-8 border-t border-white/10 flex items-center justify-between gap-4">
           <span className="text-[12px] text-white/40">© 2026 Linswift. All rights reserved.</span>
-          <div className="flex items-center gap-4">
-            {socialLinks.map(s => (
-              <a key={s.label} href={s.href} target="_blank" rel="noopener noreferrer"
-                className="text-[12px] text-white/40 hover:text-white/70 transition-colors">{s.label}</a>
-            ))}
-          </div>
+          <span className="text-[12px] text-white/30">aw@linswift.com</span>
         </div>
       </div>
     </footer>
