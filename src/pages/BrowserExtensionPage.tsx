@@ -10,7 +10,7 @@ import {
 } from 'lucide-react'
 import { Footer, Navbar } from './LandingPage'
 
-const DOWNLOAD_URL = '/downloads/linswift-browser-extension.zip'
+const DOWNLOAD_URL = 'https://www.linswift.com/downloads/linswift-browser-extension.zip'
 
 const installSteps = [
   '下载浏览器插件安装包，解压到一个后续不会随意删除的本地文件夹。',

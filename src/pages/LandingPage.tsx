@@ -28,6 +28,10 @@ import BrandLogo from '../components/common/BrandLogo'
 
 gsap.registerPlugin(ScrollTrigger)
 
+const WEBSITE_BASE_URL = 'https://www.linswift.com'
+const BROWSER_EXTENSION_GUIDE_URL = `${WEBSITE_BASE_URL}/browser-extension`
+const BROWSER_EXTENSION_DOWNLOAD_URL = `${WEBSITE_BASE_URL}/downloads/linswift-browser-extension.zip`
+
 export default function LandingPage() {
   const navigate = useNavigate()
   const { user, loading: authLoading } = useAuth()
@@ -49,11 +53,11 @@ export default function LandingPage() {
       />
       <HeroSection
         onGetStarted={() => navigate('/register')}
-        onExtensionGuide={() => navigate('/browser-extension')}
+        onExtensionGuide={() => window.location.assign(BROWSER_EXTENSION_GUIDE_URL)}
       />
       <AIWorkflowSection />
       <CoreFeatures />
-      <FeatureGrid onExtensionGuide={() => navigate('/browser-extension')} />
+      <FeatureGrid onExtensionGuide={() => window.location.assign(BROWSER_EXTENSION_GUIDE_URL)} />
       <PricingSection onGetStarted={() => navigate('/register')} />
       <TestimonialsSection />
       <FinalCTA onGetStarted={() => navigate('/register')} />
@@ -113,14 +117,14 @@ export function Navbar({
     { label: '功能', href: `${linkBase}#features`, icon: Zap, color: '#FF8400' },
     { label: '定价', href: `${linkBase}#pricing`, icon: BarChart3, color: '#8B5CF6' },
     { label: '评价', href: `${linkBase}#testimonials`, icon: Star, color: '#3B82F6' },
-    { label: '插件教程', href: '/browser-extension', icon: Puzzle, color: '#22C55E' },
+    { label: '插件教程', href: BROWSER_EXTENSION_GUIDE_URL, icon: Puzzle, color: '#22C55E' },
   ]
 
   const navLinks = [
     { label: '功能', href: `${linkBase}#features` },
     { label: '定价', href: `${linkBase}#pricing` },
     { label: '评价', href: `${linkBase}#testimonials` },
-    { label: '插件教程', href: '/browser-extension' },
+    { label: '插件教程', href: BROWSER_EXTENSION_GUIDE_URL },
   ]
 
   return (
@@ -856,8 +860,8 @@ export function Footer({ linkBase = '' }: { linkBase?: string }) {
 
   const resourceLinks = [
     { label: '帮助中心', href: 'mailto:aw@linswift.com' },
-    { label: '插件安装教程', href: '/browser-extension' },
-    { label: '下载浏览器插件', href: '/downloads/linswift-browser-extension.zip' },
+    { label: '插件安装教程', href: BROWSER_EXTENSION_GUIDE_URL },
+    { label: '下载浏览器插件', href: BROWSER_EXTENSION_DOWNLOAD_URL },
     { label: '使用教程', href: `${linkBase}#features` },
   ]
 
