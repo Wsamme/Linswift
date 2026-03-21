@@ -28,6 +28,11 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     ja: '日本語',
     ko: '한국어',
   }
+  const TRANSLATION_MODE_OPTIONS = {
+    hybrid: '混合模式',
+    deepl: 'DeepL',
+    ai: 'AI',
+  }
   const YOUTUBE_SUBTITLE_MODE_OPTIONS = {
     original: '原文',
     bilingual: '双语',
@@ -54,6 +59,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
         inlineTranslateEnabled: false,
         autoTranslateOnLoad: true,
         translationLanguage: 'zh-CN',
+        translationMode: 'hybrid',
         disabledAutoTranslateHosts: [],
         youtubeSubtitleMode: 'vocab',
         uiScale: 0.56,
@@ -84,6 +90,8 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       cues: [],
       translations: {},
       translationUnavailable: false,
+      translationProvider: '',
+      translationNote: '',
       lastStatusKey: '',
     },
     study: {
@@ -1843,6 +1851,8 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     panelState.youtube.cues = []
     panelState.youtube.translations = {}
     panelState.youtube.translationUnavailable = false
+    panelState.youtube.translationProvider = ''
+    panelState.youtube.translationNote = ''
     panelState.youtube.lastStatusKey = ''
     youtubeTranslationRequestKey = ''
     youtubeTranscriptRequestKey = ''
@@ -1975,7 +1985,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       <div class="linswift-youtube-overlay-card">
         <div class="linswift-youtube-overlay-meta">
           <span>YouTube · ${escapeHtml(getYouTubeSubtitleModeLabel())}</span>
-          <span>${escapeHtml(getTranslationLanguageLabel())}</span>
+          <span>${escapeHtml(getTranslationLanguageLabel())} · ${escapeHtml(getTranslationModeLabel())}</span>
         </div>
         ${originalHtml}
         ${translationHtml}
@@ -2072,6 +2082,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       panelState.youtube.videoId,
       panelState.youtube.transcriptTrackKey,
       getTranslationLanguage(),
+      getTranslationMode(),
     ].join('::')
 
     if (
@@ -2093,6 +2104,8 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
 
     youtubeTranscriptTranslationRequestKey = requestKey
     panelState.youtube.transcriptTranslationStatus = 'loading'
+    panelState.youtube.translationProvider = ''
+    panelState.youtube.translationNote = ''
     renderSummary()
 
     let translatedAny = false
@@ -2107,6 +2120,8 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
           type: 'panel-translate-lines',
           lines: batch,
         })
+        panelState.youtube.translationProvider = String(response.provider || '')
+        panelState.youtube.translationNote = String(response.note || '')
 
         const translatedLines = Array.isArray(response.lines) ? response.lines : []
         let batchUpdated = false
@@ -2217,6 +2232,8 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
         type: 'panel-translate-lines',
         lines: [cueText],
       })
+      panelState.youtube.translationProvider = String(response.provider || '')
+      panelState.youtube.translationNote = String(response.note || '')
 
       const translatedLine = Array.isArray(response.lines) ? String(response.lines[0] || '') : ''
       panelState.youtube.translationUnavailable = Boolean(response.unavailable)
@@ -2572,6 +2589,15 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
 
   function getTranslationLanguageLabel() {
     return TRANSLATION_LANGUAGE_OPTIONS[getTranslationLanguage()] || '简中'
+  }
+
+  function getTranslationMode() {
+    const key = panelState.extensionState.settings.translationMode || 'hybrid'
+    return TRANSLATION_MODE_OPTIONS[key] ? key : 'hybrid'
+  }
+
+  function getTranslationModeLabel() {
+    return TRANSLATION_MODE_OPTIONS[getTranslationMode()] || '混合模式'
   }
 
   function updateInlineTranslationForWord(word, meaning) {
@@ -3498,13 +3524,19 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
             : panelState.youtube.transcriptTranslationStatus === 'error'
               ? '整段翻译失败'
               : transcriptCount > 0
-                ? '等待整段翻译'
+              ? '等待整段翻译'
                 : '等待整段翻译'
+    const translationStatusWithNote = panelState.youtube.translationNote
+      ? `${translationStatus} · ${panelState.youtube.translationNote}`
+      : translationStatus
     const subtitleStatus = panelState.youtube.captionsEnabled
       ? panelState.youtube.subtitleReady
-        ? `字幕已就绪 · 已采集 ${cueCount} 条 · ${prefetchStatus} · ${translationStatus}`
+        ? `字幕已就绪 · 已采集 ${cueCount} 条 · ${prefetchStatus} · ${translationStatusWithNote}`
         : '字幕已开启 · 等待字幕出现'
-      : `${prefetchStatus} · ${translationStatus}`
+      : `${prefetchStatus} · ${translationStatusWithNote}`
+    const translationEngineNote = panelState.youtube.translationProvider
+      ? `${getTranslationModeLabel()} · ${panelState.youtube.translationProvider.toUpperCase()}`
+      : `${getTranslationModeLabel()}`
 
     refs.youtubeCard.innerHTML = `
       <div class="linswift-youtube-card-top">
@@ -3513,6 +3545,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
           <p class="linswift-youtube-meta">
             ${escapeHtml(panelState.youtube.channel || 'YouTube')} · ${escapeHtml(subtitleStatus)}
           </p>
+          <p class="linswift-youtube-meta">${escapeHtml(translationEngineNote)}</p>
         </div>
         <span class="linswift-tag">视频字幕</span>
       </div>
@@ -3605,6 +3638,9 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     }
     if (refs.translationLanguageSelect) {
       refs.translationLanguageSelect.value = getTranslationLanguage()
+    }
+    if (refs.translationModeSelect) {
+      refs.translationModeSelect.value = getTranslationMode()
     }
     if (refs.sizeSelect) {
       refs.sizeSelect.value = String(getUiScale())
@@ -3941,6 +3977,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       panelState.extensionState.settings.inlineTranslateEnabled
     )
     const previousLanguage = panelState.extensionState.settings.translationLanguage || 'zh-CN'
+    const previousTranslationMode = panelState.extensionState.settings.translationMode || 'hybrid'
     const previousYouTubeMode = panelState.extensionState.settings.youtubeSubtitleMode || 'vocab'
     const nextSettings = {
       ...panelState.extensionState.settings,
@@ -3948,6 +3985,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       inlineTranslateEnabled: panelState.extensionState.settings.inlineTranslateEnabled,
       autoTranslateOnLoad: Boolean(panelState.extensionState.settings.autoTranslateOnLoad),
       translationLanguage: refs.translationLanguageSelect.value || previousLanguage,
+      translationMode: refs.translationModeSelect?.value || previousTranslationMode,
       disabledAutoTranslateHosts: getDisabledAutoTranslateHosts(),
       youtubeSubtitleMode:
         refs.youtubeCard?.querySelector?.('[data-youtube-mode-select]')?.value || previousYouTubeMode,
@@ -3980,10 +4018,15 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
 
     if (
       panelState.youtube.enabled &&
-      previousLanguage !== panelState.extensionState.settings.translationLanguage
+      (
+        previousLanguage !== panelState.extensionState.settings.translationLanguage ||
+        previousTranslationMode !== panelState.extensionState.settings.translationMode
+      )
     ) {
       panelState.youtube.translations = {}
       panelState.youtube.translationUnavailable = false
+      panelState.youtube.translationProvider = ''
+      panelState.youtube.translationNote = ''
       panelState.youtube.transcriptTranslationStatus = 'idle'
       youtubeTranscriptTranslationRequestKey = ''
     }
@@ -4002,6 +4045,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       (
         previousInlineTranslateEnabled !== panelState.extensionState.settings.inlineTranslateEnabled ||
         previousLanguage !== panelState.extensionState.settings.translationLanguage ||
+        previousTranslationMode !== panelState.extensionState.settings.translationMode ||
         previousYouTubeMode !== panelState.extensionState.settings.youtubeSubtitleMode
       )
     ) {
@@ -4011,7 +4055,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       }
     }
 
-    setStatus('阅读设置已保存。')
+    setStatus(`阅读设置已保存 · 当前翻译模式：${getTranslationModeLabel()}`)
   }
 
   async function toggleInlineTranslate() {
@@ -4247,6 +4291,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       scanButton: root.querySelector('[data-scan-button]'),
       inlineToggle: root.querySelector('[data-inline-toggle]'),
       translationLanguageSelect: root.querySelector('[data-translation-language]'),
+      translationModeSelect: root.querySelector('[data-translation-mode]'),
       sizeSelect: root.querySelector('[data-size-select]'),
       autoTranslateToggle: root.querySelector('[data-auto-translate-toggle]'),
       siteAutoTranslateToggle: root.querySelector('[data-site-auto-translate-toggle]'),
@@ -4275,7 +4320,8 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       !refs.kicker ||
       !refs.tooltip ||
       !refs.studyOverlay ||
-      !refs.translationLanguageSelect
+      !refs.translationLanguageSelect ||
+      !refs.translationModeSelect
     ) {
       refs = null
       return null
@@ -4379,6 +4425,14 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
                   </select>
                 </div>
                 <div class="linswift-toolbar-row linswift-toolbar-row--secondary">
+                  <select class="linswift-select" data-translation-mode aria-label="网页翻译引擎">
+                    <option value="hybrid">翻译引擎 · 混合模式</option>
+                    <option value="deepl">翻译引擎 · DeepL</option>
+                    <option value="ai">翻译引擎 · AI</option>
+                  </select>
+                  <div class="linswift-tag">网页 / 字幕</div>
+                </div>
+                <div class="linswift-toolbar-row linswift-toolbar-row--secondary">
                   <button class="linswift-button" type="button" data-inline-toggle>页内直译：关</button>
                   <button class="linswift-button" type="button" data-auto-translate-toggle>自动翻译网页：开</button>
                 </div>
@@ -4386,7 +4440,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
                   <button class="linswift-button" type="button" data-site-auto-translate-toggle>当前网站自动翻译</button>
                   <button class="linswift-button" type="button" data-panel-view-back="translate">查看翻译页</button>
                 </div>
-                <p class="linswift-settings-note">开启自动翻译后，刷新网页会自动重新识别并标注。关闭当前网站后会记住该站点，下次不再自动翻译。</p>
+                <p class="linswift-settings-note">网页 / 字幕翻译引擎现在可选混合、DeepL 或 AI。开启自动翻译后，刷新网页会自动重新识别并标注。关闭当前网站后会记住该站点，下次不再自动翻译。</p>
               </section>
               <section class="linswift-toolbar">
                 <p class="linswift-section-label">界面与显示</p>
@@ -4436,6 +4490,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     })
     refs.levelSelect.addEventListener('change', saveSettings)
     refs.translationLanguageSelect.addEventListener('change', saveSettings)
+    refs.translationModeSelect.addEventListener('change', saveSettings)
     refs.sizeSelect.addEventListener('change', saveSettings)
     refs.resultsToggle.addEventListener('click', () => {
       panelState.showingSaved = false

@@ -18,6 +18,7 @@ const DEFAULT_SETTINGS = {
   inlineTranslateEnabled: false,
   autoTranslateOnLoad: true,
   translationLanguage: 'zh-CN',
+  translationMode: 'hybrid',
   disabledAutoTranslateHosts: [],
   youtubeSubtitleMode: 'vocab',
   uiScale: 0.56,

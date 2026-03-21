@@ -77,6 +77,17 @@ function parseBody(req) {
   return req.body
 }
 
+function normalizeTexts(payload) {
+  if (Array.isArray(payload?.texts)) {
+    return payload.texts
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+  }
+
+  const single = String(payload?.text || '').trim()
+  return single ? [single] : []
+}
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     res.statusCode = 204
@@ -90,9 +101,10 @@ export default async function handler(req, res) {
     return
   }
 
-  const { text, sourceLang, targetLang, context } = parseBody(req)
-  const safeText = String(text || '').trim()
-  if (!safeText) {
+  const body = parseBody(req)
+  const { sourceLang, targetLang, context } = body
+  const safeTexts = normalizeTexts(body)
+  if (safeTexts.length === 0) {
     json(res, 400, { error: '缺少待翻译文本' })
     return
   }
@@ -116,7 +128,9 @@ export default async function handler(req, res) {
   ).replace(/\/$/, '')
 
   const params = new URLSearchParams()
-  params.set('text', safeText)
+  safeTexts.forEach((text) => {
+    params.append('text', text)
+  })
   params.set('target_lang', deeplTargetLang)
   params.set('preserve_formatting', '1')
   if (deeplSourceLang) params.set('source_lang', deeplSourceLang)
@@ -140,9 +154,24 @@ export default async function handler(req, res) {
       return
     }
 
-    const translation = payload?.translations?.[0]
+    const translations = Array.isArray(payload?.translations) ? payload.translations : []
+    const translation = translations[0]
     if (!translation?.text) {
       json(res, 502, { error: 'DeepL 返回内容为空' })
+      return
+    }
+
+    if (safeTexts.length > 1) {
+      json(res, 200, {
+        lines: translations.map((item) => String(item?.text || '').trim()),
+        translatedCount: translations.reduce((count, item, index) => {
+          const translated = String(item?.text || '').trim()
+          return count + (translated && translated !== safeTexts[index] ? 1 : 0)
+        }, 0),
+        detectedSourceLanguage: translation.detected_source_language || null,
+        targetLanguage: deeplTargetLang,
+        provider: 'deepl',
+      })
       return
     }
 

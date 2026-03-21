@@ -4,3 +4,4 @@ export const SUPABASE_ANON_KEY =
 
 export const DEFAULT_VOCAB_SOURCE = 'reading'
 export const MOONSHOT_MODEL = 'moonshot-v1-8k'
+export const DEEPL_PROXY_URL = 'https://www.linswift.com/api/deepl/translate'

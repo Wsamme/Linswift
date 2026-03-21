@@ -17,7 +17,7 @@ import { useNavigate } from 'react-router-dom'
 import { gsap } from 'gsap'
 import {
   Sparkles, Languages, BookOpen, Headphones, Mic, Brain, BookOpenText,
-  Gamepad2, BarChart3, FileText, Shield, Zap, Globe, Star, ChevronRight,
+  Gamepad2, BarChart3, FileText, Shield, Zap, Globe, Star, ChevronRight, Puzzle,
   Check, ArrowRight, Menu, X,
 } from 'lucide-react'
 import SpotlightCard from '../components/reactbits/SpotlightCard'
@@ -40,10 +40,16 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen bg-white text-[#1A1A1A] overflow-x-hidden">
-      <Navbar onLogin={() => navigate('/login')} onRegister={() => navigate('/register')} />
-      <HeroSection onGetStarted={() => navigate('/register')} />
+      <Navbar
+        onLogin={() => navigate('/login')}
+        onRegister={() => navigate('/register')}
+      />
+      <HeroSection
+        onGetStarted={() => navigate('/register')}
+        onExtensionGuide={() => navigate('/browser-extension')}
+      />
       <CoreFeatures />
-      <FeatureGrid />
+      <FeatureGrid onExtensionGuide={() => navigate('/browser-extension')} />
       <PricingSection onGetStarted={() => navigate('/register')} />
       <TestimonialsSection />
       <FinalCTA onGetStarted={() => navigate('/register')} />
@@ -55,7 +61,15 @@ export default function LandingPage() {
 /* ============================================================
  * 顶部导航栏
  * ============================================================ */
-function Navbar({ onLogin, onRegister }: { onLogin: () => void; onRegister: () => void }) {
+export function Navbar({
+  onLogin,
+  onRegister,
+  linkBase = '',
+}: {
+  onLogin: () => void
+  onRegister: () => void
+  linkBase?: string
+}) {
   const [scrolled, setScrolled] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const mobileMenuRef = useRef<HTMLDivElement>(null)
@@ -92,15 +106,17 @@ function Navbar({ onLogin, onRegister }: { onLogin: () => void; onRegister: () =
   }
 
   const mobileNavCards = [
-    { label: '功能', href: '#features', icon: Zap, color: '#FF8400' },
-    { label: '定价', href: '#pricing', icon: BarChart3, color: '#8B5CF6' },
-    { label: '评价', href: '#testimonials', icon: Star, color: '#3B82F6' },
+    { label: '功能', href: `${linkBase}#features`, icon: Zap, color: '#FF8400' },
+    { label: '定价', href: `${linkBase}#pricing`, icon: BarChart3, color: '#8B5CF6' },
+    { label: '评价', href: `${linkBase}#testimonials`, icon: Star, color: '#3B82F6' },
+    { label: '插件教程', href: '/browser-extension', icon: Puzzle, color: '#22C55E' },
   ]
 
   const navLinks = [
-    { label: '功能', href: '#features' },
-    { label: '定价', href: '#pricing' },
-    { label: '评价', href: '#testimonials' },
+    { label: '功能', href: `${linkBase}#features` },
+    { label: '定价', href: `${linkBase}#pricing` },
+    { label: '评价', href: `${linkBase}#testimonials` },
+    { label: '插件教程', href: '/browser-extension' },
   ]
 
   return (
@@ -196,7 +212,13 @@ function Navbar({ onLogin, onRegister }: { onLogin: () => void; onRegister: () =
 /* ============================================================
  * Hero 区
  * ============================================================ */
-function HeroSection({ onGetStarted }: { onGetStarted: () => void }) {
+function HeroSection({
+  onGetStarted,
+  onExtensionGuide,
+}: {
+  onGetStarted: () => void
+  onExtensionGuide: () => void
+}) {
   const heroRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -242,10 +264,20 @@ function HeroSection({ onGetStarted }: { onGetStarted: () => void }) {
             免费开始学习
             <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
           </button>
-          <a href="#features"
-            className="px-8 py-4 border-2 border-[#E5E5E5] hover:border-[#FF8400] text-[16px] font-semibold rounded-2xl transition-colors">
-            了解更多
-          </a>
+          <div className="flex flex-col gap-4 sm:flex-row">
+            <a href="#features"
+              className="px-8 py-4 border-2 border-[#E5E5E5] hover:border-[#FF8400] text-[16px] font-semibold rounded-2xl transition-colors">
+              了解更多
+            </a>
+            <button
+              type="button"
+              onClick={onExtensionGuide}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border-2 border-[#DDEEDB] bg-white px-8 py-4 text-[16px] font-semibold text-[#1A1A1A] transition-colors hover:border-[#22C55E]"
+            >
+              <Puzzle size={18} className="text-[#22C55E]" />
+              浏览器插件
+            </button>
+          </div>
         </div>
 
         {/* 数据统计 */}
@@ -260,6 +292,24 @@ function HeroSection({ onGetStarted }: { onGetStarted: () => void }) {
               <div className="text-[13px] text-[#888] mt-1">{s.label}</div>
             </div>
           ))}
+        </div>
+
+        <div className="hero-stats mt-10 flex justify-center">
+          <button
+            type="button"
+            onClick={onExtensionGuide}
+            className="inline-flex max-w-[720px] items-start gap-3 rounded-[24px] border border-[#EADFD0] bg-white/82 px-5 py-4 text-left shadow-[0_12px_40px_rgba(255,132,0,0.08)] backdrop-blur-xl transition-all hover:-translate-y-0.5 hover:border-[#FF8400]"
+          >
+            <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#ECFDF3]">
+              <Puzzle size={20} className="text-[#22C55E]" />
+            </div>
+            <div>
+              <div className="text-[15px] font-bold text-[#1A1A1A]">浏览器插件已开放官网下载</div>
+              <div className="mt-1 text-[13px] leading-6 text-[#666]">
+                Chrome / Edge 可直接下载 zip 安装包，官网已提供完整安装、翻译模式和常见问题教程。
+              </div>
+            </div>
+          </button>
         </div>
       </div>
     </section>
@@ -363,7 +413,7 @@ function CoreFeatures() {
 /* ============================================================
  * 附加功能网格（SpotlightCard）
  * ============================================================ */
-function FeatureGrid() {
+function FeatureGrid({ onExtensionGuide }: { onExtensionGuide: () => void }) {
   const items = [
     { icon: Headphones, label: '听力训练', desc: '随行听 + 听歌填字 + 听力图书馆', color: '#8B5CF6' },
     { icon: Mic, label: 'AI 口语', desc: 'AI 场景对话 + 复述练习', color: '#3B82F6' },
@@ -371,6 +421,7 @@ function FeatureGrid() {
     { icon: Brain, label: '艾宾浩斯复习', desc: '科学间隔重复，对抗遗忘曲线', color: '#FF8400' },
     { icon: BarChart3, label: '学习数据', desc: '热度图 + 连续天数 + 成就追踪', color: '#EF4444' },
     { icon: FileText, label: 'PDF 阅读器', desc: '导入 PDF，保留原版排版阅读', color: '#F59E0B' },
+    { icon: Puzzle, label: '浏览器插件', desc: '官网直下 zip，页内翻译 + 字幕翻译 + 云端词库同步', color: '#22C55E', action: onExtensionGuide },
     { icon: Globe, label: '多语言翻译', desc: '支持中英日韩等多语种切换', color: '#06B6D4' },
     { icon: Shield, label: '数据安全', desc: 'Supabase 加密存储，隐私优先', color: '#8B5CF6' },
   ]
@@ -396,6 +447,16 @@ function FeatureGrid() {
                 </div>
                 <h4 className="text-[15px] font-bold mb-1">{f.label}</h4>
                 <p className="text-[13px] text-[#888] leading-relaxed">{f.desc}</p>
+                {f.action && (
+                  <button
+                    type="button"
+                    onClick={f.action}
+                    className="mt-4 inline-flex items-center gap-1 text-[13px] font-semibold transition-all hover:gap-2"
+                    style={{ color: f.color }}
+                  >
+                    查看教程 <ChevronRight size={14} />
+                  </button>
+                )}
               </SpotlightCard>
             )
           })}
@@ -638,19 +699,20 @@ function FinalCTA({ onGetStarted }: { onGetStarted: () => void }) {
 /* ============================================================
  * 页脚
  * ============================================================ */
-function Footer() {
+export function Footer({ linkBase = '' }: { linkBase?: string }) {
   const productLinks = [
-    { label: 'AI 翻译', href: '#feature-translate' },
-    { label: '智能阅读', href: '#feature-reading' },
-    { label: '游戏化记忆', href: '#feature-memory' },
-    { label: '听力训练', href: '#more-features' },
-    { label: '口语练习', href: '#more-features' },
+    { label: 'AI 翻译', href: `${linkBase}#feature-translate` },
+    { label: '智能阅读', href: `${linkBase}#feature-reading` },
+    { label: '游戏化记忆', href: `${linkBase}#feature-memory` },
+    { label: '听力训练', href: `${linkBase}#more-features` },
+    { label: '口语练习', href: `${linkBase}#more-features` },
   ]
 
   const resourceLinks = [
     { label: '帮助中心', href: 'mailto:support@linswift.com' },
-    { label: '使用教程', href: '#features' },
-    { label: '更新日志', href: '#' },
+    { label: '插件安装教程', href: '/browser-extension' },
+    { label: '下载浏览器插件', href: '/downloads/linswift-browser-extension.zip' },
+    { label: '使用教程', href: `${linkBase}#features` },
   ]
 
   const legalLinks = [
@@ -660,7 +722,7 @@ function Footer() {
   ]
 
   const socialLinks = [
-    { label: 'GitHub', href: 'https://github.com/nicekid1/Linswift' },
+    { label: 'GitHub', href: 'https://github.com/icecream-melting/Linswift' },
     { label: 'Twitter', href: 'https://twitter.com' },
   ]
 

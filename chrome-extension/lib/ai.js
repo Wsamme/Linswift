@@ -1,4 +1,4 @@
-import { MOONSHOT_MODEL } from './config.js'
+import { DEEPL_PROXY_URL, MOONSHOT_MODEL } from './config.js'
 
 const DICTIONARY_API_BASE = 'https://api.dictionaryapi.dev/api/v2/entries/en'
 const MOONSHOT_API_BASE = 'https://api.moonshot.cn/v1/chat/completions'
@@ -31,6 +31,12 @@ const TRANSLATION_LANGUAGE_MAP = {
   en: { label: 'English', instruction: 'English' },
   ja: { label: '日本語', instruction: '日语' },
   ko: { label: '한국어', instruction: '韩语' },
+}
+
+const TRANSLATION_MODE_MAP = {
+  hybrid: '混合模式',
+  deepl: 'DeepL',
+  ai: 'AI',
 }
 const LOCALIZED_FALLBACKS = {
   'zh-CN': {
@@ -109,6 +115,10 @@ function cleanupJson(raw) {
 
 function resolveTranslationLanguage(targetLanguage) {
   return TRANSLATION_LANGUAGE_MAP[targetLanguage] || TRANSLATION_LANGUAGE_MAP['zh-CN']
+}
+
+function resolveTranslationMode(mode) {
+  return TRANSLATION_MODE_MAP[mode] ? mode : 'hybrid'
 }
 
 function getLocalizedFallback(targetLanguage) {
@@ -301,6 +311,52 @@ async function translateManyWithPublicApi(texts, targetLanguage = 'zh-CN') {
   }
 
   return results
+}
+
+async function translateManyWithDeepL(texts, targetLanguage = 'zh-CN') {
+  const normalized = Array.isArray(texts)
+    ? texts.map((text) => normalizeComparableText(text))
+    : []
+
+  if (normalized.length === 0) {
+    return {
+      lines: [],
+      translatedCount: 0,
+      fallbackUsed: false,
+      unavailable: false,
+      provider: 'deepl',
+    }
+  }
+
+  const response = await fetch(DEEPL_PROXY_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      texts: normalized,
+      sourceLang: 'English',
+      targetLang: targetLanguage,
+    }),
+  })
+
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload?.error || 'DeepL 字幕翻译暂不可用')
+  }
+
+  const lines = Array.isArray(payload?.lines) ? payload.lines : normalized
+  const translatedCount = lines.reduce((count, line, index) => {
+    return count + (normalizeComparableText(line) !== normalizeComparableText(normalized[index]) ? 1 : 0)
+  }, 0)
+
+  return {
+    lines,
+    translatedCount,
+    fallbackUsed: false,
+    unavailable: translatedCount === 0,
+    provider: 'deepl',
+  }
 }
 
 function buildDictionaryLookupCandidates(word) {
@@ -621,7 +677,7 @@ ${context ? `上下文：${context}` : ''}
   }
 }
 
-export async function translateBatchLines(lines, apiKey, targetLanguage = 'zh-CN') {
+async function translateBatchLinesWithAI(lines, apiKey, targetLanguage = 'zh-CN') {
   const normalizedLines = Array.isArray(lines)
     ? lines.map((line) => String(line || '').trim())
     : []
@@ -632,6 +688,7 @@ export async function translateBatchLines(lines, apiKey, targetLanguage = 'zh-CN
       translatedCount: 0,
       fallbackUsed: false,
       unavailable: false,
+      provider: 'fallback',
     }
   }
 
@@ -645,6 +702,7 @@ export async function translateBatchLines(lines, apiKey, targetLanguage = 'zh-CN
       translatedCount: 0,
       fallbackUsed: false,
       unavailable: false,
+      provider: 'fallback',
     }
   }
 
@@ -658,6 +716,7 @@ export async function translateBatchLines(lines, apiKey, targetLanguage = 'zh-CN
       translatedCount,
       fallbackUsed: true,
       unavailable: translatedCount === 0,
+      provider: 'fallback',
     }
   }
 
@@ -736,5 +795,47 @@ export async function translateBatchLines(lines, apiKey, targetLanguage = 'zh-CN
     translatedCount,
     fallbackUsed,
     unavailable: translatedCount === 0,
+    provider: fallbackUsed ? 'fallback' : 'moonshot',
+  }
+}
+
+export async function translateBatchLines(
+  lines,
+  apiKey,
+  targetLanguage = 'zh-CN',
+  translationMode = 'hybrid'
+) {
+  const mode = resolveTranslationMode(translationMode)
+
+  if (mode === 'ai') {
+    return {
+      ...(await translateBatchLinesWithAI(lines, apiKey, targetLanguage)),
+      mode,
+      note: `当前使用 ${TRANSLATION_MODE_MAP[mode]} 翻译网页与字幕`,
+    }
+  }
+
+  try {
+    const deeplResult = await translateManyWithDeepL(lines, targetLanguage)
+    return {
+      ...deeplResult,
+      mode,
+      note:
+        mode === 'deepl'
+          ? '当前使用 DeepL 翻译网页与字幕'
+          : '当前使用混合模式：DeepL 负责主译文',
+    }
+  } catch (error) {
+    const fallback = await translateBatchLinesWithAI(lines, apiKey, targetLanguage)
+    const message = error instanceof Error ? error.message : String(error)
+    return {
+      ...fallback,
+      mode,
+      fallbackUsed: true,
+      note:
+        mode === 'deepl'
+          ? `DeepL 暂不可用，已回退到 ${fallback.provider === 'moonshot' ? 'AI' : '公共翻译'}：${message}`
+          : `混合模式里的 DeepL 暂不可用，已回退到 ${fallback.provider === 'moonshot' ? 'AI' : '公共翻译'}：${message}`,
+    }
   }
 }

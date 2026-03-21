@@ -403,7 +403,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const translation = await translateBatchLines(
         Array.isArray(message.lines) ? message.lines : [],
         state.settings.moonshotApiKey?.trim(),
-        state.settings.translationLanguage || 'zh-CN'
+        state.settings.translationLanguage || 'zh-CN',
+        state.settings.translationMode || 'hybrid'
       )
 
       sendResponse({ ok: true, ...translation })

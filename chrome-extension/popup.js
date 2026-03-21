@@ -13,6 +13,7 @@ const knownCount = document.getElementById('knownCount')
 const resultsSection = document.getElementById('resultsSection')
 const savedSection = document.getElementById('savedSection')
 const apiKeyInput = document.getElementById('apiKeyInput')
+const translationModeSelect = document.getElementById('translationModeSelect')
 const saveSettingsButton = document.getElementById('saveSettingsButton')
 const urlParams = new URLSearchParams(window.location.search)
 const explicitTargetUrl = urlParams.get('targetUrl')
@@ -282,6 +283,7 @@ async function initialize() {
 
   levelSelect.value = extensionState.settings.level
   apiKeyInput.value = extensionState.settings.moonshotApiKey || ''
+  translationModeSelect.value = extensionState.settings.translationMode || 'hybrid'
 
   const activeTab = explicitTabId
     ? await chrome.tabs.get(explicitTabId)
@@ -331,8 +333,9 @@ showSavedButton.addEventListener('click', async () => {
 
 saveSettingsButton.addEventListener('click', async () => {
   extensionState.settings.moonshotApiKey = apiKeyInput.value.trim()
+  extensionState.settings.translationMode = translationModeSelect.value || 'hybrid'
   await saveSettings(extensionState.settings)
-  setStatus('设置已保存。')
+  setStatus(`设置已保存，当前翻译引擎：${translationModeSelect.options[translationModeSelect.selectedIndex]?.text || '混合模式'}`)
 })
 
 initialize()

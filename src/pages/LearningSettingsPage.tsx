@@ -13,7 +13,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  ChevronLeft, ChevronRight, Volume2, BarChart3, Loader2,
+  ChevronLeft, ChevronRight, Volume2, Loader2,
 } from 'lucide-react'
 import { useTTSSettings } from '../hooks/useTTSSettings'
 import { useThemeSettings } from '../hooks/useThemeSettings'
@@ -155,24 +155,57 @@ export default function LearningSettingsPage() {
     </div>
   )
 
-  const dailyGoalCard = (
+  const activeModeLabel = modeOptions.find((item) => item.key === learn.learningMode)?.label || '听力优先'
+
+  const planCard = (
     <div className={`${isDesktop ? 'glass-card-strong rounded-[30px] p-6' : 'bg-[var(--color-card)] rounded-[var(--radius-lg)] p-5'} space-y-3`} style={isDesktop ? undefined : { boxShadow: 'var(--shadow-card)' }}>
-      <h2 className={`${isDesktop ? 'text-[20px]' : 'text-[16px]'} font-semibold text-[var(--color-foreground)]`}>每日学习目标</h2>
-      <p className="text-[12px] text-[var(--color-muted-light)]">设置每天要学习的新单词数量</p>
-      <div className={`grid ${isDesktop ? 'grid-cols-4' : 'grid-cols-4'} gap-2.5`}>
-        {goalOptions.map(g => (
-          <button
-            key={g}
-            onClick={() => update({ dailyGoal: g })}
-            className={`rounded-full py-2 text-[13px] font-medium transition-colors ${
-              learn.dailyGoal === g
-                ? 'bg-[var(--color-primary)] text-white shadow-[0_12px_24px_rgba(255,132,0,0.18)]'
-                : `${isDesktop ? 'glass-card-elevated' : 'bg-[var(--color-primary-light)]'} text-[var(--color-primary)]`
-            }`}
-          >
-            {g}个
-          </button>
-        ))}
+      <div className="space-y-1">
+        <h2 className={`${isDesktop ? 'text-[20px]' : 'text-[16px]'} font-semibold text-[var(--color-foreground)]`}>学习计划</h2>
+        <p className="text-[12px] text-[var(--color-muted-light)]">这里只保留真正影响学习任务分配和复习节奏的设置。</p>
+      </div>
+
+      <div className="space-y-3 rounded-[22px] bg-white/35 p-4">
+        <div className="flex items-center justify-between">
+          <span className="text-[13px] font-medium text-[var(--color-foreground)]">每日新词目标</span>
+          <span className="text-[12px] text-[var(--color-primary)]">{learn.dailyGoal} 个</span>
+        </div>
+        <div className="grid grid-cols-4 gap-2.5">
+          {goalOptions.map(g => (
+            <button
+              key={g}
+              onClick={() => update({ dailyGoal: g })}
+              className={`rounded-full py-2 text-[13px] font-medium transition-colors ${
+                learn.dailyGoal === g
+                  ? 'bg-[var(--color-primary)] text-white shadow-[0_12px_24px_rgba(255,132,0,0.18)]'
+                  : `${isDesktop ? 'glass-card-elevated' : 'bg-[var(--color-primary-light)]'} text-[var(--color-primary)]`
+              }`}
+            >
+              {g}个
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-3 rounded-[22px] bg-white/35 p-4">
+        <div className="flex items-center justify-between">
+          <span className="text-[13px] font-medium text-[var(--color-foreground)]">复习周期</span>
+          <span className="text-[12px] text-[var(--color-primary)]">{learn.reviewCycleDays} 天制</span>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          {[7, 15].map((day) => (
+            <button
+              key={day}
+              onClick={() => update({ reviewCycleDays: day as 7 | 15 })}
+              className={`rounded-full py-3 text-[13px] font-medium transition-colors ${
+                learn.reviewCycleDays === day
+                  ? 'bg-[var(--color-primary)] text-white shadow-[0_12px_24px_rgba(255,132,0,0.18)]'
+                  : `${isDesktop ? 'glass-card-elevated' : 'bg-[var(--color-primary-light)]'} text-[var(--color-primary)]`
+              }`}
+            >
+              {day}天制
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   )
@@ -180,7 +213,7 @@ export default function LearningSettingsPage() {
   const modeCard = (
     <div className={`${isDesktop ? 'glass-card-strong rounded-[30px] p-6' : 'bg-[var(--color-card)] rounded-[var(--radius-lg)] p-5'} space-y-3`} style={isDesktop ? undefined : { boxShadow: 'var(--shadow-card)' }}>
       <h2 className={`${isDesktop ? 'text-[20px]' : 'text-[16px]'} font-semibold text-[var(--color-foreground)]`}>学习模式</h2>
-      <p className="text-[12px] text-[var(--color-muted-light)]">选择你偏好的学习方式</p>
+      <p className="text-[12px] text-[var(--color-muted-light)]">只保留一个主偏好入口，决定你在背词页优先看到的训练方式。</p>
       <div className={`grid ${isDesktop ? 'grid-cols-3' : 'grid-cols-3'} gap-3`}>
         {modeOptions.map(m => (
           <button
@@ -200,32 +233,10 @@ export default function LearningSettingsPage() {
     </div>
   )
 
-  const cycleCard = (
-    <div className={`${isDesktop ? 'glass-card-strong rounded-[30px] p-6' : 'bg-[var(--color-card)] rounded-[var(--radius-lg)] p-5'} space-y-3`} style={isDesktop ? undefined : { boxShadow: 'var(--shadow-card)' }}>
-      <h2 className={`${isDesktop ? 'text-[20px]' : 'text-[16px]'} font-semibold text-[var(--color-foreground)]`}>艾宾浩斯复习制</h2>
-      <p className="text-[12px] text-[var(--color-muted-light)]">选择 7 天或 15 天复习路径，影响自动掌握判定</p>
-      <div className="grid grid-cols-2 gap-3">
-        {[7, 15].map((day) => (
-          <button
-            key={day}
-            onClick={() => update({ reviewCycleDays: day as 7 | 15 })}
-            className={`rounded-full py-3 text-[13px] font-medium transition-colors ${
-              learn.reviewCycleDays === day
-                ? 'bg-[var(--color-primary)] text-white shadow-[0_12px_24px_rgba(255,132,0,0.18)]'
-                : `${isDesktop ? 'glass-card-elevated' : 'bg-[var(--color-primary-light)]'} text-[var(--color-primary)]`
-            }`}
-          >
-            {day}天制
-          </button>
-        ))}
-      </div>
-    </div>
-  )
-
   const themeCard = (
     <div className={`${isDesktop ? 'glass-card-strong rounded-[30px] p-6' : 'bg-[var(--color-card)] rounded-[var(--radius-lg)] p-5'} space-y-3`} style={isDesktop ? undefined : { boxShadow: 'var(--shadow-card)' }}>
       <h2 className={`${isDesktop ? 'text-[20px]' : 'text-[16px]'} font-semibold text-[var(--color-foreground)]`}>主题设置</h2>
-      <p className="text-[12px] text-[var(--color-muted-light)]">这里可以直接切换外观模式；字体大小、语言和主题色可继续进入完整主题设置页调整。</p>
+      <p className="text-[12px] text-[var(--color-muted-light)]">这里只保留常用主题切换；更细的语言、字体和主题色继续去主题设置页。</p>
       <div className="grid grid-cols-3 gap-2.5">
         {[
           { key: 'light' as const, label: '浅色', icon: '☀️' },
@@ -246,19 +257,18 @@ export default function LearningSettingsPage() {
           </button>
         ))}
       </div>
-      <div className="glass-card-elevated rounded-[20px] px-4 py-3">
-        <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--color-muted)]">Current Theme</p>
-        <p className="mt-2 text-[14px] text-[var(--color-foreground)]">
+      <div className="flex items-center justify-between rounded-[20px] bg-white/35 px-4 py-3 text-[12px] text-[var(--color-muted)]">
+        <div>
+          <p className="font-medium text-[var(--color-foreground)]">
           {themeSettings.mode === 'system' ? '跟随系统' : themeSettings.mode === 'dark' ? '深色模式' : '浅色模式'}
-        </p>
-        <p className="mt-1 text-[12px] text-[var(--color-muted)]">
-          语言：{getLanguageLabel(themeSettings.language)}
-        </p>
+          </p>
+          <p className="mt-1">语言：{getLanguageLabel(themeSettings.language)}</p>
+        </div>
         <button
           onClick={() => navigate('/theme-settings')}
-          className="mt-3 rounded-full bg-[var(--color-primary-light)] px-4 py-2 text-[12px] font-semibold text-[var(--color-primary)] transition-colors hover:bg-[var(--color-primary)] hover:text-white"
+          className="rounded-full bg-[var(--color-primary-light)] px-4 py-2 text-[12px] font-semibold text-[var(--color-primary)] transition-colors hover:bg-[var(--color-primary)] hover:text-white"
         >
-          打开完整主题设置
+          更多主题
         </button>
       </div>
     </div>
@@ -266,6 +276,11 @@ export default function LearningSettingsPage() {
 
   const featureCard = (
     <div className={`${isDesktop ? 'glass-card-strong rounded-[30px] overflow-hidden' : 'bg-[var(--color-card)] rounded-[var(--radius-lg)] overflow-hidden'}`} style={isDesktop ? undefined : { boxShadow: 'var(--shadow-card)' }}>
+      <div className={`${isDesktop ? 'px-6 pt-6 pb-4' : 'px-5 pt-5 pb-4'}`}>
+        <h2 className={`${isDesktop ? 'text-[20px]' : 'text-[16px]'} font-semibold text-[var(--color-foreground)]`}>朗读与阅读</h2>
+        <p className="mt-1 text-[12px] text-[var(--color-muted-light)]">这里保留真正会影响学习过程的开关，删除无实际配置作用的跳转项。</p>
+      </div>
+
       <button
         onClick={() => navigate('/pronunciation-settings')}
         className={`w-full flex items-center justify-between ${isDesktop ? 'px-6 py-5 hover:bg-white/40' : 'px-5 py-3.5 active:bg-[var(--color-background-secondary)]'} transition-colors`}
@@ -283,18 +298,6 @@ export default function LearningSettingsPage() {
       <ToggleRow label="📝 显示例句" value={learn.showExamples} onChange={() => update({ showExamples: !learn.showExamples })} desktop={isDesktop} />
       <div className="h-px bg-[var(--color-border)] mx-4" />
       <ToggleRow label="⏰ 复习提醒" value={learn.reviewReminder} onChange={() => update({ reviewReminder: !learn.reviewReminder })} desktop={isDesktop} />
-      <div className="h-px bg-[var(--color-border)] mx-4" />
-
-      <button
-        onClick={() => navigate('/app/learn')}
-        className={`w-full flex items-center justify-between ${isDesktop ? 'px-6 py-5 hover:bg-white/40' : 'px-5 py-3.5 active:bg-[var(--color-background-secondary)]'} transition-colors`}
-      >
-        <div className="flex items-center gap-3">
-          <BarChart3 size={18} className="text-[var(--color-muted)]" />
-          <span className={`${isDesktop ? 'text-[16px]' : 'text-[15px]'} text-[var(--color-foreground)]`}>学习统计</span>
-        </div>
-        <ChevronRight size={16} className="text-[var(--color-muted)]" />
-      </button>
     </div>
   )
 
@@ -304,31 +307,31 @@ export default function LearningSettingsPage() {
         title="学习设置"
         description="把目标、模式、复习节奏和朗读相关开关收进桌面工作台，避免继续使用手机单列设置页。"
         onBack={goBack}
-        sideTitle="Study Rhythm"
-        sideDescription="这里决定每日学习强度、优先学习方式以及复习节奏。修改会自动同步到本地，部分字段同步到云端。"
+        sideTitle="同步状态"
+        sideDescription="只有每日目标、复习周期、显示例句和复习提醒会同步到云端。学习模式和主题偏好主要保留在当前设备。"
         sideContent={
           <div className="space-y-6">
             {syncIndicator}
             <div className="glass-card-elevated rounded-[28px] p-6">
-              <p className="text-[13px] font-semibold uppercase tracking-[0.16em] text-[var(--color-muted)]">Current Plan</p>
-              <div className="mt-4 space-y-3">
-                <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">每日目标：{learn.dailyGoal} 个新词</div>
-                <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">学习模式：{modeOptions.find((item) => item.key === learn.learningMode)?.label}</div>
-                <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">复习周期：{learn.reviewCycleDays} 天制</div>
+              <p className="text-[13px] font-semibold uppercase tracking-[0.16em] text-[var(--color-muted)]">当前生效</p>
+              <div className="mt-4 space-y-3 text-[14px] text-[var(--color-foreground)]/82">
+                <div className="rounded-[18px] bg-white/50 px-4 py-3">每日目标：{learn.dailyGoal} 个新词</div>
+                <div className="rounded-[18px] bg-white/50 px-4 py-3">学习模式：{activeModeLabel}</div>
+                <div className="rounded-[18px] bg-white/50 px-4 py-3">复习周期：{learn.reviewCycleDays} 天制</div>
+                <div className="rounded-[18px] bg-white/50 px-4 py-3">例句：{learn.showExamples ? '显示' : '关闭'} · 提醒：{learn.reviewReminder ? '开启' : '关闭'}</div>
               </div>
             </div>
           </div>
         }
       >
-        <div className="grid grid-cols-[minmax(0,1fr)_minmax(320px,360px)] gap-6">
+        <div className="grid grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)] gap-6">
           <div className="space-y-6">
-            {dailyGoalCard}
+            {planCard}
             {modeCard}
           </div>
           <div className="space-y-6">
-            {cycleCard}
-            {themeCard}
             {featureCard}
+            {themeCard}
           </div>
         </div>
       </SettingsDesktopShell>
@@ -354,128 +357,11 @@ export default function LearningSettingsPage() {
 
         {/* ===== 可滚动内容区 ===== */}
         <div className="flex-1 overflow-y-auto px-5 pb-8 space-y-4">
-
-          {/* ----- 每日学习目标 ----- */}
-          <div className="bg-[var(--color-card)] rounded-[var(--radius-lg)] p-5 space-y-3" style={{ boxShadow: 'var(--shadow-card)' }}>
-            <h2 className="text-[16px] font-semibold text-[var(--color-foreground)]">每日学习目标</h2>
-            <p className="text-[12px] text-[var(--color-muted-light)]">设置每天要学习的新单词数量</p>
-            <div className="flex gap-2.5">
-              {goalOptions.map(g => (
-                <button
-                  key={g}
-                  onClick={() => update({ dailyGoal: g })}
-                  className={`flex-1 py-1.5 rounded-full text-[13px] font-medium transition-colors ${
-                    learn.dailyGoal === g
-                      ? 'bg-[var(--color-primary)] text-white'
-                      : 'bg-[var(--color-primary-light)] text-[var(--color-primary)]'
-                  }`}
-                >
-                  {g}个
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* ----- 学习模式 ----- */}
-          <div className="bg-[var(--color-card)] rounded-[var(--radius-lg)] p-5 space-y-3" style={{ boxShadow: 'var(--shadow-card)' }}>
-            <h2 className="text-[16px] font-semibold text-[var(--color-foreground)]">学习模式</h2>
-            <p className="text-[12px] text-[var(--color-muted-light)]">选择你偏好的学习方式</p>
-            <div className="flex gap-2.5">
-              {modeOptions.map(m => (
-                <button
-                  key={m.key}
-                  onClick={() => update({ learningMode: m.key })}
-                  className={`flex-1 flex flex-col items-center gap-1 py-2.5 rounded-[var(--radius-md)] transition-colors ${
-                    learn.learningMode === m.key
-                      ? 'bg-[var(--color-primary)] text-white'
-                      : 'bg-[var(--color-primary-light)] text-[var(--color-primary)]'
-                  }`}
-                >
-                  <span className="text-[20px]">{m.icon}</span>
-                  <span className="text-[12px] font-medium">{m.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* ----- 复习制 ----- */}
-          <div className="bg-[var(--color-card)] rounded-[var(--radius-lg)] p-5 space-y-3" style={{ boxShadow: 'var(--shadow-card)' }}>
-            <h2 className="text-[16px] font-semibold text-[var(--color-foreground)]">艾宾浩斯复习制</h2>
-            <p className="text-[12px] text-[var(--color-muted-light)]">选择 7 天或 15 天复习路径，影响自动掌握判定</p>
-            <div className="flex gap-2.5">
-              {[7, 15].map((day) => (
-                <button
-                  key={day}
-                  onClick={() => update({ reviewCycleDays: day as 7 | 15 })}
-                  className={`flex-1 py-2 rounded-full text-[13px] font-medium transition-colors ${
-                    learn.reviewCycleDays === day
-                      ? 'bg-[var(--color-primary)] text-white'
-                      : 'bg-[var(--color-primary-light)] text-[var(--color-primary)]'
-                  }`}
-                >
-                  {day}天制
-                </button>
-              ))}
-            </div>
-          </div>
-
+          {planCard}
+          {modeCard}
           {themeCard}
 
-          {/* ----- 功能开关列表 ----- */}
-          <div className="bg-[var(--color-card)] rounded-[var(--radius-lg)] overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
-            {/* 发音设置（跳转到子页面） */}
-            <button
-              onClick={() => navigate('/pronunciation-settings')}
-              className="w-full flex items-center justify-between px-5 py-3.5 active:bg-[var(--color-background-secondary)] transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <Volume2 size={18} className="text-[var(--color-muted)]" />
-                <span className="text-[15px] text-[var(--color-foreground)]">发音设置</span>
-              </div>
-              <ChevronRight size={16} className="text-[var(--color-muted)]" />
-            </button>
-
-            <div className="h-px bg-[var(--color-border)] mx-4" />
-
-            {/* 自动播放单词 */}
-            <ToggleRow
-              label="🔄 自动播放单词"
-              value={ttsSettings.autoPlay}
-              onChange={() => toggleSetting('autoPlay')}
-            />
-
-            <div className="h-px bg-[var(--color-border)] mx-4" />
-
-            {/* 显示例句 */}
-            <ToggleRow
-              label="📝 显示例句"
-              value={learn.showExamples}
-              onChange={() => update({ showExamples: !learn.showExamples })}
-            />
-
-            <div className="h-px bg-[var(--color-border)] mx-4" />
-
-            {/* 复习提醒 */}
-            <ToggleRow
-              label="⏰ 复习提醒"
-              value={learn.reviewReminder}
-              onChange={() => update({ reviewReminder: !learn.reviewReminder })}
-            />
-
-            <div className="h-px bg-[var(--color-border)] mx-4" />
-
-            {/* 学习统计（跳转） */}
-            <button
-              onClick={() => navigate('/app/learn')}
-              className="w-full flex items-center justify-between px-5 py-3.5 active:bg-[var(--color-background-secondary)] transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <BarChart3 size={18} className="text-[var(--color-muted)]" />
-                <span className="text-[15px] text-[var(--color-foreground)]">学习统计</span>
-              </div>
-              <ChevronRight size={16} className="text-[var(--color-muted)]" />
-            </button>
-          </div>
+          {featureCard}
         </div>
       </div>
     </div>

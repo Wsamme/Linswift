@@ -30,6 +30,12 @@
         <details class="settings">
           <summary>AI 设置（可选）</summary>
           <p class="muted">配置 Moonshot API Key 后，扫描结果会自动补中文释义。</p>
+          <label for="translationModeSelect" class="settings__label">网页 / 字幕翻译引擎</label>
+          <select id="translationModeSelect">
+            <option value="hybrid">混合模式（DeepL 主翻译）</option>
+            <option value="deepl">DeepL</option>
+            <option value="ai">AI</option>
+          </select>
           <label for="apiKeyInput" class="settings__label">Moonshot API Key</label>
           <input id="apiKeyInput" type="password" placeholder="sk-..." />
           <button id="saveSettingsButton" class="ghost ghost--block">保存设置</button>
