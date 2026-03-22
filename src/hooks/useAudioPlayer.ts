@@ -59,6 +59,10 @@ export interface UseAudioPlayerReturn extends AudioPlayerState {
   prev: () => void
   /** 跳到指定句子 */
   seekTo: (index: number) => void
+  /** 当前倍速 */
+  playbackRate: number
+  /** 设置倍速 */
+  setPlaybackRate: (rate: number) => void
   /** 加载新内容（不自动播放） */
   loadContent: (segments: AudioSegment[]) => void
   /** 加载新内容并自动播放 */
@@ -129,11 +133,15 @@ export function useAudioPlayer(
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentIndex, setCurrentIndex] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
+  const [playbackRate, setPlaybackRateState] = useState(() => loadTTSSettings().rate)
+  const [isPaused, setIsPaused] = useState(false)
 
   // ===== 内部引用（避免闭包问题） =====
   const segmentsRef = useRef(segments)
   const currentIndexRef = useRef(currentIndex)
   const isPlayingRef = useRef(isPlaying)
+  const isPausedRef = useRef(isPaused)
+  const playbackRateRef = useRef(playbackRate)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null)
 
@@ -141,6 +149,8 @@ export function useAudioPlayer(
   useEffect(() => { segmentsRef.current = segments }, [segments])
   useEffect(() => { currentIndexRef.current = currentIndex }, [currentIndex])
   useEffect(() => { isPlayingRef.current = isPlaying }, [isPlaying])
+  useEffect(() => { isPausedRef.current = isPaused }, [isPaused])
+  useEffect(() => { playbackRateRef.current = playbackRate }, [playbackRate])
 
   // ===== 计算派生状态 =====
   const totalSegments = segments.length
@@ -162,12 +172,20 @@ export function useAudioPlayer(
     }
   }, [])
 
+  const startTimer = useCallback(() => {
+    clearTimer()
+    timerRef.current = setInterval(() => {
+      setCurrentTime((prev) => prev + (0.25 * playbackRateRef.current))
+    }, 250)
+  }, [clearTimer])
+
   // ===== 停止 TTS =====
   const stopTTS = useCallback(() => {
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel()
     }
     utteranceRef.current = null
+    setIsPaused(false)
   }, [])
 
   // ===== 播放指定索引的片段 =====
@@ -176,6 +194,7 @@ export function useAudioPlayer(
     if (index >= segmentsRef.current.length) {
       // 所有片段播放完毕
       setIsPlaying(false)
+      setIsPaused(false)
       clearTimer()
       return
     }
@@ -193,7 +212,7 @@ export function useAudioPlayer(
     // 判断语言
     const chineseRatio = (segment.text.match(/[\u4e00-\u9fff]/g) || []).length / segment.text.length
     utterance.lang = chineseRatio > 0.3 ? 'zh-CN' : settings.accent
-    utterance.rate = settings.rate
+    utterance.rate = playbackRateRef.current || settings.rate
     utterance.volume = settings.volume
     utterance.pitch = 1
 
@@ -214,6 +233,7 @@ export function useAudioPlayer(
       } else {
         // 播放完毕
         setIsPlaying(false)
+        setIsPaused(false)
         setCurrentTime(0)
       }
     }
@@ -229,6 +249,7 @@ export function useAudioPlayer(
         speakSegment(nextIndex)
       } else {
         setIsPlaying(false)
+        setIsPaused(false)
       }
     }
 
@@ -237,30 +258,47 @@ export function useAudioPlayer(
 
     // 启动计时器追踪当前片段播放时间
     setCurrentTime(0)
-    timerRef.current = setInterval(() => {
-      setCurrentTime(prev => prev + 0.5)
-    }, 500)
-  }, [clearTimer, stopTTS])
+    startTimer()
+  }, [clearTimer, startTimer, stopTTS])
 
   // ===== 播放 =====
   const play = useCallback(() => {
     if (segments.length === 0) return
+
+    if ('speechSynthesis' in window && isPausedRef.current && utteranceRef.current) {
+      window.speechSynthesis.resume()
+      setIsPaused(false)
+      setIsPlaying(true)
+      startTimer()
+      return
+    }
 
     // 如果已经播完，从头开始
     if (currentIndex >= segments.length) {
       setCurrentIndex(0)
       setCurrentTime(0)
       setIsPlaying(true)
+      setIsPaused(false)
       speakSegment(0)
     } else {
       setIsPlaying(true)
+      setIsPaused(false)
       speakSegment(currentIndex)
     }
-  }, [segments, currentIndex, speakSegment])
+  }, [segments, currentIndex, speakSegment, startTimer])
 
   // ===== 暂停 =====
   const pause = useCallback(() => {
+    if ('speechSynthesis' in window && window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+      window.speechSynthesis.pause()
+      setIsPaused(true)
+      setIsPlaying(false)
+      clearTimer()
+      return
+    }
+
     setIsPlaying(false)
+    setIsPaused(false)
     stopTTS()
     clearTimer()
   }, [stopTTS, clearTimer])
@@ -268,6 +306,7 @@ export function useAudioPlayer(
   // ===== 停止并重置 =====
   const stop = useCallback(() => {
     setIsPlaying(false)
+    setIsPaused(false)
     setCurrentIndex(0)
     setCurrentTime(0)
     stopTTS()
@@ -281,6 +320,7 @@ export function useAudioPlayer(
     clearTimer()
     setCurrentIndex(nextIdx)
     setCurrentTime(0)
+    setIsPaused(false)
     if (isPlaying) {
       speakSegment(nextIdx)
     }
@@ -293,6 +333,7 @@ export function useAudioPlayer(
     clearTimer()
     setCurrentIndex(prevIdx)
     setCurrentTime(0)
+    setIsPaused(false)
     if (isPlaying) {
       speakSegment(prevIdx)
     }
@@ -305,10 +346,23 @@ export function useAudioPlayer(
     clearTimer()
     setCurrentIndex(safeIndex)
     setCurrentTime(0)
+    setIsPaused(false)
     if (isPlaying) {
       speakSegment(safeIndex)
     }
   }, [segments.length, isPlaying, stopTTS, clearTimer, speakSegment])
+
+  const setPlaybackRate = useCallback((rate: number) => {
+    const safeRate = Math.min(2, Math.max(0.5, rate))
+    setPlaybackRateState(safeRate)
+
+    if (isPlayingRef.current) {
+      const activeIndex = currentIndexRef.current
+      setTimeout(() => {
+        speakSegment(activeIndex)
+      }, 0)
+    }
+  }, [speakSegment])
 
   // ===== 加载新内容 =====
   const loadContent = useCallback((newSegments: AudioSegment[]) => {
@@ -326,6 +380,7 @@ export function useAudioPlayer(
     setCurrentIndex(0)
     setCurrentTime(0)
     setIsPlaying(true)
+    setIsPaused(false)
     // 需要延迟一帧让 state 更新后再播放
     setTimeout(() => {
       segmentsRef.current = newSegments
@@ -352,6 +407,7 @@ export function useAudioPlayer(
     totalDuration,
     elapsedTime,
     progress,
+    playbackRate,
     // 控制方法
     play,
     pause,
@@ -359,6 +415,7 @@ export function useAudioPlayer(
     next,
     prev,
     seekTo,
+    setPlaybackRate,
     loadContent,
     loadAndPlay,
     formatTime: formatTimeHelper,

@@ -6,6 +6,8 @@ import {
 import { stopSpeaking, loadTTSSettings } from '../lib/tts'
 import { supabase, type ListeningContent } from '../lib/supabase'
 import { useLogicalBack } from '../hooks/useLogicalBack'
+import { SPEED_OPTIONS } from '../lib/tts'
+import { mergeListeningContent } from '../data/listeningContent'
 
 interface LyricLine {
   fullText: string
@@ -74,6 +76,7 @@ export default function ListenFillPage() {
   const [userInputs, setUserInputs] = useState<Record<number, string>>({})
   const [activeInput, setActiveInput] = useState('')
   const [score, setScore] = useState({ correct: 0, wrong: 0 })
+  const [playbackRate, setPlaybackRate] = useState(() => loadTTSSettings().rate)
   const isPlayingRef = useRef(false)
   const blankStatusesRef = useRef<BlankStatus[]>([])
 
@@ -94,20 +97,22 @@ export default function ListenFillPage() {
         .eq('category', 'music')
         .not('transcript', 'is', null)
         .order('created_at', { ascending: false })
-      const list = (data || [])
+      const list = mergeListeningContent((data || []) as ListeningContent[], { categories: ['music'] })
         .filter((item) => item.transcript)
-        .map((item: ListeningContent) => ({
+        .map((item) => ({
           id: item.id,
           title: item.title,
-          artist: 'Music Library',
+          artist: item.id > 0 ? 'Music Library' : 'Built-in Library',
           lyrics: buildLyrics(item.transcript || ''),
         }))
-      const pdList = PUBLIC_DOMAIN_SONGS.map((item) => ({
-        id: item.id,
-        title: item.title,
-        artist: item.artist,
-        lyrics: buildLyrics(item.transcript),
-      }))
+      const pdList = PUBLIC_DOMAIN_SONGS
+        .filter((item) => !list.some((entry) => entry.title.toLowerCase() === item.title.toLowerCase()))
+        .map((item) => ({
+          id: item.id,
+          title: item.title,
+          artist: item.artist,
+          lyrics: buildLyrics(item.transcript),
+        }))
       const merged = [...pdList, ...list]
       setSongs(merged)
       if (merged.length > 0) {
@@ -141,7 +146,7 @@ export default function ListenFillPage() {
     const settings = loadTTSSettings()
     const utterance = new SpeechSynthesisUtterance(line.fullText)
     utterance.lang = settings.accent
-    utterance.rate = settings.rate * 0.85
+    utterance.rate = playbackRate * 0.85
     utterance.volume = settings.volume
     utterance.pitch = 1
     utterance.onend = () => {
@@ -158,7 +163,7 @@ export default function ListenFillPage() {
       }
     }
     window.speechSynthesis.speak(utterance)
-  }, [song])
+  }, [playbackRate, song])
 
   const togglePlay = () => {
     if (!song) return
@@ -251,7 +256,7 @@ export default function ListenFillPage() {
       <div className="mx-5 mb-4 p-4 rounded-[var(--radius-md)] text-white" style={{ background: 'linear-gradient(135deg, #FF6B6B, #FF8400)' }}>
         <p className="text-[11px] text-white/70 mb-1">当前内容</p>
         <h3 className="text-[16px] font-bold mb-1">{song.title}</h3>
-        <p className="text-[12px] text-white/80">{song.artist}</p>
+        <p className="text-[12px] text-white/80">{song.artist} · {playbackRate.toFixed(playbackRate % 1 === 0 ? 0 : 2)}x</p>
       </div>
 
       <div className="mx-5 mb-4 flex gap-2 overflow-x-auto">
@@ -312,6 +317,24 @@ export default function ListenFillPage() {
         <div className="flex items-center justify-between text-[12px] text-[var(--color-muted)] mb-2">
           <span>正确 {score.correct}</span>
           <span>错误 {score.wrong}</span>
+        </div>
+        <div className="mb-3 flex items-center justify-center gap-2 overflow-x-auto">
+          {SPEED_OPTIONS.filter((item) => item.value >= 0.75 && item.value <= 1.5).map((item) => (
+            <button
+              key={item.value}
+              onClick={() => {
+                setPlaybackRate(item.value)
+                if (isPlaying) {
+                  setTimeout(() => speakLine(currentLineIndex), 0)
+                }
+              }}
+              className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold transition-colors ${
+                playbackRate === item.value ? 'bg-[var(--color-primary)] text-white' : 'bg-[var(--color-background-secondary)] text-[var(--color-muted)]'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
         </div>
         <div className="flex items-center justify-center gap-4">
           <button onClick={() => { const p = Math.max(0, currentLineIndex - 1); setCurrentLineIndex(p); if (isPlaying) speakLine(p) }}><SkipBack size={18} className="text-[var(--color-foreground)]" /></button>

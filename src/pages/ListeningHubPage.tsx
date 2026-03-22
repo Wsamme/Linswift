@@ -7,11 +7,12 @@ import {
 import { supabase, type ListeningContent } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { useLogicalBack } from '../hooks/useLogicalBack'
+import { mergeListeningContent } from '../data/listeningContent'
 
 const modules = [
-  { icon: Music, name: '听歌填字', desc: '来自 listening_content 的 music 内容', color: '#FF8400', path: '/listen-fill' },
-  { icon: Radio, name: '随行听', desc: 'TED / 新闻 / 课程 / 学习', color: '#3B82F6', path: '/listen-go' },
-  { icon: Library, name: '听·图书馆', desc: '听力内容库回放', color: '#8B5CF6', path: '/listen-lib' },
+  { icon: Music, name: '听歌填字', desc: '内置经典歌词训练 + 云端 music 内容', color: '#FF8400', path: '/listen-fill' },
+  { icon: Radio, name: '随行听', desc: '内置 TED / 新闻 / 课程 / 学习素材，可直接播放', color: '#3B82F6', path: '/listen-go' },
+  { icon: Library, name: '听·图书馆', desc: '统一浏览内置与云端听力内容', color: '#8B5CF6', path: '/listen-lib' },
 ]
 
 export default function ListeningHubPage() {
@@ -34,9 +35,7 @@ export default function ListeningHubPage() {
         supabase.from('study_records').select('study_date, listening_minutes').eq('user_id', user.id).order('study_date', { ascending: false }),
       ])
 
-      if (!contentRes.error && contentRes.data) {
-        setContents(contentRes.data)
-      }
+      setContents(mergeListeningContent(contentRes.error ? [] : (contentRes.data || [])))
       if (!progressRes.error && progressRes.data) {
         setCompletedIds(progressRes.data.filter((r) => r.completed).map((r) => r.content_id))
       }
@@ -149,7 +148,7 @@ export default function ListeningHubPage() {
                 </div>
               ))}
               {todayTasks.length === 0 && (
-                <p className="text-[12px] text-[var(--color-muted)]">暂无听力内容，请先向 `listening_content` 导入数据。</p>
+                <p className="text-[12px] text-[var(--color-muted)]">内置听力内容已经可用；后续还可以继续从 `listening_content` 扩充云端内容。</p>
               )}
             </div>
           </div>

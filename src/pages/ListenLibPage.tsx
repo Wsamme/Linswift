@@ -7,6 +7,8 @@ import {
 import { useAudioPlayer, textToSegments, type AudioSegment } from '../hooks/useAudioPlayer'
 import { supabase, type ListeningContent } from '../lib/supabase'
 import { useLogicalBack } from '../hooks/useLogicalBack'
+import { mergeListeningContent, type ListeningContentItem } from '../data/listeningContent'
+import { SPEED_OPTIONS } from '../lib/tts'
 
 const categories = ['全部', '图书转化', 'AI 原创', '热门'] as const
 type CategoryLabel = typeof categories[number]
@@ -19,14 +21,14 @@ export default function ListenLibPage() {
   const navigate = useNavigate()
   const goBack = useLogicalBack('/listening')
   const [activeCategory, setActiveCategory] = useState<CategoryLabel>('全部')
-  const [contents, setContents] = useState<ListeningContent[]>([])
+  const [contents, setContents] = useState<ListeningContentItem[]>([])
   const [activeContentId, setActiveContentId] = useState<number | null>(null)
   const player = useAudioPlayer()
 
   useEffect(() => {
     async function load() {
       const { data } = await supabase.from('listening_content').select('*').order('created_at', { ascending: false })
-      const list = data || []
+      const list = mergeListeningContent((data || []) as ListeningContent[])
       setContents(list)
       if (list.length > 0) {
         setActiveContentId(list[0].id)
@@ -77,14 +79,14 @@ export default function ListenLibPage() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-[13px] font-semibold text-[var(--color-foreground)] line-clamp-1">{current.title}</p>
-              <p className="text-[11px] text-[var(--color-muted)]">{player.isPlaying ? '正在播放' : '已暂停'} · {mapType(current)}</p>
+              <p className="text-[11px] text-[var(--color-muted)]">{player.isPlaying ? '正在播放' : '已暂停'} · {mapType(current)} · {current.source_label === 'built-in' ? '内置' : '云端'}</p>
             </div>
           </div>
           <div className="h-1 bg-[var(--color-background-secondary)] rounded-full mb-1.5 overflow-hidden">
             <div className="h-full bg-[var(--color-primary)] rounded-full transition-all duration-300" style={{ width: `${player.progress}%` }} />
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-[10px] text-[var(--color-muted)]">{player.formatTime(player.elapsedTime)} / {player.formatTime(player.totalDuration)}</span>
+            <span className="text-[10px] text-[var(--color-muted)]">{player.formatTime(player.elapsedTime)} / {player.formatTime(player.totalDuration)} · {player.playbackRate.toFixed(player.playbackRate % 1 === 0 ? 0 : 2)}x</span>
             <div className="flex items-center gap-3">
               <button onClick={player.prev} className="p-1 active:scale-90 transition-transform"><SkipBack size={16} className="text-[var(--color-foreground)]" /></button>
               <button onClick={() => player.isPlaying ? player.pause() : player.play()} className="p-1.5 active:scale-90 transition-transform">
@@ -93,6 +95,19 @@ export default function ListenLibPage() {
               <button onClick={player.next} className="p-1 active:scale-90 transition-transform"><SkipForward size={16} className="text-[var(--color-foreground)]" /></button>
               <button onClick={player.stop} className="p-1 active:scale-90 transition-transform"><Square size={14} className="text-[var(--color-muted)]" /></button>
             </div>
+          </div>
+          <div className="mt-3 flex items-center gap-2 overflow-x-auto">
+            {SPEED_OPTIONS.filter((item) => item.value >= 0.75 && item.value <= 1.5).map((item) => (
+              <button
+                key={item.value}
+                onClick={() => player.setPlaybackRate(item.value)}
+                className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold transition-colors ${
+                  player.playbackRate === item.value ? 'bg-[var(--color-primary)] text-white' : 'bg-[var(--color-background-secondary)] text-[var(--color-muted)]'
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
           </div>
         </div>
       )}
@@ -150,7 +165,7 @@ export default function ListenLibPage() {
               </div>
             )
           })}
-          {filtered.length === 0 && <p className="text-[12px] text-[var(--color-muted)]">暂无内容，请先在 Supabase 的 `listening_content` 中插入记录。</p>}
+          {filtered.length === 0 && <p className="text-[12px] text-[var(--color-muted)]">当前分类暂无内容，内置内容会持续扩充，也可以继续用 Supabase 扩展。</p>}
         </div>
       </div>
     </div>

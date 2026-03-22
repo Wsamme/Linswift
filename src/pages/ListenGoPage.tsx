@@ -6,6 +6,8 @@ import {
 import { useAudioPlayer, textToSegments, type AudioSegment } from '../hooks/useAudioPlayer'
 import { supabase, type ListeningContent } from '../lib/supabase'
 import { useLogicalBack } from '../hooks/useLogicalBack'
+import { mergeListeningContent, getListeningBadge, type ListeningContentItem } from '../data/listeningContent'
+import { SPEED_OPTIONS } from '../lib/tts'
 
 const categoryMap: Record<string, string> = {
   all: '推荐',
@@ -18,14 +20,14 @@ const categoryMap: Record<string, string> = {
 export default function ListenGoPage() {
   const goBack = useLogicalBack('/listening')
   const [activeCategory, setActiveCategory] = useState<'all' | 'ted' | 'news' | 'course' | 'study'>('all')
-  const [contents, setContents] = useState<ListeningContent[]>([])
+  const [contents, setContents] = useState<ListeningContentItem[]>([])
   const [activeContentId, setActiveContentId] = useState<number | null>(null)
   const player = useAudioPlayer()
 
   useEffect(() => {
     async function load() {
       const { data } = await supabase.from('listening_content').select('*').in('category', ['ted', 'news', 'course', 'study']).order('created_at', { ascending: false })
-      const list = data || []
+      const list = mergeListeningContent((data || []) as ListeningContent[], { categories: ['ted', 'news', 'course', 'study'] })
       setContents(list)
       if (list.length > 0) {
         setActiveContentId(list[0].id)
@@ -70,15 +72,15 @@ export default function ListenGoPage() {
 
       {current && (
         <div className="mx-5 mb-4 p-4 rounded-[var(--radius-md)] text-white" style={{ background: 'linear-gradient(135deg, #3B82F6, #6366F1)' }}>
-          <p className="text-[11px] text-white/70 mb-1">{player.isPlaying ? '正在播放' : '已暂停'}</p>
+          <p className="text-[11px] text-white/70 mb-1">{player.isPlaying ? '正在播放' : '已暂停'} · {current.source_label === 'built-in' ? '内置内容' : '云端内容'}</p>
           <h3 className="text-[16px] font-bold mb-1">{current.title}</h3>
-          <p className="text-[12px] text-white/80 mb-3">{current.category.toUpperCase()} · {Math.max(1, Math.round((current.duration_seconds || 60) / 60))} 分钟</p>
+          <p className="text-[12px] text-white/80 mb-3">{getListeningBadge(current)} · {Math.max(1, Math.round((current.duration_seconds || 60) / 60))} 分钟</p>
           <div className="h-1 bg-white/20 rounded-full mb-2">
             <div className="h-full bg-white rounded-full transition-all duration-300" style={{ width: `${player.progress}%` }} />
           </div>
           <div className="flex items-center justify-between">
             <span className="text-[10px] text-white/60">
-              {player.formatTime(player.elapsedTime)} / {player.formatTime(player.totalDuration)}
+              {player.formatTime(player.elapsedTime)} / {player.formatTime(player.totalDuration)} · {player.playbackRate.toFixed(player.playbackRate % 1 === 0 ? 0 : 2)}x
             </span>
             <div className="flex items-center gap-4">
               <button onClick={player.prev} className="active:scale-90 transition-transform"><SkipBack size={18} className="text-white/80" /></button>
@@ -90,6 +92,19 @@ export default function ListenGoPage() {
                 {player.isPlaying ? <Volume2 size={18} className="text-white/80" /> : <VolumeX size={18} className="text-white/40" />}
               </button>
             </div>
+          </div>
+          <div className="mt-3 flex items-center gap-2 overflow-x-auto">
+            {SPEED_OPTIONS.filter((item) => item.value >= 0.75 && item.value <= 1.5).map((item) => (
+              <button
+                key={item.value}
+                onClick={() => player.setPlaybackRate(item.value)}
+                className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold transition-colors ${
+                  player.playbackRate === item.value ? 'bg-white text-[#3B82F6]' : 'bg-white/12 text-white/72'
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
           </div>
         </div>
       )}
@@ -128,13 +143,13 @@ export default function ListenGoPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className={`text-[14px] font-semibold line-clamp-1 ${isActive ? 'text-[var(--color-primary)]' : 'text-[var(--color-foreground)]'}`}>{item.title}</p>
-                  <p className="text-[11px] text-[var(--color-muted)]">{item.category.toUpperCase()} · {item.difficulty}</p>
+                  <p className="text-[11px] text-[var(--color-muted)]">{getListeningBadge(item)} · {item.difficulty}</p>
                 </div>
                 <span className="text-[11px] text-[var(--color-muted)]">{Math.max(1, Math.round((item.duration_seconds || 60) / 60))} 分钟</span>
               </div>
             )
           })}
-          {filtered.length === 0 && <p className="text-[12px] text-[var(--color-muted)]">暂无内容，请先向 `listening_content` 写入数据。</p>}
+          {filtered.length === 0 && <p className="text-[12px] text-[var(--color-muted)]">当前分类暂无内容，稍后会继续补充静态听力素材。</p>}
         </div>
       </div>
     </div>
