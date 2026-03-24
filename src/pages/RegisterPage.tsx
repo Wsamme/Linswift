@@ -11,6 +11,7 @@ import { User, Mail, Lock, Eye, EyeOff, Loader2, ArrowLeft } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import Particles from '../components/reactbits/Particles'
 import BrandLogo from '../components/common/BrandLogo'
+import { navigateSafely } from '../lib/navigation'
 
 export default function RegisterPage() {
   const navigate = useNavigate()
@@ -105,7 +106,7 @@ export default function RegisterPage() {
         {/* 右侧注册表单（glass） */}
         <div className="flex-1 flex items-center justify-center p-8">
         <div className={`${glassPanel} rounded-3xl w-full max-w-[440px] px-10 py-10`}>
-          <button onClick={() => navigate('/login')}
+          <button onClick={() => navigateSafely(navigate, '/login')}
             className="flex items-center gap-2 text-[#999] hover:text-[#1A1A1A] text-[14px] mb-6 transition-colors">
             <ArrowLeft size={16} />
             返回登录
@@ -167,7 +168,7 @@ export default function RegisterPage() {
 
           <p className="text-center text-[13px] text-[#999] mt-5">
             已有账号？
-            <span onClick={() => navigate('/login')}
+            <span onClick={() => navigateSafely(navigate, '/login')}
               className="text-[#FF8400] font-semibold ml-1 cursor-pointer hover:underline">登录</span>
           </p>
         </div>
@@ -192,7 +193,7 @@ export default function RegisterPage() {
             />
           </div>
           <div className="relative z-10 flex flex-col items-center">
-            <button onClick={() => navigate('/login')}
+            <button onClick={() => navigateSafely(navigate, '/login')}
               className="absolute -top-16 left-5 w-10 h-10 rounded-full bg-black/5 flex items-center justify-center">
               <ArrowLeft size={20} className="text-[#1A1A1A]" />
             </button>
@@ -266,7 +267,7 @@ export default function RegisterPage() {
 
             <p className="text-center text-[13px] text-[#999] mt-5">
               已有账号？
-              <span onClick={() => navigate('/login')}
+              <span onClick={() => navigateSafely(navigate, '/login')}
                 className="text-[#FF8400] font-semibold ml-1 cursor-pointer hover:underline">登录</span>
             </p>
           </div>

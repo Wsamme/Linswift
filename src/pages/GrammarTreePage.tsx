@@ -16,6 +16,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useLogicalBack } from '../hooks/useLogicalBack'
 import { getGrammarBlueprint } from '../data/grammarCatalog'
 import { useGrammarLearning } from '../hooks/useGrammarLearning'
+import { navigateSafely } from '../lib/navigation'
 import {
   GRAMMAR_ERROR_LABELS,
   getNodeDueReviewCount,
@@ -193,7 +194,7 @@ export default function GrammarTreePage() {
           每个语法课都可以跳去相关长难句例句，长难句页也会回链到对应语法点，避免语法和阅读各练各的。
         </div>
         <button
-          onClick={() => navigate('/grammar/long-sentence')}
+          onClick={() => navigateSafely(navigate, '/grammar/long-sentence')}
           className="mt-5 rounded-full bg-white px-4 py-2.5 text-[13px] font-semibold text-slate-900 active:scale-[0.98]"
         >
           进入长难句学习
@@ -221,7 +222,7 @@ export default function GrammarTreePage() {
                   }}
                   onClick={() => {
                     if (node.status === 'locked') return
-                    navigate(`/grammar/lesson?id=${encodeURIComponent(node.node_id)}`)
+                    navigateSafely(navigate, `/grammar/lesson?id=${encodeURIComponent(node.node_id)}`)
                   }}
                 >
                   <div className="flex items-start gap-3">

@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { navigateSafely } from '../lib/navigation'
 
 function withBookId(basePath: string, searchParams: URLSearchParams) {
   const bookId = searchParams.get('bookId')
@@ -82,6 +83,6 @@ export function useLogicalBack(defaultTarget = '/app/learn') {
 
   return useCallback(() => {
     const target = getLogicalBackTarget(location.pathname, location.search) || defaultTarget
-    navigate(target)
+    navigateSafely(navigate, target)
   }, [defaultTarget, location.pathname, location.search, navigate])
 }

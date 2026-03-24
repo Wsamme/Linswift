@@ -8,6 +8,7 @@ import { speakEnglish, stopSpeaking } from '../lib/tts'
 import { type WordPair, shuffleArray, calcCorrectScore, calcWrongPenalty } from '../lib/gameEngine'
 import { calculateNextReview, getReviewCycleDaysFromLocalStorage } from '../lib/ebbinghaus'
 import { useLogicalBack } from '../hooks/useLogicalBack'
+import { navigateSafely } from '../lib/navigation'
 
 const AUTO_AUDIO_KEY = 'linswift_listen_identify_auto_audio'
 const MIN_WORD_POOL = 4
@@ -243,7 +244,7 @@ export default function ListenIdentifyGame() {
       <div className="min-h-screen bg-[var(--color-background)] flex flex-col items-center justify-center px-8 text-center">
         <p className="text-[18px] font-bold text-[var(--color-foreground)] mb-2">词库不足，无法开始游戏</p>
         <p className="text-[13px] text-[var(--color-muted)] mb-5">需要至少 4 个英文词汇（建议在词库补充后再来）</p>
-        <button onClick={() => navigate('/app/vocab')} className="px-6 py-3 bg-[var(--color-primary)] text-white rounded-[var(--radius-sm)] text-[14px] font-semibold">前往词库</button>
+        <button onClick={() => navigateSafely(navigate, '/app/vocab')} className="px-6 py-3 bg-[var(--color-primary)] text-white rounded-[var(--radius-sm)] text-[14px] font-semibold">前往词库</button>
       </div>
     )
   }

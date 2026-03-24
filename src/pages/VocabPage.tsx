@@ -467,12 +467,7 @@ export default function VocabPage() {
 
   if (isDesktop) {
     return (
-      <div className="glass-page relative -mx-6 -my-4 min-h-full overflow-hidden px-6 py-5">
-        <div className="pointer-events-none absolute inset-0">
-          <div className="absolute inset-x-0 top-0 h-[240px] bg-[radial-gradient(circle_at_top_right,rgba(255,132,0,0.12),transparent_50%),radial-gradient(circle_at_left_top,rgba(255,220,189,0.35),transparent_44%)]" />
-          <div className="absolute inset-0 opacity-[0.1]" style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.42) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.28) 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
-        </div>
-
+      <div className="relative -mx-6 -my-4 min-h-full overflow-hidden bg-white px-6 py-5">
         <div className="relative z-10 flex min-h-full flex-col gap-5">
           <section className={`${glassPanel} rounded-[32px] p-6`}>
             <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_minmax(380px,460px)]">
@@ -984,11 +979,7 @@ export default function VocabPage() {
   }
 
   return (
-    <div className="glass-page relative flex min-h-[100dvh] w-full flex-col overflow-hidden">
-      <div className="pointer-events-none absolute inset-0">
-        <div className="absolute inset-x-0 top-0 h-[300px] bg-[radial-gradient(circle_at_top_right,rgba(255,132,0,0.2),transparent_45%),radial-gradient(circle_at_left_top,rgba(255,220,189,0.58),transparent_42%)]" />
-        <div className="absolute inset-0 opacity-[0.12]" style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.38) 1px, transparent 1px)', backgroundSize: '26px 26px' }} />
-      </div>
+    <div className="relative flex min-h-[100dvh] w-full flex-col overflow-hidden bg-white">
       {/* ===== Header ===== */}
       <div className="relative z-10 px-5 pt-5">
         <div className="glass-card-strong rounded-[30px] px-5 py-5">

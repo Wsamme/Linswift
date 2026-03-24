@@ -7,6 +7,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { getWordDetail } from '../services/gemini'
 import { useLogicalBack } from '../hooks/useLogicalBack'
+import { navigateSafely } from '../lib/navigation'
 import {
   estimateVocabularyByAnswerStats,
   getLevelWordRange,
@@ -526,7 +527,7 @@ export default function VocabTestPage() {
           <p className="text-[56px] font-bold text-[var(--color-primary)] leading-none mb-6">{estimatedVocab.toLocaleString()}</p>
           <p className="text-[12px] text-[var(--color-muted)] mb-6">公共核心词库总量 {PUBLIC_VOCAB_TOTAL_WORDS.toLocaleString()} 词，可继续把本次陌生词加入个人词库做精学。</p>
           <button
-            onClick={() => navigate('/app/vocab')}
+            onClick={() => navigateSafely(navigate, '/app/vocab')}
             className="px-8 py-3 bg-[var(--color-primary)] text-white rounded-[var(--radius-sm)] text-[14px] font-semibold active:scale-[0.98] transition-transform"
           >
             返回词库

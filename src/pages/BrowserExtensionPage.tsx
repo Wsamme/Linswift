@@ -9,6 +9,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { Footer, Navbar } from './LandingPage'
+import { navigateSafely } from '../lib/navigation'
 
 const DOWNLOAD_URL = 'https://www.linswift.com/downloads/linswift-browser-extension.zip'
 
@@ -70,8 +71,9 @@ export default function BrowserExtensionPage() {
   return (
     <div className="min-h-screen bg-white text-[#1A1A1A] overflow-x-hidden">
       <Navbar
-        onLogin={() => navigate('/login')}
-        onRegister={() => navigate('/register')}
+        onLogin={() => navigateSafely(navigate, '/login')}
+        onRegister={() => navigateSafely(navigate, '/register')}
+        onExtensionGuide={() => navigateSafely(navigate, '/browser-extension')}
         linkBase="/"
       />
 

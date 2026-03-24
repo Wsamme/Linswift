@@ -36,10 +36,14 @@ export default function AppShell() {
   return (
     <div className="flex min-h-[100dvh] w-full justify-center bg-[var(--color-background)]">
       <div className="relative flex min-h-[100dvh] w-full flex-col overflow-hidden bg-[var(--color-background)]">
-        <main className="min-h-0 flex-1 overflow-y-auto bg-[var(--color-background)]">
+        <main className="min-h-0 flex-1 overflow-y-auto bg-[var(--color-background)] pb-[calc(92px+env(safe-area-inset-bottom))]">
           <Outlet />
         </main>
-        <BottomNav />
+        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-3 pb-[max(env(safe-area-inset-bottom),10px)]">
+          <div className="pointer-events-auto w-full max-w-[560px]">
+            <BottomNav />
+          </div>
+        </div>
       </div>
     </div>
   )

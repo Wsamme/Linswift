@@ -8,11 +8,13 @@ import {
   type TranslateResult,
   type UnfamiliarWord,
 } from '../services/translation'
+import { getWordDetail, type WordDetail } from '../services/gemini'
 import { useVocabulary } from '../hooks/useVocabulary'
 import { useTranslations } from '../hooks/useTranslations'
 import { useStudyRecords } from '../hooks/useStudyRecords'
 import { speakEnglish, speakChinese, speakJapanese } from '../lib/tts'
 import { normalizeLookupKey } from '../lib/text'
+import { hasLatinText, normalizeWhitespace, shouldShowPhonetic } from '../lib/text'
 import DesktopScreenshotTranslator from '../components/translate/DesktopScreenshotTranslator'
 
 const LANGUAGE_OPTIONS = [
@@ -68,13 +70,11 @@ type AutocompleteSuggestion = {
   score: number
 }
 
+type DictionaryTab = 'summary' | 'phrases' | 'examples' | 'encyclopedia'
+
 const LANG_CODE_MAP = Object.fromEntries(
   LANGUAGE_OPTIONS.map((option) => [option.value, option.code])
 ) as Record<AppTranslateLanguage, AppTranslateLanguageCode>
-
-const LANG_SHORT_LABEL_MAP = Object.fromEntries(
-  LANGUAGE_OPTIONS.map((option) => [option.value, option.shortLabel])
-) as Record<AppTranslateLanguage, string>
 
 const LANG_FROM_CODE_MAP = Object.fromEntries(
   LANGUAGE_OPTIONS.map((option) => [option.code, option.value])
@@ -139,6 +139,28 @@ function speakGeneric(text: string, languageCode: string) {
   window.speechSynthesis.speak(utterance)
 }
 
+function isDictionaryLikeQuery(text: string) {
+  const normalized = normalizeWhitespace(text)
+  if (!normalized || normalized.length > 48) return false
+  if (!hasLatinText(normalized)) return false
+  return normalized.split(/\s+/).length <= 3
+}
+
+function splitMeanings(text: string) {
+  return String(text || '')
+    .split(/[；;。]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function buildFallbackPartBlocks(detail: WordDetail) {
+  const meanings = splitMeanings(detail.meaning)
+  if (meanings.length === 0) {
+    return [{ partOfSpeech: '释义', meanings: ['暂无释义'] }]
+  }
+  return [{ partOfSpeech: '释义', meanings }]
+}
+
 export default function TranslatePage() {
   const { vocabulary, addWord, addWords } = useVocabulary()
   const {
@@ -164,8 +186,12 @@ export default function TranslatePage() {
   const [copiedText, setCopiedText] = useState(false)
   const [currentTranslationId, setCurrentTranslationId] = useState<number | null>(null)
   const [collectedWordSet, setCollectedWordSet] = useState<Record<string, boolean>>({})
-  const [collectedPhraseKey, setCollectedPhraseKey] = useState<string | null>(null)
   const [isInputFocused, setIsInputFocused] = useState(false)
+  const [dictionaryDetail, setDictionaryDetail] = useState<WordDetail | null>(null)
+  const [dictionaryQuery, setDictionaryQuery] = useState('')
+  const [dictionaryLoading, setDictionaryLoading] = useState(false)
+  const [dictionaryError, setDictionaryError] = useState<string | null>(null)
+  const [activeDictionaryTab, setActiveDictionaryTab] = useState<DictionaryTab>('summary')
 
   useEffect(() => { fetchHistory(20) }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -228,6 +254,41 @@ export default function TranslatePage() {
       .slice(0, 5)
   }, [history, inputText, vocabulary])
 
+  const dictionaryLookupQuery = useMemo(() => {
+    const trimmedInput = normalizeWhitespace(inputText)
+    if (isDictionaryLikeQuery(trimmedInput)) return trimmedInput
+
+    const translated = normalizeWhitespace(result?.translatedText || '')
+    if (targetLang === 'English' && isDictionaryLikeQuery(translated)) return translated
+
+    return ''
+  }, [inputText, result?.translatedText, targetLang])
+
+  const dictionarySuggestionPool = useMemo(() => {
+    const unique = new Map<string, { word: string; meaning: string }>()
+
+    autocompleteSuggestions.forEach((item) => {
+      const key = normalizeLookupKey(item.text)
+      if (!unique.has(key)) {
+        unique.set(key, { word: item.text, meaning: item.subtitle })
+      }
+    })
+
+    dictionaryDetail?.relatedWords?.forEach((item) => {
+      const word = normalizeWhitespace(item.word)
+      if (!word) return
+      const key = normalizeLookupKey(word)
+      if (!unique.has(key)) {
+        unique.set(key, { word, meaning: item.meaning || '相关词' })
+      }
+    })
+
+    return Array.from(unique.values())
+      .filter((item) => isDictionaryLikeQuery(item.word))
+      .filter((item) => normalizeLookupKey(item.word) !== normalizeLookupKey(dictionaryLookupQuery))
+      .slice(0, 6)
+  }, [autocompleteSuggestions, dictionaryDetail?.relatedWords, dictionaryLookupQuery])
+
   const isCurrentStarred = !!currentHistoryItem?.is_starred
 
   const isVocabularyCollected = useCallback((value: string, languageCode: string) => {
@@ -240,16 +301,8 @@ export default function TranslatePage() {
   useEffect(() => {
     if (!result) {
       setCollectedWordSet({})
-      setCollectedPhraseKey(null)
       return
     }
-
-    const targetLanguageCode = LANG_CODE_MAP[targetLang]
-    setCollectedPhraseKey(
-      isVocabularyCollected(result.translatedText, targetLanguageCode)
-        ? normalizeCollectKey(result.translatedText, targetLanguageCode)
-        : null
-    )
 
     setCollectedWordSet(
       result.unfamiliarWords.reduce<Record<string, boolean>>((acc, word) => {
@@ -260,7 +313,42 @@ export default function TranslatePage() {
         return acc
       }, {})
     )
-  }, [isVocabularyCollected, result, targetLang])
+  }, [isVocabularyCollected, result])
+
+  useEffect(() => {
+    if (!dictionaryLookupQuery) {
+      setDictionaryDetail(null)
+      setDictionaryQuery('')
+      setDictionaryError(null)
+      setDictionaryLoading(false)
+      return
+    }
+
+    let cancelled = false
+    setDictionaryLoading(true)
+    setDictionaryError(null)
+    setDictionaryQuery(dictionaryLookupQuery)
+    setActiveDictionaryTab('summary')
+
+    getWordDetail(dictionaryLookupQuery)
+      .then((detail) => {
+        if (cancelled) return
+        setDictionaryDetail(detail)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setDictionaryDetail(null)
+        setDictionaryError(err instanceof Error ? err.message : '词条详情加载失败')
+      })
+      .finally(() => {
+        if (cancelled) return
+        setDictionaryLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [dictionaryLookupQuery])
 
   const swapLanguages = () => {
     setSourceLang(targetLang)
@@ -331,29 +419,6 @@ export default function TranslatePage() {
     }
   }
 
-  const handleCollectTranslatedPhrase = useCallback(async () => {
-    if (!result?.translatedText.trim()) return
-
-    const targetLanguageCode = LANG_CODE_MAP[targetLang]
-    const phraseKey = normalizeCollectKey(result.translatedText, targetLanguageCode)
-    const { error: saveError } = await addWord({
-      word: result.translatedText,
-      language_code: targetLanguageCode,
-      language_label: LANG_SHORT_LABEL_MAP[targetLang],
-      meaning: inputText.trim() || undefined,
-      example_sentence: `${sourceLang}：${inputText.trim()}`,
-      source: 'translate',
-    })
-
-    if (!saveError) {
-      setCollectedPhraseKey(phraseKey)
-      await appendStudy({
-        vocabulary_learned: 1,
-        study_duration: 1,
-      })
-    }
-  }, [addWord, appendStudy, inputText, result, sourceLang, targetLang])
-
   const renderHighlightedText = (text: string, words: UnfamiliarWord[]) => {
     if (words.length === 0) return <span>{text}</span>
 
@@ -384,8 +449,65 @@ export default function TranslatePage() {
     })
   }
 
+  const dictionaryPartBlocks = dictionaryDetail?.partOfSpeechBlocks?.length
+    ? dictionaryDetail.partOfSpeechBlocks
+    : dictionaryDetail
+      ? buildFallbackPartBlocks(dictionaryDetail)
+      : []
+
+  const dictionaryCollectedKey = dictionaryQuery
+    ? normalizeCollectKey(dictionaryQuery, 'en')
+    : null
+
+  const isDictionaryCollected = dictionaryCollectedKey
+    ? !!vocabulary.find((item) => normalizeCollectKey(item.word, item.language_code || 'en') === dictionaryCollectedKey)
+    : false
+
+  const dictionarySummaryPreview = dictionaryPartBlocks
+    .flatMap((block) => block.meanings)
+    .slice(0, 3)
+
+  const dictionaryTabItems: Array<{
+    key: DictionaryTab
+    label: string
+    count: number | null
+  }> = [
+    { key: 'summary', label: '简明', count: dictionaryPartBlocks.length || null },
+    { key: 'phrases', label: '词组', count: dictionaryDetail?.phrasePatterns?.length || 0 },
+    { key: 'examples', label: '例句', count: dictionaryDetail?.examples?.length || 0 },
+    {
+      key: 'encyclopedia',
+      label: '百科',
+      count: (dictionaryDetail?.encyclopedia?.length || 0) + (dictionaryDetail?.relatedWords?.length || 0),
+    },
+  ]
+
+  const handleCollectDictionaryWord = useCallback(async () => {
+    if (!dictionaryDetail?.word.trim()) return
+
+    const { error: saveError } = await addWord({
+      word: dictionaryDetail.word,
+      language_code: 'en',
+      language_label: 'English',
+      phonetic: dictionaryDetail.phoneticAm || dictionaryDetail.phoneticBr || dictionaryDetail.phonetic,
+      meaning: dictionaryPartBlocks
+        .flatMap((block) => block.meanings)
+        .slice(0, 4)
+        .join('；') || dictionaryDetail.meaning,
+      example_sentence: dictionaryDetail.examples[0] || undefined,
+      source: 'translate',
+    })
+
+    if (!saveError) {
+      await appendStudy({
+        vocabulary_learned: 1,
+        study_duration: 1,
+      })
+    }
+  }, [addWord, appendStudy, dictionaryDetail, dictionaryPartBlocks])
+
   return (
-    <div className="flex h-full min-h-[100dvh] flex-col bg-[var(--color-background)] pb-[max(env(safe-area-inset-bottom),12px)]">
+    <div className="flex min-h-full flex-col bg-[var(--color-background)] pb-4 md:min-h-[100dvh]">
       <div className="px-5 py-4">
         <h1 className="font-secondary text-[20px] font-bold text-[var(--color-foreground)]">
           翻译
@@ -397,6 +519,7 @@ export default function TranslatePage() {
 
       <DesktopScreenshotTranslator
         targetLang={targetLang}
+        onTargetLangChange={(nextLang) => setTargetLang(nextLang as AppTranslateLanguage)}
         onUseExtractedText={(text) => {
           setInputText(text)
           setResult(null)
@@ -408,7 +531,7 @@ export default function TranslatePage() {
         <select
           value={sourceLang}
           onChange={(e) => setSourceLang(e.target.value as AppTranslateLanguage)}
-          className="flex-1 rounded-[var(--radius-sm)] bg-[var(--color-background-secondary)] py-2 text-center text-[14px] font-semibold text-[var(--color-foreground)] outline-none"
+          className="flex-1 appearance-none rounded-[var(--radius-sm)] bg-[var(--color-background-secondary)] px-3 py-2 text-center text-[14px] font-semibold text-[var(--color-foreground)] outline-none [text-align-last:center]"
         >
           {LANGUAGE_OPTIONS.map((lang) => (
             <option key={lang.value} value={lang.value}>{lang.value}</option>
@@ -423,7 +546,7 @@ export default function TranslatePage() {
         <select
           value={targetLang}
           onChange={(e) => setTargetLang(e.target.value as AppTranslateLanguage)}
-          className="flex-1 rounded-[var(--radius-sm)] bg-[var(--color-background-secondary)] py-2 text-center text-[14px] font-semibold text-[var(--color-foreground)] outline-none"
+          className="flex-1 appearance-none rounded-[var(--radius-sm)] bg-[var(--color-background-secondary)] px-3 py-2 text-center text-[14px] font-semibold text-[var(--color-foreground)] outline-none [text-align-last:center]"
         >
           {LANGUAGE_OPTIONS.map((lang) => (
             <option key={lang.value} value={lang.value}>{lang.value}</option>
@@ -503,7 +626,7 @@ export default function TranslatePage() {
                 最多 5 条
               </span>
             </div>
-            <div className="space-y-2">
+            <div className="overflow-hidden rounded-[16px] border border-[var(--color-border)] bg-[var(--color-background-secondary)]">
               {autocompleteSuggestions.map((suggestion) => (
                 <button
                   key={suggestion.key}
@@ -515,7 +638,7 @@ export default function TranslatePage() {
                     setError(null)
                     setIsInputFocused(false)
                   }}
-                  className="flex w-full items-start justify-between gap-3 rounded-[14px] bg-[var(--color-background-secondary)] px-3 py-2 text-left transition-colors active:bg-[var(--color-primary-light)]"
+                  className="flex w-full items-center gap-3 border-b border-[var(--color-border)]/70 px-3 py-2.5 text-left transition-colors last:border-b-0 active:bg-white/55"
                 >
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[13px] font-medium text-[var(--color-foreground)]">
@@ -525,7 +648,7 @@ export default function TranslatePage() {
                       {suggestion.subtitle}
                     </p>
                   </div>
-                  <span className="rounded-full bg-white px-2 py-1 text-[10px] font-semibold text-[var(--color-primary)]">
+                  <span className="shrink-0 rounded-full bg-white px-2 py-1 text-[10px] font-semibold text-[var(--color-primary)]">
                     {suggestion.badge}
                   </span>
                 </button>
@@ -577,6 +700,407 @@ export default function TranslatePage() {
         </div>
       )}
 
+      {(dictionaryLookupQuery || dictionaryLoading || dictionaryDetail || dictionaryError) && (
+        <div
+          className="mx-5 mb-3 rounded-[var(--radius-md)] bg-[var(--color-card)] p-4"
+          style={{ boxShadow: 'var(--shadow-card)' }}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-[12px] text-[var(--color-muted)]">词典结果</p>
+              <div className="mt-1 flex items-center gap-2">
+                <h2 className="truncate text-[28px] font-bold text-[var(--color-foreground)]">
+                  {dictionaryQuery || dictionaryLookupQuery}
+                </h2>
+                {dictionaryLoading && <Loader2 size={18} className="animate-spin text-[var(--color-primary)]" />}
+              </div>
+            </div>
+            {!!dictionaryQuery && (
+              <button
+                className="rounded-full bg-[var(--color-background-secondary)] p-2"
+                onClick={() => speakByLanguage(dictionaryQuery, 'English')}
+                title="播放单词发音"
+              >
+                <Volume2 size={16} className="text-[var(--color-muted)]" />
+              </button>
+            )}
+          </div>
+
+          {dictionarySuggestionPool.length > 0 && (
+            <div className="mt-4 overflow-hidden rounded-[18px] border border-[var(--color-border)] bg-[var(--color-background-secondary)]">
+              {dictionarySuggestionPool.map((item) => (
+                <button
+                  key={item.word}
+                  type="button"
+                  onClick={() => {
+                    setInputText(item.word)
+                    setResult(null)
+                    setError(null)
+                  }}
+                  className="flex w-full items-center gap-3 border-b border-[var(--color-border)]/70 px-3 py-3 text-left transition-colors last:border-b-0 active:bg-white/55"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[14px] font-semibold text-[var(--color-foreground)]">{item.word}</span>
+                  </span>
+                  <span className="max-w-[68%] truncate text-[13px] text-[var(--color-muted)]">{item.meaning}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {dictionaryError && (
+            <p className="mt-4 rounded-[14px] bg-[var(--color-error)]/10 px-3 py-2 text-[12px] text-[var(--color-error)]">
+              {dictionaryError}
+            </p>
+          )}
+
+          {dictionaryDetail && (
+            <>
+              <div className="mt-4 rounded-[22px] border border-[var(--color-border)] bg-[var(--color-background-secondary)] p-4">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-[var(--color-primary)]">
+                        AI 词典
+                      </span>
+                      <span className="rounded-full bg-white px-2.5 py-1 text-[11px] text-[var(--color-muted)]">
+                        {dictionaryQuery.split(/\s+/).length > 1 ? '词组查询' : '单词查询'}
+                      </span>
+                      <span className="rounded-full bg-white px-2.5 py-1 text-[11px] text-[var(--color-muted)]">
+                        {dictionaryPartBlocks.length} 个词性
+                      </span>
+                    </div>
+                    <p className="mt-3 text-[15px] leading-7 text-[var(--color-muted)]">
+                      {dictionarySummaryPreview.length > 0
+                        ? dictionarySummaryPreview.join('；')
+                        : dictionaryDetail.meaning}
+                    </p>
+                  </div>
+
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => speakByLanguage(dictionaryDetail.word, 'English')}
+                      className="rounded-full bg-white p-2.5"
+                      title="播放单词发音"
+                    >
+                      <Volume2 size={16} className="text-[var(--color-muted)]" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(dictionaryDetail.word)
+                      }}
+                      className="rounded-full bg-white p-2.5"
+                      title="复制单词"
+                    >
+                      <Copy size={16} className="text-[var(--color-muted)]" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCollectDictionaryWord}
+                      disabled={isDictionaryCollected}
+                      className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-[13px] font-semibold transition-transform active:scale-[0.98] ${
+                        isDictionaryCollected
+                          ? 'bg-[var(--color-success)]/10 text-[var(--color-success)]'
+                          : 'bg-[var(--color-primary)] text-white'
+                      }`}
+                    >
+                      {isDictionaryCollected ? <Check size={15} /> : <Plus size={15} />}
+                      {isDictionaryCollected ? '已加入词库' : '加入词库'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
+                  {shouldShowPhonetic(dictionaryDetail.word, dictionaryDetail.phoneticBr || dictionaryDetail.phonetic) && (
+                    <button
+                      type="button"
+                      onClick={() => speakByLanguage(dictionaryDetail.word, 'English')}
+                      className="inline-flex items-center gap-2 text-[13px] text-[var(--color-foreground)]"
+                    >
+                      <span className="font-semibold">英</span>
+                      <span>{dictionaryDetail.phoneticBr || dictionaryDetail.phonetic}</span>
+                      <Volume2 size={15} className="text-[var(--color-muted)]" />
+                    </button>
+                  )}
+                  {shouldShowPhonetic(dictionaryDetail.word, dictionaryDetail.phoneticAm || dictionaryDetail.phonetic) && (
+                    <button
+                      type="button"
+                      onClick={() => speakByLanguage(dictionaryDetail.word, 'English')}
+                      className="inline-flex items-center gap-2 text-[13px] text-[var(--color-foreground)]"
+                    >
+                      <span className="font-semibold">美</span>
+                      <span>{dictionaryDetail.phoneticAm || dictionaryDetail.phonetic}</span>
+                      <Volume2 size={15} className="text-[var(--color-muted)]" />
+                    </button>
+                  )}
+                  <span className="text-[13px] text-[var(--color-muted)]">
+                    近义词 {dictionaryDetail.synonyms.length} 个
+                  </span>
+                  <span className="text-[13px] text-[var(--color-muted)]">
+                    例句 {dictionaryDetail.examples.length} 条
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-4 lg:grid lg:grid-cols-[minmax(0,1fr)_280px] lg:gap-5">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-5 overflow-x-auto border-b border-[var(--color-border)] pb-px">
+                    {dictionaryTabItems.map((item) => {
+                      const active = activeDictionaryTab === item.key
+                      return (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={() => setActiveDictionaryTab(item.key)}
+                          className={`inline-flex shrink-0 items-center gap-2 border-b-2 px-1 pb-3 text-[15px] font-semibold transition-colors ${
+                            active
+                              ? 'border-[var(--color-primary)] text-[var(--color-foreground)]'
+                              : 'border-transparent text-[var(--color-muted)]'
+                          }`}
+                        >
+                          <span>{item.label}</span>
+                          {item.count ? (
+                            <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${active ? 'bg-[var(--color-primary-light)] text-[var(--color-primary)]' : 'bg-[var(--color-background-secondary)] text-[var(--color-muted)]'}`}>
+                              {item.count}
+                            </span>
+                          ) : null}
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  {activeDictionaryTab === 'summary' && (
+                    <div className="mt-5 space-y-5">
+                      <section>
+                        <div className="mb-3 flex items-center justify-between">
+                          <h3 className="text-[14px] font-semibold text-[var(--color-foreground)]">核心释义</h3>
+                          <span className="text-[11px] text-[var(--color-muted)]">按词性分组</span>
+                        </div>
+                        <div className="overflow-hidden rounded-[18px] border border-[var(--color-border)] bg-[var(--color-card)]">
+                          {dictionaryPartBlocks.map((block, blockIndex) => (
+                            <div
+                              key={`${block.partOfSpeech}-${block.meanings.join('-')}`}
+                              className={`grid grid-cols-[76px,1fr] gap-3 px-4 py-4 ${blockIndex === dictionaryPartBlocks.length - 1 ? '' : 'border-b border-[var(--color-border)]'}`}
+                            >
+                              <div className="pt-0.5 text-[14px] italic text-[var(--color-muted)]">
+                                {block.partOfSpeech}
+                              </div>
+                              <div className="space-y-2">
+                                {block.meanings.map((meaning, index) => (
+                                  <p key={`${block.partOfSpeech}-${index}`} className="text-[15px] leading-7 text-[var(--color-foreground)]">
+                                    {index + 1}. {meaning}
+                                  </p>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </section>
+
+                      <section className="rounded-[18px] border border-[var(--color-border)] bg-[var(--color-card)] p-4">
+                        <div className="mb-2 flex items-center justify-between">
+                          <h3 className="text-[14px] font-semibold text-[var(--color-foreground)]">记忆提示</h3>
+                          <span className="text-[11px] text-[var(--color-muted)]">AI 辅助</span>
+                        </div>
+                        <p className="text-[14px] leading-7 text-[var(--color-foreground)]">
+                          {dictionaryDetail.mnemonic}
+                        </p>
+                      </section>
+                    </div>
+                  )}
+
+                  {activeDictionaryTab === 'phrases' && (
+                    <div className="mt-5 space-y-3">
+                      {(dictionaryDetail.phrasePatterns && dictionaryDetail.phrasePatterns.length > 0
+                        ? dictionaryDetail.phrasePatterns
+                        : []).map((item, index) => (
+                        <div key={`${item.phrase}-${item.meaning}`} className="rounded-[18px] border border-[var(--color-border)] bg-[var(--color-card)] px-4 py-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--color-muted)]">
+                                Phrase {index + 1}
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setInputText(item.phrase)
+                                  setResult(null)
+                                  setError(null)
+                                }}
+                                className="mt-1 text-left text-[16px] font-semibold text-[var(--color-foreground)]"
+                              >
+                                {item.phrase}
+                              </button>
+                              <p className="mt-2 text-[14px] leading-7 text-[var(--color-muted)]">{item.meaning}</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => speakByLanguage(item.phrase, 'English')}
+                              className="rounded-full bg-[var(--color-background-secondary)] p-2"
+                            >
+                              <Volume2 size={14} className="text-[var(--color-muted)]" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      {(!dictionaryDetail.phrasePatterns || dictionaryDetail.phrasePatterns.length === 0) && (
+                        <div className="rounded-[18px] border border-[var(--color-border)] bg-[var(--color-card)] p-4 text-[13px] text-[var(--color-muted)]">
+                          当前词条暂未生成固定搭配。
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {activeDictionaryTab === 'examples' && (
+                    <div className="mt-5 space-y-3">
+                      {(dictionaryDetail.examples.length > 0 ? dictionaryDetail.examples : ['暂无例句']).map((example, index) => (
+                        <div key={`${example}-${index}`} className="rounded-[18px] border border-[var(--color-border)] bg-[var(--color-card)] px-4 py-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--color-muted)]">
+                                Example {index + 1}
+                              </p>
+                              <p className="mt-2 text-[15px] leading-7 text-[var(--color-foreground)]">{example}</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => speakByLanguage(example, 'English')}
+                              className="rounded-full bg-[var(--color-background-secondary)] p-2"
+                            >
+                              <Volume2 size={14} className="text-[var(--color-muted)]" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {activeDictionaryTab === 'encyclopedia' && (
+                    <div className="mt-5 space-y-5">
+                      {dictionaryDetail.synonyms.length > 0 && (
+                        <section className="rounded-[18px] border border-[var(--color-border)] bg-[var(--color-card)] p-4">
+                          <h3 className="mb-3 text-[14px] font-semibold text-[var(--color-foreground)]">近义词</h3>
+                          <div className="flex flex-wrap gap-2">
+                            {dictionaryDetail.synonyms.map((synonym) => (
+                              <button
+                                key={synonym}
+                                type="button"
+                                onClick={() => {
+                                  setInputText(synonym)
+                                  setResult(null)
+                                  setError(null)
+                                }}
+                                className="rounded-full bg-[var(--color-primary-light)] px-3 py-1.5 text-[12px] font-semibold text-[var(--color-primary)]"
+                              >
+                                {synonym}
+                              </button>
+                            ))}
+                          </div>
+                        </section>
+                      )}
+
+                      {dictionaryDetail.encyclopedia && dictionaryDetail.encyclopedia.length > 0 && (
+                        <section className="rounded-[18px] border border-[var(--color-border)] bg-[var(--color-card)] p-4">
+                          <h3 className="mb-3 text-[14px] font-semibold text-[var(--color-foreground)]">百科说明</h3>
+                          <div className="space-y-3">
+                            {dictionaryDetail.encyclopedia.map((item, index) => (
+                              <p key={`${item}-${index}`} className="text-[14px] leading-7 text-[var(--color-foreground)]">
+                                {index + 1}. {item}
+                              </p>
+                            ))}
+                          </div>
+                        </section>
+                      )}
+
+                      {dictionaryDetail.relatedWords && dictionaryDetail.relatedWords.length > 0 && (
+                        <section className="rounded-[18px] border border-[var(--color-border)] bg-[var(--color-card)] p-4">
+                          <h3 className="mb-3 text-[14px] font-semibold text-[var(--color-foreground)]">联想词</h3>
+                          <div className="overflow-hidden rounded-[16px] border border-[var(--color-border)] bg-[var(--color-background-secondary)]">
+                            {dictionaryDetail.relatedWords.map((item, index) => (
+                              <button
+                                key={`${item.word}-${item.meaning}`}
+                                type="button"
+                                onClick={() => {
+                                  setInputText(item.word)
+                                  setResult(null)
+                                  setError(null)
+                                }}
+                                className={`flex w-full items-center justify-between gap-3 px-3 py-3 text-left ${index === dictionaryDetail.relatedWords!.length - 1 ? '' : 'border-b border-[var(--color-border)]'}`}
+                              >
+                                <span className="text-[14px] font-semibold text-[var(--color-foreground)]">{item.word}</span>
+                                <span className="max-w-[68%] truncate text-[13px] text-[var(--color-muted)]">{item.meaning}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </section>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <aside className="mt-5 space-y-4 lg:mt-0">
+                  <section className="rounded-[18px] border border-[var(--color-border)] bg-[var(--color-card)] p-4">
+                    <h3 className="text-[14px] font-semibold text-[var(--color-foreground)]">词条信息</h3>
+                    <div className="mt-3 space-y-3 text-[13px]">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-[var(--color-muted)]">查询类型</span>
+                        <span className="font-medium text-[var(--color-foreground)]">
+                          {dictionaryQuery.split(/\s+/).length > 1 ? '英文词组' : '英文单词'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-[var(--color-muted)]">词性分组</span>
+                        <span className="font-medium text-[var(--color-foreground)]">{dictionaryPartBlocks.length}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-[var(--color-muted)]">搭配数量</span>
+                        <span className="font-medium text-[var(--color-foreground)]">{dictionaryDetail.phrasePatterns?.length || 0}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-[var(--color-muted)]">例句数量</span>
+                        <span className="font-medium text-[var(--color-foreground)]">{dictionaryDetail.examples.length}</span>
+                      </div>
+                    </div>
+                  </section>
+
+                  {dictionarySuggestionPool.length > 0 && (
+                    <section className="rounded-[18px] border border-[var(--color-border)] bg-[var(--color-card)] p-4">
+                      <h3 className="text-[14px] font-semibold text-[var(--color-foreground)]">继续查词</h3>
+                      <div className="mt-3 space-y-2">
+                        {dictionarySuggestionPool.map((item) => (
+                          <button
+                            key={`side-${item.word}`}
+                            type="button"
+                            onClick={() => {
+                              setInputText(item.word)
+                              setResult(null)
+                              setError(null)
+                            }}
+                            className="flex w-full items-center justify-between gap-3 rounded-[14px] bg-[var(--color-background-secondary)] px-3 py-2.5 text-left"
+                          >
+                            <span className="text-[13px] font-semibold text-[var(--color-foreground)]">{item.word}</span>
+                            <span className="max-w-[58%] truncate text-[12px] text-[var(--color-muted)]">{item.meaning}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
+                  <section className="rounded-[18px] border border-[var(--color-border)] bg-[var(--color-card)] p-4">
+                    <h3 className="text-[14px] font-semibold text-[var(--color-foreground)]">学习建议</h3>
+                    <p className="mt-3 text-[13px] leading-6 text-[var(--color-muted)]">
+                      先看简明释义，再切到词组和例句。若是抽象词或多义词，最后再看百科说明和联想词。
+                    </p>
+                  </section>
+                </aside>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {result && (
         <div
           className="mx-5 mb-3 rounded-[var(--radius-md)] bg-[var(--color-card)] p-4"
@@ -612,32 +1136,6 @@ export default function TranslatePage() {
               ))}
             </div>
           )}
-
-          <p className="mt-3 text-[11px] text-[var(--color-muted-light)]">
-            收藏时会写入 {LANG_SHORT_LABEL_MAP[targetLang]} 词库
-          </p>
-
-          <button
-            className="mt-4 flex w-full items-center justify-center gap-2 rounded-[var(--radius-sm)] bg-[var(--color-background-secondary)] px-4 py-2.5 transition-transform active:scale-[0.98]"
-            disabled={collectedPhraseKey === normalizeCollectKey(result.translatedText, LANG_CODE_MAP[targetLang])}
-            onClick={handleCollectTranslatedPhrase}
-          >
-            {collectedPhraseKey === normalizeCollectKey(result.translatedText, LANG_CODE_MAP[targetLang]) ? (
-              <>
-                <Check size={16} className="text-[var(--color-success)]" />
-                <span className="text-[13px] font-semibold text-[var(--color-success)]">
-                  已收藏到 {LANG_SHORT_LABEL_MAP[targetLang]} 词库
-                </span>
-              </>
-            ) : (
-              <>
-                <Plus size={16} className="text-[var(--color-primary)]" />
-                <span className="text-[13px] font-semibold text-[var(--color-primary)]">
-                  收藏当前翻译到词库
-                </span>
-              </>
-            )}
-          </button>
 
           {result.unfamiliarWords.length > 0 && (
             <div className="mt-3 border-t border-[var(--color-border)] pt-3">

@@ -8,6 +8,7 @@ import { type WordPair, shuffleArray, calcCorrectScore } from '../lib/gameEngine
 import { calculateNextReview, getReviewCycleDaysFromLocalStorage } from '../lib/ebbinghaus'
 import { speakEnglish } from '../lib/tts'
 import { useLogicalBack } from '../hooks/useLogicalBack'
+import { navigateSafely } from '../lib/navigation'
 
 const TOTAL_SECONDS = 30
 const REQUIRED_CORRECT_PER_WORD = 2
@@ -351,7 +352,7 @@ export default function LightningGame() {
       <div className="min-h-screen bg-[var(--color-background)] flex flex-col items-center justify-center px-8 text-center">
         <p className="text-[18px] font-bold text-[var(--color-foreground)] mb-2">词库不足，无法开始游戏</p>
         <p className="text-[13px] text-[var(--color-muted)] mb-5">至少需要 4 个可训练词汇（已从主数据库尝试随机补词）</p>
-        <button onClick={() => navigate('/app/vocab')} className="px-6 py-3 bg-[var(--color-primary)] text-white rounded-[var(--radius-sm)] text-[14px] font-semibold">前往词库</button>
+        <button onClick={() => navigateSafely(navigate, '/app/vocab')} className="px-6 py-3 bg-[var(--color-primary)] text-white rounded-[var(--radius-sm)] text-[14px] font-semibold">前往词库</button>
       </div>
     )
   }

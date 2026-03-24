@@ -15,6 +15,7 @@ import {
   saveCachedBookWords,
 } from '../lib/books'
 import { loadProcessedClassicBook, type ProcessedClassicBook } from '../lib/classicReader'
+import { navigateSafely } from '../lib/navigation'
 
 /**
  * 阅读界面（V2：从数据库加载真实内容）
@@ -276,7 +277,7 @@ export default function ReadingPage() {
         <div className="glass-card w-full max-w-[320px] rounded-[28px] px-6 py-8 text-center">
           <p className="mb-4 text-[16px] font-semibold text-[var(--color-foreground)]">未找到书籍</p>
           <button
-            onClick={() => navigate('/bookshelf')}
+            onClick={() => navigateSafely(navigate, '/bookshelf')}
             className="glass-card-interactive inline-flex items-center justify-center rounded-[18px] bg-[var(--color-primary)] px-6 py-2.5 text-[14px] font-semibold text-white"
           >
             前往书架

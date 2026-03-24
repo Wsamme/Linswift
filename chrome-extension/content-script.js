@@ -3,8 +3,11 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
 
   const HIGHLIGHT_CLASS = 'linswift-word-highlight'
   const SELECTION_HIGHLIGHT_CLASS = 'linswift-selection-highlight'
+  const SELECTION_HIGHLIGHT_OVERLAY_CLASS = 'linswift-selection-highlight-overlay'
+  const SELECTION_HIGHLIGHT_ANCHOR_CLASS = 'linswift-selection-highlight-anchor'
   const PANEL_STYLE_ID = 'linswift-floating-style'
   const PANEL_ROOT_ID = 'linswift-floating-root'
+  const PANEL_POSITION_STORAGE_KEY = 'linswift_floating_position_v2'
   const YOUTUBE_PAGE_BRIDGE_ID = 'linswift-youtube-page-bridge'
   const YOUTUBE_PAGE_BRIDGE_REQUEST_TYPE = 'linswift-youtube-page-request'
   const YOUTUBE_PAGE_BRIDGE_RESPONSE_TYPE = 'linswift-youtube-page-response'
@@ -122,9 +125,110 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
   let youtubeTranscriptTranslationRequestKey = ''
   let youtubeAutoCaptionRequestKey = ''
   let residentPanelBootstrapped = false
+  let floatingPositionLoaded = false
+  let floatingPositionState = null
 
   function shouldAutoOpenDemoPanel() {
     return document.querySelector('meta[name="linswift-demo-auto-open"][content="1"]') !== null
+  }
+
+  function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max)
+  }
+
+  function getVisibleFloatingElement() {
+    if (!refs) return null
+    if (!panelState.minimized && !refs.panel.classList.contains('linswift-hidden')) {
+      return refs.panel
+    }
+    if (!refs.bubble.classList.contains('linswift-hidden')) {
+      return refs.bubble
+    }
+    return refs.panel
+  }
+
+  async function loadFloatingPosition() {
+    if (floatingPositionLoaded) return floatingPositionState
+    floatingPositionLoaded = true
+    try {
+      const stored = await chrome.storage.local.get([PANEL_POSITION_STORAGE_KEY])
+      floatingPositionState = stored?.[PANEL_POSITION_STORAGE_KEY] || null
+    } catch {
+      floatingPositionState = null
+    }
+    return floatingPositionState
+  }
+
+  async function saveFloatingPosition(position) {
+    floatingPositionState = position
+    try {
+      await chrome.storage.local.set({
+        [PANEL_POSITION_STORAGE_KEY]: position,
+      })
+    } catch {}
+  }
+
+  function computeFloatingPositionForRect(rect, position) {
+    const viewportWidth = window.innerWidth
+    const viewportHeight = window.innerHeight
+    const width = Math.min(rect.width || 0, viewportWidth - 24)
+    const height = Math.min(rect.height || 0, viewportHeight - 24)
+
+    if (!position) {
+      return {
+        left: clamp(viewportWidth - width - 24, 12, Math.max(12, viewportWidth - width - 12)),
+        top: clamp(viewportHeight - height - 24, 12, Math.max(12, viewportHeight - height - 12)),
+      }
+    }
+
+    const anchorX = position.anchorX === 'left' ? 'left' : 'right'
+    const anchorY = position.anchorY === 'top' ? 'top' : 'bottom'
+    const offsetX = Math.max(12, Number(position.offsetX) || 24)
+    const offsetY = Math.max(12, Number(position.offsetY) || 24)
+    const unclampedLeft =
+      anchorX === 'left' ? offsetX : viewportWidth - width - offsetX
+    const unclampedTop =
+      anchorY === 'top' ? offsetY : viewportHeight - height - offsetY
+
+    return {
+      left: clamp(unclampedLeft, 12, Math.max(12, viewportWidth - width - 12)),
+      top: clamp(unclampedTop, 12, Math.max(12, viewportHeight - height - 12)),
+    }
+  }
+
+  function applyFloatingPosition(position) {
+    if (!refs?.root) return
+    const target = getVisibleFloatingElement()
+    if (!target) return
+    const rect = target.getBoundingClientRect()
+    const next = computeFloatingPositionForRect(rect, position)
+    refs.root.style.left = `${next.left}px`
+    refs.root.style.top = `${next.top}px`
+    refs.root.style.right = 'auto'
+    refs.root.style.bottom = 'auto'
+  }
+
+  function snapshotFloatingPosition() {
+    const target = getVisibleFloatingElement()
+    if (!target) return null
+    const rect = target.getBoundingClientRect()
+    const rightGap = Math.max(12, window.innerWidth - rect.right)
+    const bottomGap = Math.max(12, window.innerHeight - rect.bottom)
+    const leftGap = Math.max(12, rect.left)
+    const topGap = Math.max(12, rect.top)
+
+    return {
+      anchorX: rightGap < leftGap ? 'right' : 'left',
+      anchorY: bottomGap < topGap ? 'bottom' : 'top',
+      offsetX: Math.round(rightGap < leftGap ? rightGap : leftGap),
+      offsetY: Math.round(bottomGap < topGap ? bottomGap : topGap),
+    }
+  }
+
+  async function persistCurrentFloatingPosition() {
+    const position = snapshotFloatingPosition()
+    if (!position) return
+    await saveFloatingPosition(position)
   }
 
   function injectStyles() {
@@ -148,6 +252,25 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
         box-shadow: inset 0 -1px 0 rgba(255, 132, 0, 0.16);
         border-radius: 0.32em;
         padding: 0 0.08em;
+      }
+
+      .${SELECTION_HIGHLIGHT_OVERLAY_CLASS} {
+        position: fixed;
+        z-index: 2147483000;
+        pointer-events: none;
+        background: linear-gradient(180deg, rgba(255, 132, 0, 0.14), rgba(255, 132, 0, 0.28));
+        border-bottom: 2px solid rgba(255, 132, 0, 0.82);
+        box-shadow: inset 0 -1px 0 rgba(255, 132, 0, 0.16);
+        border-radius: 0.32em;
+      }
+
+      .${SELECTION_HIGHLIGHT_ANCHOR_CLASS} {
+        position: fixed;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        pointer-events: none;
+        z-index: 2147483000;
       }
 
       .linswift-inline-annotation {
@@ -2445,16 +2568,10 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
   }
 
   function clearSelectionHighlight() {
-    const mark = selectionHighlightRecord?.mark
-    if (!mark?.isConnected) {
-      selectionHighlightRecord = null
-      return
-    }
-
-    const textNode = document.createTextNode(
-      selectionHighlightRecord.text || mark.textContent || ''
-    )
-    mark.replaceWith(textNode)
+    selectionHighlightRecord?.overlays?.forEach((overlay) => {
+      overlay?.remove?.()
+    })
+    selectionHighlightRecord?.anchor?.remove?.()
     selectionHighlightRecord.parent?.normalize?.()
     selectionHighlightRecord = null
   }
@@ -2477,46 +2594,56 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
   function applySelectionHighlight(range, word) {
     if (!range || range.collapsed) return null
 
-    const textNode = range.startContainer
-    if (
-      textNode?.nodeType !== Node.TEXT_NODE ||
-      range.startContainer !== range.endContainer ||
-      range.startOffset >= range.endOffset
-    ) {
-      return null
+    const rects = Array.from(range.getClientRects())
+      .map((rect) => ({
+        left: Math.round(rect.left),
+        top: Math.round(rect.top),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+      }))
+      .filter((rect) => rect.width > 0 && rect.height > 0)
+
+    if (rects.length === 0) {
+      const fallback = range.getBoundingClientRect()
+      if (fallback.width > 0 && fallback.height > 0) {
+        rects.push({
+          left: Math.round(fallback.left),
+          top: Math.round(fallback.top),
+          width: Math.round(fallback.width),
+          height: Math.round(fallback.height),
+        })
+      }
     }
 
-    const sourceText = textNode.textContent || ''
-    const selectedText = sourceText.slice(range.startOffset, range.endOffset)
-    if (!selectedText) return null
+    if (rects.length === 0) return null
 
-    const fragment = document.createDocumentFragment()
-    const parent = textNode.parentNode
-    if (!parent) return null
+    const overlays = rects.map((rect) => {
+      const overlay = document.createElement('span')
+      overlay.className = `${SELECTION_HIGHLIGHT_CLASS} ${SELECTION_HIGHLIGHT_OVERLAY_CLASS}`
+      overlay.dataset.word = word
+      overlay.style.left = `${rect.left}px`
+      overlay.style.top = `${rect.top}px`
+      overlay.style.width = `${rect.width}px`
+      overlay.style.height = `${rect.height}px`
+      document.body.appendChild(overlay)
+      return overlay
+    })
 
-    if (range.startOffset > 0) {
-      fragment.appendChild(document.createTextNode(sourceText.slice(0, range.startOffset)))
-    }
+    const anchorRect = rects[0]
+    const anchor = document.createElement('span')
+    anchor.className = `${SELECTION_HIGHLIGHT_CLASS} ${SELECTION_HIGHLIGHT_ANCHOR_CLASS}`
+    anchor.dataset.word = word
+    anchor.style.left = `${anchorRect.left}px`
+    anchor.style.top = `${anchorRect.top + anchorRect.height}px`
+    document.body.appendChild(anchor)
 
-    const mark = document.createElement('span')
-    mark.className = SELECTION_HIGHLIGHT_CLASS
-    mark.dataset.word = word
-    mark.textContent = selectedText
-    fragment.appendChild(mark)
-
-    if (range.endOffset < sourceText.length) {
-      fragment.appendChild(document.createTextNode(sourceText.slice(range.endOffset)))
-    }
-
-    parent.replaceChild(fragment, textNode)
     selectionHighlightRecord = {
-      mark,
-      parent,
-      text: selectedText,
+      overlays,
+      anchor,
       word,
     }
 
-    return mark
+    return anchor
   }
 
   function getSelectionLookupTarget() {
@@ -4243,7 +4370,9 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     panelState.hidden = false
     refs.panel.classList.add('linswift-hidden')
     refs.bubble.classList.remove('linswift-hidden')
+    applyFloatingPosition(floatingPositionState)
     syncBubble()
+    void persistCurrentFloatingPosition()
   }
 
   function restorePanel() {
@@ -4252,6 +4381,8 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     panelState.hidden = false
     refs.panel.classList.remove('linswift-hidden')
     refs.bubble.classList.add('linswift-hidden')
+    applyFloatingPosition(floatingPositionState)
+    void persistCurrentFloatingPosition()
   }
 
   function hidePanel() {
@@ -4261,8 +4392,10 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     panelState.minimized = true
     refs.panel.classList.add('linswift-hidden')
     refs.bubble.classList.remove('linswift-hidden')
+    applyFloatingPosition(floatingPositionState)
     syncBubble()
     setStatus('Linswift 已收起为常驻圆球。')
+    void persistCurrentFloatingPosition()
   }
 
   function bindRefs(root) {
@@ -4581,8 +4714,12 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     })
 
     window.addEventListener('mouseup', () => {
+      const hadDragState = Boolean(dragState)
       dragState = null
       document.documentElement.classList.remove('linswift-dragging')
+      if (hadDragState) {
+        void persistCurrentFloatingPosition()
+      }
     })
     document.addEventListener('click', (event) => {
       if (!refs?.tooltip || refs.tooltip.classList.contains('linswift-hidden')) return
@@ -4594,8 +4731,12 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     })
     window.addEventListener('scroll', () => {
       if (!activeInlineWord || !refs?.tooltip || refs.tooltip.classList.contains('linswift-hidden')) return
+      if (activeTooltipSource === 'selection') {
+        hideInlineTooltip(true)
+        return
+      }
       const activeAnnotation = activeTooltipSource === 'selection'
-        ? selectionHighlightRecord?.mark
+        ? selectionHighlightRecord?.anchor
         : inlineAnnotationRecords.find(
             (item) =>
               item?.wrapper?.isConnected &&
@@ -4608,11 +4749,15 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       positionInlineTooltip(activeAnnotation)
     }, true)
     window.addEventListener('scroll', positionYouTubeOverlay, true)
-    window.addEventListener('resize', positionYouTubeOverlay)
+    window.addEventListener('resize', () => {
+      positionYouTubeOverlay()
+      applyFloatingPosition(floatingPositionState)
+    })
     document.addEventListener('fullscreenchange', () => {
       syncFloatingHostElement()
       syncYouTubeOverlayHostElement()
       positionYouTubeOverlay()
+      applyFloatingPosition(floatingPositionState)
     })
 
     return root
@@ -4655,12 +4800,14 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     refs.root.style.bottom = refs.root.style.bottom || '24px'
     refs.root.style.left = refs.root.style.left || 'auto'
     refs.root.style.top = refs.root.style.top || 'auto'
+    await loadFloatingPosition()
 
     await initializePanelState()
     panelState.hidden = false
     panelState.minimized = true
     refs.panel.classList.add('linswift-hidden')
     refs.bubble.classList.remove('linswift-hidden')
+    applyFloatingPosition(floatingPositionState)
     syncBubble()
 
     if (shouldAutoTranslateCurrentPage() && panelState.extensionState.settings.inlineTranslateEnabled) {
@@ -4695,6 +4842,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     refs.root.style.bottom = refs.root.style.bottom || '24px'
     refs.root.style.left = refs.root.style.left || 'auto'
     refs.root.style.top = refs.root.style.top || 'auto'
+    await loadFloatingPosition()
     syncYouTubePageState()
     setStatus(
       panelState.youtube.enabled
@@ -4704,6 +4852,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
 
     try {
       await initializePanelState()
+      applyFloatingPosition(floatingPositionState)
       if (panelState.youtube.enabled) {
         setStatus('YouTube 模式已启动，正在连接视频并预抓整条字幕...')
         void bootstrapYouTubeSession().then(() => {

@@ -8,6 +8,7 @@ import { supabase, type ListeningContent } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { useLogicalBack } from '../hooks/useLogicalBack'
 import { mergeListeningContent } from '../data/listeningContent'
+import { navigateSafely } from '../lib/navigation'
 
 const modules = [
   { icon: Music, name: '听歌填字', desc: '内置经典歌词训练 + 云端 music 内容', color: '#FF8400', path: '/listen-fill' },
@@ -112,7 +113,7 @@ export default function ListeningHubPage() {
               {modules.map((m) => (
                 <button
                   key={m.path}
-                  onClick={() => navigate(m.path)}
+                  onClick={() => navigateSafely(navigate, m.path)}
                   className="w-full flex items-center gap-4 p-4 bg-[var(--color-card)] rounded-[var(--radius-md)] active:scale-[0.98] transition-transform text-left"
                   style={{ boxShadow: 'var(--shadow-card)' }}
                 >
@@ -159,7 +160,7 @@ export default function ListeningHubPage() {
               {recommendations.map((item) => (
                 <button
                   key={item.id}
-                  onClick={() => navigate('/listen-go')}
+                  onClick={() => navigateSafely(navigate, '/listen-go')}
                   className="w-full flex items-center gap-3 p-3 bg-[var(--color-card)] rounded-[var(--radius-sm)] cursor-pointer active:bg-[var(--color-background-secondary)] transition-colors"
                   style={{ boxShadow: 'var(--shadow-card)' }}
                 >

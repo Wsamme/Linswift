@@ -16,6 +16,7 @@ import { t, useAppLanguage } from '../../lib/i18n'
 import BrandLogo from '../common/BrandLogo'
 import { useAuth } from '../../contexts/AuthContext'
 import { useProfile } from '../../hooks/useProfile'
+import { handleSafeRouteClick, navigateSafely } from '../../lib/navigation'
 
 /* ===== 类型定义 ===== */
 interface NavSubLink {
@@ -118,7 +119,7 @@ export default function CardNav() {
     if (item.subLinks.length > 0) {
       setExpandedIdx(expandedIdx === idx ? null : idx)
     }
-    navigate(item.path)
+    navigateSafely(navigate, item.path)
   }
 
   return (
@@ -144,6 +145,7 @@ export default function CardNav() {
                 <NavLink
                   to={item.path}
                   onClick={(e) => {
+                    if (handleSafeRouteClick(e, item.path)) return
                     if (hasSubLinks) {
                       e.preventDefault()
                       handleCardClick(item, idx)
@@ -193,6 +195,9 @@ export default function CardNav() {
                           <NavLink
                             key={sub.path}
                             to={sub.path}
+                            onClick={(e) => {
+                              handleSafeRouteClick(e, sub.path)
+                            }}
                             className={({ isActive }) =>
                               `flex items-center gap-2 px-3 py-2 rounded-lg text-[13px] transition-colors duration-150 ${
                                 isActive
@@ -233,6 +238,9 @@ export default function CardNav() {
       <div className="border-t border-[var(--color-border)] px-3 py-3">
         <NavLink
           to="/learning-settings"
+          onClick={(e) => {
+            handleSafeRouteClick(e, '/learning-settings')
+          }}
           className={({ isActive }) =>
             `flex items-center gap-3 rounded-xl px-4 py-3 text-[15px] font-semibold transition-colors ${
               isActive
@@ -247,7 +255,7 @@ export default function CardNav() {
 
         <button
           type="button"
-          onClick={() => navigate('/profile-edit')}
+          onClick={() => navigateSafely(navigate, '/profile-edit')}
           className="mt-3 w-full rounded-[20px] border border-[var(--color-border)] bg-[var(--color-background-secondary)]/70 px-4 py-3 text-left transition-colors hover:bg-[var(--color-background-secondary)]"
         >
           <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--color-muted)]">

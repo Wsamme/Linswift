@@ -3,10 +3,14 @@ import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 
 const projectRoot = process.cwd()
+const sourceLogoSvg = path.join(projectRoot, 'src', 'assets', 'brand-logo.svg')
 const sourceLogoPng = path.join(projectRoot, 'src', 'assets', 'brand-logo.png')
+const sourceLogoAsset = fs.existsSync(sourceLogoSvg) ? sourceLogoSvg : sourceLogoPng
+const sourceIsSvg = sourceLogoAsset.endsWith('.svg')
 const brandingDir = path.join(projectRoot, 'branding')
 const publicDir = path.join(projectRoot, 'public')
 const buildDir = path.join(projectRoot, 'build')
+const extensionIconsDir = path.join(projectRoot, 'chrome-extension', 'icons')
 const favicon = path.join(publicDir, 'favicon.png')
 const publicLogo = path.join(publicDir, 'logo-cutout.png')
 const pwa192 = path.join(publicDir, 'pwa-192x192.png')
@@ -18,14 +22,30 @@ const brandingPwa192 = path.join(brandingDir, 'pwa-192x192.png')
 const brandingPwa512 = path.join(brandingDir, 'pwa-512x512.png')
 const brandingIcns = path.join(brandingDir, 'icon.icns')
 const iconsetDir = path.join(buildDir, 'icon.iconset')
+const extensionIcon16 = path.join(extensionIconsDir, 'icon-16.png')
+const extensionIcon32 = path.join(extensionIconsDir, 'icon-32.png')
+const extensionIcon48 = path.join(extensionIconsDir, 'icon-48.png')
+const extensionIcon128 = path.join(extensionIconsDir, 'icon-128.png')
+
+function commandExists(command) {
+  try {
+    execFileSync('which', [command], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+}
 
 fs.mkdirSync(publicDir, { recursive: true })
 fs.mkdirSync(buildDir, { recursive: true })
 fs.mkdirSync(brandingDir, { recursive: true })
+fs.mkdirSync(extensionIconsDir, { recursive: true })
 
-if (!fs.existsSync(sourceLogoPng)) {
-  throw new Error(`Missing brand logo source: ${sourceLogoPng}`)
+if (!fs.existsSync(sourceLogoAsset)) {
+  throw new Error(`Missing brand logo source: ${sourceLogoAsset}`)
 }
+
+const canRasterizeSvg = !sourceIsSvg || commandExists('rsvg-convert')
 
 function resizePng(size, outputPath) {
   execFileSync('sips', ['-z', String(size), String(size), sourceLogoPng, '--out', outputPath], {
@@ -33,13 +53,63 @@ function resizePng(size, outputPath) {
   })
 }
 
+function rasterizeSvg(size, outputPath) {
+  execFileSync('rsvg-convert', ['-w', String(size), '-h', String(size), '-o', outputPath, sourceLogoSvg], {
+    stdio: 'ignore',
+  })
+}
+
+function renderSquare(size, outputPath) {
+  if (sourceIsSvg) {
+    rasterizeSvg(size, outputPath)
+    return
+  }
+  resizePng(size, outputPath)
+}
+
+function seedPrebuiltRasterAssets() {
+  const requiredPrebuiltAssets = [
+    [favicon, brandingFavicon],
+    [pwa192, brandingPwa192],
+    [pwa512, brandingPwa512],
+  ]
+
+  const missing = requiredPrebuiltAssets
+    .map(([existingSource]) => existingSource)
+    .filter((existingSource) => !fs.existsSync(existingSource))
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing prebuilt raster assets for ${sourceLogoSvg}: ${missing.join(', ')}`
+    )
+  }
+
+  requiredPrebuiltAssets.forEach(([existingSource, targetPath]) => {
+    fs.copyFileSync(existingSource, targetPath)
+  })
+
+  ;[extensionIcon16, extensionIcon32, extensionIcon48, extensionIcon128].forEach((iconPath) => {
+    if (!fs.existsSync(iconPath)) {
+      fs.copyFileSync(brandingPwa512, iconPath)
+    }
+  })
+}
+
 const canGenerateMacIcons = process.platform === 'darwin'
 
-if (canGenerateMacIcons) {
-  resizePng(256, brandingFavicon)
-  resizePng(192, brandingPwa192)
-  resizePng(512, brandingPwa512)
+if (canRasterizeSvg) {
+  renderSquare(256, brandingFavicon)
+  renderSquare(192, brandingPwa192)
+  renderSquare(512, brandingPwa512)
+  renderSquare(16, extensionIcon16)
+  renderSquare(32, extensionIcon32)
+  renderSquare(48, extensionIcon48)
+  renderSquare(128, extensionIcon128)
+} else {
+  seedPrebuiltRasterAssets()
+}
 
+if (canGenerateMacIcons && canRasterizeSvg) {
   fs.rmSync(iconsetDir, { recursive: true, force: true })
   fs.mkdirSync(iconsetDir, { recursive: true })
 
@@ -57,7 +127,7 @@ if (canGenerateMacIcons) {
   ]
 
   for (const [size, fileName] of iconsetSizes) {
-    resizePng(size, path.join(iconsetDir, fileName))
+    renderSquare(size, path.join(iconsetDir, fileName))
   }
 
   execFileSync('iconutil', ['-c', 'icns', iconsetDir, '-o', brandingIcns], {
@@ -69,7 +139,7 @@ if (!fs.existsSync(brandingFavicon) || !fs.existsSync(brandingPwa192) || !fs.exi
   throw new Error('Missing rasterized brand assets in branding/.')
 }
 
-fs.copyFileSync(sourceLogoPng, publicLogo)
+fs.copyFileSync(brandingPwa512, publicLogo)
 fs.copyFileSync(brandingFavicon, favicon)
 fs.copyFileSync(brandingPwa192, pwa192)
 fs.copyFileSync(brandingPwa512, pwa512)

@@ -9,6 +9,7 @@ import { supabase, type ListeningContent } from '../lib/supabase'
 import { useLogicalBack } from '../hooks/useLogicalBack'
 import { mergeListeningContent, type ListeningContentItem } from '../data/listeningContent'
 import { SPEED_OPTIONS } from '../lib/tts'
+import { navigateSafely } from '../lib/navigation'
 
 const categories = ['全部', '图书转化', 'AI 原创', '热门'] as const
 type CategoryLabel = typeof categories[number]
@@ -114,7 +115,7 @@ export default function ListenLibPage() {
 
       <div className="mx-5 mb-4">
         <button
-          onClick={() => navigate('/bookshelf')}
+          onClick={() => navigateSafely(navigate, '/bookshelf')}
           className="w-full flex items-center justify-center gap-2 py-3.5 border-2 border-dashed border-[var(--color-primary)]/30 rounded-[var(--radius-md)] text-[var(--color-primary)] active:bg-[var(--color-primary-light)] transition-colors"
         >
           <Plus size={18} />

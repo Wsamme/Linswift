@@ -7,6 +7,7 @@ import {
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { useLogicalBack } from '../hooks/useLogicalBack'
+import { navigateSafely } from '../lib/navigation'
 
 const modes = [
   { icon: RotateCcw, name: '复述练习', desc: '来自 retell_prompts', color: '#FF8400', path: '/retell' },
@@ -104,7 +105,7 @@ export default function SpeakingHubPage() {
               {modes.map((m) => (
                 <button
                   key={m.path}
-                  onClick={() => navigate(m.path)}
+                  onClick={() => navigateSafely(navigate, m.path)}
                   className="w-full flex items-center gap-4 p-4 bg-[var(--color-card)] rounded-[var(--radius-md)] active:scale-[0.98] transition-transform text-left"
                   style={{ boxShadow: 'var(--shadow-card)' }}
                 >
@@ -124,7 +125,7 @@ export default function SpeakingHubPage() {
           <div className="mx-5 mb-5">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-[14px] font-bold text-[var(--color-foreground)] font-secondary">快捷场景</h3>
-              <button onClick={() => navigate('/scene-select')} className="text-[12px] text-[var(--color-primary)] font-semibold">全部 →</button>
+              <button onClick={() => navigateSafely(navigate, '/scene-select')} className="text-[12px] text-[var(--color-primary)] font-semibold">全部 →</button>
             </div>
             <div className="grid grid-cols-4 gap-3">
               {quickScenes.map((scene) => {
@@ -132,7 +133,7 @@ export default function SpeakingHubPage() {
                 return (
                   <button
                     key={scene.id}
-                    onClick={() => navigate('/ai-dialog')}
+                    onClick={() => navigateSafely(navigate, '/ai-dialog')}
                     className="flex flex-col items-center gap-2 py-3 bg-[var(--color-card)] rounded-[var(--radius-md)] active:scale-95 transition-transform"
                     style={{ boxShadow: 'var(--shadow-card)' }}
                   >

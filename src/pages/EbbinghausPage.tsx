@@ -7,6 +7,7 @@ import { getEbbinghausForecastPlan, normalizeReviewCycleDays, type ReviewCycleDa
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { useLogicalBack } from '../hooks/useLogicalBack'
+import { navigateSafely } from '../lib/navigation'
 
 /**
  * 艾宾浩斯记忆规划看板 —— 接入 Supabase
@@ -210,9 +211,9 @@ export default function EbbinghausPage() {
       <div className="mx-5 mb-5">
         <h3 className="text-[14px] font-bold text-[var(--color-foreground)] mb-3 font-secondary">选择学习模式</h3>
         <div className="grid grid-cols-3 gap-3">
-          <ModeCard icon={BookOpen} label="卡片学习" desc="经典翻卡" color="#FF8400" onClick={() => navigate('/flashcard')} />
-          <ModeCard icon={Gamepad2} label="游戏记忆" desc="趣味闯关" color="#8B5CF6" onClick={() => navigate('/vocab-game')} />
-          <ModeCard icon={Sparkles} label="AI 速记" desc="联想记忆" color="#3B82F6" onClick={() => navigate('/ai-memo')} />
+          <ModeCard icon={BookOpen} label="卡片学习" desc="经典翻卡" color="#FF8400" onClick={() => navigateSafely(navigate, '/flashcard')} />
+          <ModeCard icon={Gamepad2} label="游戏记忆" desc="趣味闯关" color="#8B5CF6" onClick={() => navigateSafely(navigate, '/vocab-game')} />
+          <ModeCard icon={Sparkles} label="AI 速记" desc="联想记忆" color="#3B82F6" onClick={() => navigateSafely(navigate, '/ai-memo')} />
         </div>
       </div>
 
@@ -239,7 +240,7 @@ export default function EbbinghausPage() {
                 <p className="text-[11px] text-[var(--color-muted)]">{task.type} · {taskCounts[task.countKey]} 词</p>
               </div>
               <button
-                onClick={() => navigate('/flashcard')}
+                onClick={() => navigateSafely(navigate, '/flashcard')}
                 className="px-3 py-1.5 bg-[var(--color-primary-light)] rounded-full text-[12px] font-semibold text-[var(--color-primary)]"
               >
                 开始
@@ -254,7 +255,7 @@ export default function EbbinghausPage() {
                 词库为空，去翻译页收录一些词汇吧
               </p>
               <button
-                onClick={() => navigate('/translate')}
+                onClick={() => navigateSafely(navigate, '/app/translate')}
                 className="mt-2 text-[13px] text-[var(--color-primary)] font-semibold"
               >
                 前往翻译 →

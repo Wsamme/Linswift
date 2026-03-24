@@ -18,8 +18,12 @@ import {
 } from '../lib/pdf'
 import {
   buildOverlayRegions,
+  createOCRSession,
   fitTranslatedRegionText,
+  recognizePdfPage,
+  OCRServiceError,
   type OverlayRegion,
+  type OCRProgressUpdate,
 } from '../lib/ocr'
 import { translateBatch, type BatchTranslationResult } from '../services/gemini'
 import { speakEnglish, speakAuto } from '../lib/tts'
@@ -27,6 +31,7 @@ import { supabase, uploadFile, type UserBook } from '../lib/supabase'
 import { useVocabulary } from '../hooks/useVocabulary'
 import { useAuth } from '../contexts/AuthContext'
 import { useLogicalBack } from '../hooks/useLogicalBack'
+import { navigateSafely } from '../lib/navigation'
 
 // ===== 阅读器设置类型 =====
 const READER_SETTINGS_KEY = 'linswift_reader_settings'
@@ -166,6 +171,10 @@ export default function PDFReaderPage() {
 
   // ===== OCR 叠加层状态 =====
   const [ocrOverlayDebug, setOcrOverlayDebug] = useState(false)
+  const [ocrRunning, setOcrRunning] = useState(false)
+  const [ocrStatusText, setOcrStatusText] = useState('')
+  const [ocrProgress, setOcrProgress] = useState<number | null>(null)
+  const [ocrError, setOcrError] = useState<string | null>(null)
 
   // ===== 文本叠加层状态 =====
   const textLayerRef = useRef<HTMLDivElement>(null)
@@ -239,11 +248,61 @@ export default function PDFReaderPage() {
   const resetOCRState = useCallback(() => {
     setOcrLayoutData(null)
     setOcrTranslatedLines([])
+    setOcrStatusText('')
+    setOcrProgress(null)
+    setOcrError(null)
+    setOcrRunning(false)
     setTranslationStatusText('')
     setTranslationError(null)
     setTranslationSummary(null)
     setPageTranslated(false)
   }, [])
+
+  const handleRunOCR = useCallback(async () => {
+    if (!pdfDoc || ocrRunning) return
+
+    setOcrRunning(true)
+    setOcrError(null)
+    setOcrStatusText('正在初始化 OCR…')
+    setOcrProgress(0)
+    setOcrTranslatedLines([])
+    setTranslationStatusText('')
+    setTranslationError(null)
+    setTranslationSummary(null)
+    setPageTranslated(false)
+
+    let session: Awaited<ReturnType<typeof createOCRSession>> | null = null
+    try {
+      session = await createOCRSession(readerSettings.ocrLang, (update: OCRProgressUpdate) => {
+        setOcrStatusText(update.statusText || 'OCR 进行中')
+        setOcrProgress(typeof update.progress === 'number' ? update.progress : null)
+      })
+
+      const result = await recognizePdfPage(pdfDoc, currentPage, session, (update) => {
+        setOcrStatusText(update.statusText || 'OCR 进行中')
+        setOcrProgress(typeof update.progress === 'number' ? update.progress : null)
+      })
+
+      setOcrLayoutData(result)
+      setOverlayMode('cover')
+      setOcrOverlayDebug(false)
+      setOcrStatusText(`OCR 已完成：识别 ${result.lines.length} 行`)
+      setOcrProgress(100)
+    } catch (error) {
+      console.error('OCR 识别失败:', error)
+      const message = error instanceof OCRServiceError
+        ? error.message
+        : String((error as Error)?.message || error || 'OCR 识别失败')
+      setOcrError(message)
+      setOcrStatusText('OCR 识别失败')
+      setOcrProgress(null)
+    } finally {
+      setOcrRunning(false)
+      if (session) {
+        await session.terminate().catch(() => {})
+      }
+    }
+  }, [pdfDoc, ocrRunning, readerSettings.ocrLang, currentPage])
 
   useLayoutEffect(() => {
     const canvas = canvasRef.current
@@ -595,25 +654,43 @@ export default function PDFReaderPage() {
     ? (() => {
         const groupedRegions = ocrOverlayModel.translationRegions.filter((region) => sanitizeText(region.text).trim().length > 0)
         const fallbackRegions = ocrOverlayModel.regions.filter((region) => sanitizeText(region.text).trim().length > 0)
-        const lineFallbackRegions: OverlayRegion[] = ocrOverlayModel.lines
-          .filter((line) => sanitizeText(line.text).trim().length > 0)
-          .map((line) => ({
+        const visibleLines = ocrOverlayModel.lines.filter((line) => sanitizeText(line.text).trim().length > 0)
+        const lineFallbackRegions: OverlayRegion[] = visibleLines.map((line, index) => {
+          const lineWidth = line.bbox.x1 - line.bbox.x0
+          const lineHeight = line.bbox.y1 - line.bbox.y0
+          const nextLine = visibleLines.slice(index + 1).find((candidate) => (
+            candidate.columnIndex === line.columnIndex && candidate.bbox.y0 > line.bbox.y0
+          ))
+          const verticalPadding = Math.max(6, lineHeight * 0.55)
+          const nextLineCeiling = nextLine
+            ? Math.max(line.bbox.y1 + verticalPadding, nextLine.bbox.y0 - Math.max(4, lineHeight * 0.38))
+            : ocrLayoutData!.imageHeight
+
+          return {
             id: `line-region-fallback-${line.id}`,
             text: line.text,
             bbox: line.bbox,
-            availableX0: Math.max(0, line.bbox.x0 - Math.max(6, (line.bbox.x1 - line.bbox.x0) * 0.06)),
-            availableX1: Math.min(ocrLayoutData!.imageWidth, line.bbox.x1 + Math.max(6, (line.bbox.x1 - line.bbox.x0) * 0.08)),
-            maxY1: Math.min(ocrLayoutData!.imageHeight, line.bbox.y1 + Math.max(18, (line.bbox.y1 - line.bbox.y0) * 1.9)),
+            availableX0: Math.max(0, line.bbox.x0 - Math.max(4, lineWidth * 0.04)),
+            availableX1: Math.min(ocrLayoutData!.imageWidth, line.bbox.x1 + Math.max(8, lineWidth * 0.1)),
+            maxY1: Math.min(
+              ocrLayoutData!.imageHeight,
+              Math.max(line.bbox.y1 + verticalPadding, nextLineCeiling),
+            ),
             confidence: line.confidence,
             lineIndex: line.lineIndex,
             rowIndex: line.rowIndex,
             columnIndex: line.columnIndex,
             words: line.words,
-          }))
+          }
+        })
+        const safeLineFallback = hasSuspiciousTranslationAnchors(lineFallbackRegions) ? [] : lineFallbackRegions
         const safeGrouped = hasSuspiciousTranslationAnchors(groupedRegions) ? [] : groupedRegions
         const safeFallback = hasSuspiciousTranslationAnchors(fallbackRegions) ? [] : fallbackRegions
 
-        if (safeGrouped.length > 0) {
+        if (safeLineFallback.length > 0) {
+          return safeLineFallback
+        }
+        if (safeGrouped.length > 0 && safeGrouped.length >= Math.max(3, Math.round(lineFallbackRegions.length * 0.22))) {
           return safeGrouped
         }
         if (safeFallback.length > 0 && safeFallback.length <= Math.max(140, lineFallbackRegions.length)) {
@@ -850,7 +927,7 @@ export default function PDFReaderPage() {
             选择 PDF 文件
           </button>
           <button
-            onClick={() => navigate('/bookshelf')}
+            onClick={() => navigateSafely(navigate, '/bookshelf')}
             className="mt-3 text-[13px] text-[var(--color-primary)]"
           >
             或从书架选择
@@ -878,7 +955,7 @@ export default function PDFReaderPage() {
             PDF 链接可能已失效或文件无权限，建议回书架重新导入该 PDF。
           </p>
           <button
-            onClick={() => navigate('/bookshelf')}
+            onClick={() => navigateSafely(navigate, '/bookshelf')}
             className="px-6 py-2.5 bg-[var(--color-primary)] text-white rounded-[var(--radius-sm)] text-[14px] font-semibold"
           >
             返回书架重新导入
@@ -972,6 +1049,20 @@ export default function PDFReaderPage() {
               {savedToShelf ? '✓ 已保存' : savingToShelf ? '...' : '保存'}
             </button>
           )}
+          <button
+            onClick={handleRunOCR}
+            disabled={ocrRunning || !pdfDoc}
+            className={`px-2 py-1 rounded-full text-[10px] font-medium active:scale-95 ${
+              ocrRunning
+                ? 'bg-purple-500/20 text-purple-200'
+                : ocrLayoutData
+                  ? 'bg-purple-500/30 text-purple-100'
+                  : 'bg-white/10 text-white/70'
+            }`}
+            title="识别当前页 OCR"
+          >
+            {ocrRunning ? 'OCR…' : ocrLayoutData ? 'OCR ✓' : 'OCR'}
+          </button>
           {/* 翻译当前页 */}
           <button
             onClick={handleTranslatePage}
@@ -1033,6 +1124,49 @@ export default function PDFReaderPage() {
               >
                 <RefreshCcw size={11} />
                 重试翻译
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {(ocrRunning || ocrStatusText || ocrError || ocrLayoutData) && (
+        <div className={`px-4 py-2 border-b ${
+          ocrError
+            ? 'bg-red-500/10 border-red-500/30'
+            : 'bg-purple-500/10 border-purple-500/30'
+        }`}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                {ocrRunning
+                  ? <Loader2 size={14} className="text-purple-300 animate-spin" />
+                  : ocrError
+                    ? <AlertTriangle size={14} className="text-red-300" />
+                    : <BookOpen size={14} className="text-purple-300" />}
+                <p className="text-[12px] font-semibold text-white/90">
+                  {ocrStatusText || (ocrLayoutData ? 'OCR 已就绪' : 'OCR 未运行')}
+                </p>
+                {typeof ocrProgress === 'number' && (
+                  <span className="text-[11px] text-white/60">{Math.round(ocrProgress)}%</span>
+                )}
+              </div>
+              {ocrError && (
+                <p className="mt-1 text-[12px] text-white/70">{ocrError}</p>
+              )}
+              {!ocrError && ocrLayoutData && (
+                <p className="mt-1 text-[11px] text-white/55">
+                  当前页已识别 {ocrLayoutData.lines.length} 行，可切换到调试 / 遮盖 / 翻译模式查看覆盖层
+                </p>
+              )}
+            </div>
+            {!ocrRunning && (
+              <button
+                onClick={handleRunOCR}
+                className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white/10 px-3 py-1 text-[11px] text-white/80"
+              >
+                <RefreshCcw size={11} />
+                重新识别
               </button>
             )}
           </div>
@@ -1182,6 +1316,27 @@ export default function PDFReaderPage() {
                         文本层已加载{pageTranslated ? '（已翻译）' : ''}
                       </p>
                     )}
+                    <div className="mt-2 rounded-xl bg-white/5 p-2.5">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-[12px] font-medium text-white">OCR 识别</p>
+                          <p className="text-[10px] text-white/50">
+                            扫描版或文本层错位时，先执行 OCR，再切换到遮盖或翻译模式。
+                          </p>
+                        </div>
+                        <button
+                          onClick={handleRunOCR}
+                          disabled={ocrRunning || !pdfDoc}
+                          className={`rounded-full px-3 py-1.5 text-[11px] font-medium ${
+                            ocrRunning
+                              ? 'bg-[var(--color-primary)]/40 text-white/70'
+                              : 'bg-[var(--color-primary)] text-white'
+                          }`}
+                        >
+                          {ocrRunning ? '识别中…' : ocrLayoutData ? '重新识别' : '开始 OCR'}
+                        </button>
+                      </div>
+                    </div>
                   </div>
 
                   {/* 阅读开关 */}
@@ -1446,18 +1601,6 @@ export default function PDFReaderPage() {
                         })
                       : []
 
-                    if (translatedEntries.length > 1) {
-                      for (let i = 1; i < translatedEntries.length; i += 1) {
-                        const prev = translatedEntries[i - 1]
-                        const current = translatedEntries[i]
-                        if (Math.abs(current.fontSize - prev.fontSize) > 3) {
-                          const smoothed = Math.round(((current.fontSize + prev.fontSize) / 2) * 10) / 10
-                          current.fontSize = smoothed
-                          prev.fontSize = smoothed
-                        }
-                      }
-                    }
-
                     const debugGroups = [
                       ...ocrOverlayModel.words.map((word) => ({
                         key: `debug-word-${word.id}`,
@@ -1629,10 +1772,7 @@ export default function PDFReaderPage() {
                   flex-direction: column;
                   align-items: flex-start;
                   justify-content: flex-start;
-                  white-space: normal;
-                  word-break: break-word;
-                  overflow-wrap: anywhere;
-                  text-wrap: pretty;
+                  white-space: nowrap;
                   overflow: hidden;
                   box-sizing: border-box;
                   border-radius: 5px;
@@ -1640,6 +1780,8 @@ export default function PDFReaderPage() {
                 .ocrOverlay .ocr-overlay-line-text {
                   display: block;
                   width: 100%;
+                  white-space: nowrap;
+                  overflow: hidden;
                 }
                 .ocrOverlay .ocr-overlay-word::selection {
                   background: rgba(59, 130, 246, 0.3);

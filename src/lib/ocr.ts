@@ -1532,6 +1532,59 @@ export async function recognizePdfDocument(
   }
 }
 
+export async function recognizePdfPage(
+  pdfDoc: PDFDocumentProxy,
+  pageNumber: number,
+  session: OCRSession,
+  onProgress?: (update: OCRProgressUpdate) => void,
+): Promise<OCRLayoutResult> {
+  const safePageNumber = Math.max(1, Math.min(pageNumber, pdfDoc.numPages))
+
+  onProgress?.({
+    stage: 'rendering-page',
+    statusText: formatStatusText('rendering-page', safePageNumber, pdfDoc.numPages),
+    progress: 0,
+    page: safePageNumber,
+    totalPages: pdfDoc.numPages,
+    summary: {
+      pagesCompleted: 0,
+      totalPages: 1,
+      lineCount: 0,
+      charCount: 0,
+    },
+  })
+
+  const tempCanvas = document.createElement('canvas')
+  await renderPageToCanvas(pdfDoc, safePageNumber, tempCanvas, 2, { pixelRatio: 1 })
+
+  const result = await recognizeCanvasWithLayout(tempCanvas, {
+    ...session,
+    emit: (update) => {
+      onProgress?.({
+        ...update,
+        page: safePageNumber,
+        totalPages: pdfDoc.numPages,
+      })
+    },
+  })
+
+  onProgress?.({
+    stage: 'completed',
+    statusText: `OCR 已完成：${result.lines.length} 行 / ${getTextLength(result.text)} 字符`,
+    progress: 100,
+    page: safePageNumber,
+    totalPages: pdfDoc.numPages,
+    summary: {
+      pagesCompleted: 1,
+      totalPages: 1,
+      lineCount: result.lines.length,
+      charCount: getTextLength(result.text),
+    },
+  })
+
+  return result
+}
+
 export function buildOverlayRegions(
   layoutResult: OCRLayoutResult,
 ): OverlayModel {

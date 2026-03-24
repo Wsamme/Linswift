@@ -11,6 +11,7 @@ import { Mail, Lock, Eye, EyeOff, Loader2, ArrowLeft } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import Particles from '../components/reactbits/Particles'
 import BrandLogo from '../components/common/BrandLogo'
+import { navigateSafely } from '../lib/navigation'
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -171,10 +172,10 @@ export default function LoginPage() {
             </button>
           </div>
 
-          <p className="text-center text-[13px] text-[#999] mt-5">
-            还没有账号？
-            <span onClick={() => navigate('/register')}
-              className="text-[#FF8400] font-semibold ml-1 cursor-pointer hover:underline">注册</span>
+            <p className="text-center text-[13px] text-[#999] mt-5">
+              还没有账号？
+              <span onClick={() => navigateSafely(navigate, '/register')}
+                className="text-[#FF8400] font-semibold ml-1 cursor-pointer hover:underline">注册</span>
           </p>
         </div>
         </div>
@@ -276,7 +277,7 @@ export default function LoginPage() {
 
             <p className="text-center text-[13px] text-[#999] mt-5">
               还没有账号？
-              <span onClick={() => navigate('/register')}
+              <span onClick={() => navigateSafely(navigate, '/register')}
                 className="text-[#FF8400] font-semibold ml-1 cursor-pointer hover:underline">注册</span>
             </p>
           </div>

@@ -1,4 +1,4 @@
-import brandLogoUrl from '../../assets/brand-logo.png'
+import brandLogoUrl from '../../assets/brand-logo.svg'
 
 interface BrandLogoProps {
   className?: string

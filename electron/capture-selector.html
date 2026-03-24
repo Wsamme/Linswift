@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Linswift Capture Selector</title>
+    <style>
+      html, body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        cursor: crosshair;
+        user-select: none;
+      }
+      body {
+        background: rgba(15, 13, 11, 0.18);
+        font-family: "SF Pro Display", "PingFang SC", sans-serif;
+      }
+      .hint {
+        position: fixed;
+        top: 18px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 10px 14px;
+        border-radius: 999px;
+        background: rgba(28, 24, 20, 0.72);
+        color: #fff7f2;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        backdrop-filter: blur(12px);
+      }
+      .selection {
+        position: fixed;
+        display: none;
+        border-radius: 22px;
+        border: 3px solid #ff7c49;
+        box-shadow: 0 0 0 1px rgba(255,255,255,0.36), 0 18px 38px rgba(18, 10, 7, 0.18);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="hint">拖拽选中需要截图翻译的区域，按 Esc 取消</div>
+    <div class="selection" id="selection"></div>
+    <script>
+      const selection = document.getElementById('selection')
+      let displayBounds = { x: 0, y: 0 }
+      let dragStart = null
+
+      function paintRect(rect) {
+        selection.style.display = 'block'
+        selection.style.left = `${rect.left}px`
+        selection.style.top = `${rect.top}px`
+        selection.style.width = `${rect.width}px`
+        selection.style.height = `${rect.height}px`
+      }
+
+      function getRect(start, end) {
+        const left = Math.min(start.x, end.x)
+        const top = Math.min(start.y, end.y)
+        const width = Math.abs(end.x - start.x)
+        const height = Math.abs(end.y - start.y)
+        return { left, top, width, height }
+      }
+
+      window.captureSelectorBridge?.onInit?.((payload) => {
+        if (payload?.displayBounds) {
+          displayBounds = payload.displayBounds
+        }
+      })
+
+      window.addEventListener('mousedown', (event) => {
+        dragStart = { x: event.clientX, y: event.clientY }
+        paintRect({ left: event.clientX, top: event.clientY, width: 0, height: 0 })
+      })
+
+      window.addEventListener('mousemove', (event) => {
+        if (!dragStart) return
+        paintRect(getRect(dragStart, { x: event.clientX, y: event.clientY }))
+      })
+
+      window.addEventListener('mouseup', (event) => {
+        if (!dragStart) return
+        const rect = getRect(dragStart, { x: event.clientX, y: event.clientY })
+        dragStart = null
+        if (rect.width < 24 || rect.height < 24) {
+          window.captureSelectorBridge?.cancel?.()
+          return
+        }
+        window.captureSelectorBridge?.complete?.({
+          x: displayBounds.x + rect.left,
+          y: displayBounds.y + rect.top,
+          width: rect.width,
+          height: rect.height,
+        })
+      })
+
+      window.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          window.captureSelectorBridge?.cancel?.()
+        }
+      })
+    </script>
+  </body>
+</html>

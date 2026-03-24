@@ -128,11 +128,21 @@ export default function ClassicBookCover({ book, compact = false }: ClassicBookC
         }
         return lines
       }, []).slice(0, 3)
+  const shellRadius = compact ? '16px' : '20px'
+  const panelRadius = compact ? '14px' : '18px'
+  const panelPadding = compact ? '0.55rem' : '0.75rem'
+  const tagClass = compact
+    ? 'inline-flex rounded-full border border-white/28 bg-white/10 px-1.5 py-0.5 text-[8px] font-semibold tracking-[0.18em] text-white/85 uppercase backdrop-blur-sm'
+    : 'inline-flex rounded-full border border-white/35 bg-white/12 px-2 py-1 text-[10px] font-semibold tracking-[0.22em] text-white/90 uppercase backdrop-blur-sm'
+  const authorClass = compact
+    ? 'mb-1 text-[7px] font-semibold uppercase tracking-[0.22em] text-white/75'
+    : 'mb-1 text-[9px] font-semibold uppercase tracking-[0.28em] text-white/80'
+  const titleClass = compact ? 'text-[11px]' : 'text-[18px]'
 
   return (
     <div
-      className="relative h-full w-full overflow-hidden rounded-[20px]"
-      style={{ background: `linear-gradient(160deg, ${from} 0%, ${to} 100%)` }}
+      className="relative h-full w-full overflow-hidden"
+      style={{ borderRadius: shellRadius, background: `linear-gradient(160deg, ${from} 0%, ${to} 100%)` }}
     >
       <div
         className="absolute inset-x-0 top-0 h-[38%] opacity-90"
@@ -158,18 +168,18 @@ export default function ClassicBookCover({ book, compact = false }: ClassicBookC
         </svg>
       </div>
 
-      <div className="relative z-10 flex h-full flex-col justify-between p-4">
+      <div className={`relative z-10 flex h-full flex-col justify-between ${compact ? 'p-2.5' : 'p-4'}`}>
         <div>
-          <div className="inline-flex rounded-full border border-white/35 bg-white/12 px-2 py-1 text-[10px] font-semibold tracking-[0.22em] text-white/90 uppercase backdrop-blur-sm">
+          <div className={tagClass}>
             AI Cover
           </div>
         </div>
 
-        <div className="rounded-[18px] bg-black/12 p-3 text-white backdrop-blur-[6px]">
-          <div className="mb-1 text-[9px] font-semibold uppercase tracking-[0.28em] text-white/80">
+        <div className="bg-black/12 text-white backdrop-blur-[6px]" style={{ borderRadius: panelRadius, padding: panelPadding }}>
+          <div className={authorClass}>
             {book.author}
           </div>
-          <div className={`${compact ? 'text-[15px]' : 'text-[18px]'} font-bold leading-[1.06]`}>
+          <div className={`${titleClass} font-bold leading-[1.06]`}>
             {titleLines.map((line) => (
               <div key={line}>{line}</div>
             ))}

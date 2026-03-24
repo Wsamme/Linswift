@@ -7,6 +7,7 @@ import {
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { useLogicalBack } from '../hooks/useLogicalBack'
+import { navigateSafely } from '../lib/navigation'
 
 const iconMap: Record<string, any> = {
   coffee: Coffee,
@@ -80,7 +81,7 @@ export default function SceneSelectPage() {
             return (
               <button
                 key={scene.id}
-                onClick={() => navigate('/ai-dialog')}
+                onClick={() => navigateSafely(navigate, '/ai-dialog')}
                 className="flex-1 flex flex-col items-center gap-2 py-4 bg-[var(--color-card)] rounded-[var(--radius-md)] active:scale-95 transition-transform"
                 style={{ boxShadow: 'var(--shadow-card)' }}
               >
@@ -129,7 +130,7 @@ export default function SceneSelectPage() {
             return (
               <button
                 key={scene.id}
-                onClick={() => navigate('/ai-dialog')}
+                onClick={() => navigateSafely(navigate, '/ai-dialog')}
                 className="w-full flex items-center gap-3 p-3.5 bg-[var(--color-card)] rounded-[var(--radius-sm)] active:scale-[0.98] transition-transform text-left"
                 style={{ boxShadow: 'var(--shadow-card)' }}
               >

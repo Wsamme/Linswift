@@ -6,6 +6,7 @@ import {
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { useLogicalBack } from '../hooks/useLogicalBack'
+import { navigateSafely } from '../lib/navigation'
 
 const gameModes = [
   {
@@ -185,7 +186,7 @@ export default function VocabGamePage() {
           {gameModes.map((mode, i) => (
             <button
               key={i}
-              onClick={() => mode.available && mode.path && vocabCount > 0 && navigate(mode.path)}
+              onClick={() => mode.available && mode.path && vocabCount > 0 && navigateSafely(navigate, mode.path)}
               disabled={!mode.available || (Boolean(mode.path) && vocabCount === 0)}
               className={`w-full flex items-center gap-4 p-4 bg-[var(--color-card)] rounded-[var(--radius-md)] transition-transform text-left ${
                 mode.available && vocabCount > 0 ? 'active:scale-[0.98]' : 'opacity-60'

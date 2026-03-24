@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { longSentenceReadingItems, longSentenceWritingPrompts } from '../data/longSentences'
 import { useLongSentenceCollection } from '../hooks/useLongSentenceCollection'
 import { useLogicalBack } from '../hooks/useLogicalBack'
+import { navigateSafely } from '../lib/navigation'
 
 const cards = [
   {
@@ -90,7 +91,7 @@ export default function LongSentenceHubPage() {
             return (
               <button
                 key={card.key}
-                onClick={() => navigate(card.path)}
+                onClick={() => navigateSafely(navigate, card.path)}
                 className={`group rounded-[28px] bg-gradient-to-br ${card.tone} p-5 text-left shadow-[0_14px_34px_rgba(15,23,42,0.08)] transition-transform active:scale-[0.98]`}
               >
                 <div className="flex items-center justify-between">

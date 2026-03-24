@@ -5,6 +5,7 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig(() => {
   const isDesktopBuild = process.env.BUILD_TARGET === 'desktop'
+  const enableWebPWA = false
 
   return {
     base: isDesktopBuild ? './' : '/',
@@ -14,7 +15,7 @@ export default defineConfig(() => {
 
       // 桌面包使用 file:// 加载，不注入 PWA 资源，避免白屏和无效 SW 注册。
       VitePWA({
-        disable: isDesktopBuild,
+        disable: isDesktopBuild || !enableWebPWA,
         registerType: 'autoUpdate',
         includeAssets: ['favicon.png', 'pwa-192x192.png', 'pwa-512x512.png'],
         manifest: {

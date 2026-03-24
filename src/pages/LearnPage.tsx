@@ -29,6 +29,7 @@ import { t, tf, useAppLanguage } from '../lib/i18n'
 import { resolveUserBookMetadata } from '../lib/books'
 import { getClassicBookBySlug } from '../data/classicBooks'
 import ClassicBookCover from '../components/books/ClassicBookCover'
+import { navigateSafely } from '../lib/navigation'
 
 // 模块级缓存：页面切换后再回来不会重新请求
 let cachedRecommendation: DailyRecommendation | null = null
@@ -193,11 +194,11 @@ export default function LearnPage() {
   const displayName = user?.user_metadata?.username || user?.email?.split('@')[0] || ''
   const openLibraryBook = (book: UserBook) => {
     if (book.file_path) {
-      navigate(`/pdf-reader?bookId=${book.id}`)
+      navigateSafely(navigate, `/pdf-reader?bookId=${book.id}`)
       return
     }
 
-    navigate(book.shared_book_slug ? `/reading?bookId=${book.id}` : `/reading-prep?bookId=${book.id}`)
+    navigateSafely(navigate, book.shared_book_slug ? `/reading?bookId=${book.id}` : `/reading-prep?bookId=${book.id}`)
   }
 
   return (
@@ -210,7 +211,7 @@ export default function LearnPage() {
             textClassName="text-[22px] font-bold text-[var(--color-foreground)]"
           />
           <button
-            onClick={() => navigate('/learning-settings')}
+            onClick={() => navigateSafely(navigate, '/learning-settings')}
             className="w-10 h-10 rounded-full bg-[var(--color-background-secondary)] flex items-center justify-center active:scale-95 transition-transform"
             aria-label={t(lang, 'learn_settings')}
             title={t(lang, 'learn_settings')}
@@ -286,42 +287,42 @@ export default function LearnPage() {
           </div>
 
           {/* 今日任务 —— 桌面端 SpotlightCard */}
-          <div className="mb-5">
-            <h3 className={`${isDesktop ? 'text-[18px]' : 'text-[16px]'} font-bold text-[var(--color-foreground)] mb-3 font-secondary`}>
+          <div className={isDesktop ? 'mb-5' : 'mb-7'}>
+            <h3 className={`${isDesktop ? 'text-[18px]' : 'text-[16px]'} font-bold text-[var(--color-foreground)] ${isDesktop ? 'mb-3' : 'mb-3.5'} font-secondary`}>
               <span className="learn-section-title inline-block">{t(lang, 'learn_today_tasks')}</span>
             </h3>
             <div className={`grid ${isDesktop ? 'grid-cols-4' : 'grid-cols-4'} gap-3`}>
               {isDesktop ? (
                 <>
-                  <DesktopTaskCard icon={BookOpen} label={t(lang, 'nav_learn_word')} desc={t(lang, 'learn_desc_spaced_repetition')} color="#FF8400" onClick={() => navigate('/ebbinghaus')} />
-                  <DesktopTaskCard icon={Headphones} label={t(lang, 'nav_learn_listen')} desc={t(lang, 'learn_desc_dictation')} color="#8B5CF6" onClick={() => navigate('/listening')} />
-                  <DesktopTaskCard icon={Mic} label={t(lang, 'nav_learn_speak')} desc={t(lang, 'learn_desc_ai_conversation')} color="#3B82F6" onClick={() => navigate('/speaking')} />
-                  <DesktopTaskCard icon={BookOpenText} label={t(lang, 'nav_learn_grammar')} desc={t(lang, 'learn_desc_grammar_tree')} color="#22C55E" onClick={() => navigate('/grammar')} />
+                  <DesktopTaskCard icon={BookOpen} label={t(lang, 'nav_learn_word')} desc={t(lang, 'learn_desc_spaced_repetition')} color="#FF8400" onClick={() => navigateSafely(navigate, '/ebbinghaus')} />
+                  <DesktopTaskCard icon={Headphones} label={t(lang, 'nav_learn_listen')} desc={t(lang, 'learn_desc_dictation')} color="#8B5CF6" onClick={() => navigateSafely(navigate, '/listening')} />
+                  <DesktopTaskCard icon={Mic} label={t(lang, 'nav_learn_speak')} desc={t(lang, 'learn_desc_ai_conversation')} color="#3B82F6" onClick={() => navigateSafely(navigate, '/speaking')} />
+                  <DesktopTaskCard icon={BookOpenText} label={t(lang, 'nav_learn_grammar')} desc={t(lang, 'learn_desc_grammar_tree')} color="#22C55E" onClick={() => navigateSafely(navigate, '/grammar')} />
                 </>
               ) : (
                 <>
-                  <TaskCard icon={BookOpen} label={t(lang, 'nav_learn_word')} desc={t(lang, 'learn_desc_start_now')} color="#FFF5EB" iconColor="#FF8400" onClick={() => navigate('/ebbinghaus')} />
-                  <TaskCard icon={Headphones} label={t(lang, 'nav_learn_listen')} desc={t(lang, 'learn_desc_practice')} color="#F0EBFF" iconColor="#8B5CF6" onClick={() => navigate('/listening')} />
-                  <TaskCard icon={Mic} label={t(lang, 'nav_learn_speak')} desc={t(lang, 'learn_desc_training')} color="#E8F0FF" iconColor="#3B82F6" onClick={() => navigate('/speaking')} />
-                  <TaskCard icon={BookOpenText} label={t(lang, 'nav_learn_grammar')} desc={t(lang, 'learn_desc_tree')} color="#E8FFE8" iconColor="#22C55E" onClick={() => navigate('/grammar')} />
+                  <TaskCard icon={BookOpen} label={t(lang, 'nav_learn_word')} desc={t(lang, 'learn_desc_start_now')} color="#FFF5EB" iconColor="#FF8400" onClick={() => navigateSafely(navigate, '/ebbinghaus')} />
+                  <TaskCard icon={Headphones} label={t(lang, 'nav_learn_listen')} desc={t(lang, 'learn_desc_practice')} color="#F0EBFF" iconColor="#8B5CF6" onClick={() => navigateSafely(navigate, '/listening')} />
+                  <TaskCard icon={Mic} label={t(lang, 'nav_learn_speak')} desc={t(lang, 'learn_desc_training')} color="#E8F0FF" iconColor="#3B82F6" onClick={() => navigateSafely(navigate, '/speaking')} />
+                  <TaskCard icon={BookOpenText} label={t(lang, 'nav_learn_grammar')} desc={t(lang, 'learn_desc_tree')} color="#E8FFE8" iconColor="#22C55E" onClick={() => navigateSafely(navigate, '/grammar')} />
                 </>
               )}
             </div>
           </div>
 
           {/* 图书馆 */}
-          <div className={isDesktop ? 'mb-5' : ''}>
-            <div className="flex items-center justify-between mb-3">
+          <div className={isDesktop ? 'mb-5' : 'mt-1'}>
+            <div className={`flex items-center justify-between ${isDesktop ? 'mb-3' : 'mb-3.5'}`}>
               <h3 className={`${isDesktop ? 'text-[18px]' : 'text-[16px]'} font-bold text-[var(--color-foreground)] font-secondary`}>
                 <span className="learn-section-title inline-block">{t(lang, 'learn_library')}</span>
               </h3>
-              <button onClick={() => navigate('/bookshelf')} className="text-[12px] text-[var(--color-primary)] font-semibold">
+              <button onClick={() => navigateSafely(navigate, '/bookshelf')} className="text-[12px] text-[var(--color-primary)] font-semibold">
                 {t(lang, 'learn_all')}
               </button>
             </div>
             <div className={isDesktop
               ? 'grid grid-cols-2 gap-3 xl:grid-cols-4'
-              : 'flex gap-3 overflow-x-auto pb-2 -mx-5 px-5'
+              : 'flex gap-2 overflow-x-auto pt-1 pb-3 -mx-5 px-5'
             }>
               {books.map((book) => {
                 const classicBook = getClassicBookBySlug(book.shared_book_slug)
@@ -329,21 +330,25 @@ export default function LearnPage() {
                 return (
                   <div
                     key={book.id}
-                    className={`learn-book-card ${isDesktop ? 'max-w-[220px]' : 'shrink-0 w-[148px]'} glass-card glass-card-interactive w-full rounded-[24px] p-2.5`}
+                    className={`learn-book-card glass-card glass-card-interactive ${
+                      isDesktop
+                        ? 'w-full max-w-[220px] rounded-[24px] p-2.5'
+                        : 'shrink-0 w-[92px] rounded-[16px] p-1.5'
+                    }`}
                     onClick={() => openLibraryBook(book)}
                   >
-                    <div className="mb-3 overflow-hidden rounded-[18px]">
+                    <div className={`${isDesktop ? 'mb-3 rounded-[18px]' : 'mb-1.5 rounded-[12px]'} overflow-hidden`}>
                       {classicBook ? (
-                        <div className="aspect-[5/7]">
+                        <div className={isDesktop ? 'aspect-[5/7]' : 'aspect-[4/5.2]'}>
                           <ClassicBookCover book={classicBook} compact />
                         </div>
                       ) : (
-                        <div className="glass-card-soft flex aspect-[5/7] items-center justify-center rounded-[18px]">
-                          <span className="text-[30px]">{book.cover_emoji || '📘'}</span>
+                        <div className={`glass-card-soft flex items-center justify-center ${isDesktop ? 'aspect-[5/7] rounded-[18px]' : 'aspect-[4/5.2] rounded-[12px]'}`}>
+                          <span className={isDesktop ? 'text-[30px]' : 'text-[20px]'}>{book.cover_emoji || '📘'}</span>
                         </div>
                       )}
                     </div>
-                    <span className="line-clamp-2 block text-center text-[12px] font-medium text-[var(--color-foreground)]">
+                    <span className={`line-clamp-2 block text-center font-medium text-[var(--color-foreground)] ${isDesktop ? 'text-[12px]' : 'text-[10px] leading-[1.25]'}`}>
                       {book.title}
                     </span>
                   </div>
@@ -351,7 +356,7 @@ export default function LearnPage() {
               })}
               {books.length === 0 && (
                 <button
-                  onClick={() => navigate('/bookshelf')}
+                  onClick={() => navigateSafely(navigate, '/bookshelf')}
                   className={`${isDesktop ? 'col-span-4' : 'shrink-0 w-full'} h-[120px] rounded-xl border border-dashed border-[var(--color-border)] text-[13px] text-[var(--color-muted)]`}
                 >
                   {t(lang, 'learn_no_books')}
@@ -397,7 +402,7 @@ export default function LearnPage() {
                 ].map((item) => (
                   <button
                     key={item.path}
-                    onClick={() => navigate(item.path)}
+                    onClick={() => navigateSafely(navigate, item.path)}
                     className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-[var(--color-background-secondary)] hover:bg-[var(--color-background-secondary)]/80 transition-all text-left group"
                   >
                     <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
@@ -424,7 +429,9 @@ export default function LearnPage() {
               🔥 {tf(lang, 'learn_streak', { days: streakDays })}
             </span>
           </div>
-          <HeatMap data={heatmapLevels} />
+          <div className="flex justify-center">
+            <HeatMap data={heatmapLevels} />
+          </div>
         </div>
       )}
     </div>

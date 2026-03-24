@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Linswift Screenshot Overlay</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "SF Pro Display", "PingFang SC", "Noto Sans SC", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: transparent;
+        padding: 12px;
+        color: #251d19;
+      }
+
+      .frame {
+        position: relative;
+      }
+
+      button,
+      input,
+      textarea {
+        font: inherit;
+      }
+
+      .shell {
+        position: relative;
+        border-radius: 28px;
+        border: 1px solid rgba(255, 255, 255, 0.72);
+        background:
+          linear-gradient(180deg, rgba(255, 250, 245, 0.92), rgba(250, 244, 236, 0.90));
+        box-shadow:
+          0 18px 42px rgba(36, 26, 20, 0.16),
+          inset 0 1px 0 rgba(255, 255, 255, 0.7);
+        backdrop-filter: blur(24px) saturate(1.08);
+        overflow: hidden;
+      }
+
+      .close {
+        position: absolute;
+        top: 14px;
+        right: 14px;
+        z-index: 4;
+        width: 30px;
+        height: 30px;
+        border: none;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.58);
+        color: #9b8f84;
+        font-size: 18px;
+        line-height: 1;
+        cursor: pointer;
+        backdrop-filter: blur(8px);
+      }
+
+      .content {
+        padding: 48px 14px 12px;
+        display: grid;
+        gap: 10px;
+      }
+
+      .section {
+        border-radius: 22px;
+        border: 1px solid rgba(255, 255, 255, 0.36);
+        overflow: hidden;
+      }
+
+      .ocr {
+        background: rgba(67, 71, 78, 0.96);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      }
+
+      .translation {
+        background: rgba(255, 249, 242, 0.74);
+        backdrop-filter: blur(16px);
+      }
+
+      .vocab {
+        background: rgba(242, 233, 220, 0.72);
+        backdrop-filter: blur(14px);
+      }
+
+      .section-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 12px 14px 0;
+      }
+
+      .section-title {
+        margin: 0;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+
+      .section-hint {
+        margin: 0;
+        font-size: 10px;
+        font-weight: 600;
+        color: #8d8278;
+      }
+
+      .ocr .section-title,
+      .ocr .section-hint {
+        color: rgba(250, 246, 240, 0.92);
+      }
+
+      .body-text {
+        margin: 0;
+        padding: 10px 14px 14px;
+        font-size: 14px;
+        line-height: 1.5;
+        font-weight: 500;
+        word-break: break-word;
+      }
+
+      .ocr .body-text {
+        color: #faf5ef;
+      }
+
+      .translation .body-text {
+        color: #2f251f;
+      }
+
+      .highlight {
+        color: #ff9a28;
+        font-weight: 700;
+        text-decoration: underline;
+        text-decoration-color: rgba(255, 154, 40, 0.4);
+        text-underline-offset: 2px;
+      }
+
+      .vocab-head {
+        padding: 12px 14px 0;
+        margin: 0;
+        font-size: 11px;
+        font-weight: 600;
+        color: #8a7b70;
+      }
+
+      .chips {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+        padding: 10px 14px 0;
+      }
+
+      .chip {
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 5px 7px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.76);
+        background: rgba(255, 248, 241, 0.86);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+      }
+
+      .chip-word {
+        min-width: 0;
+        font-size: 10px;
+        font-weight: 700;
+        color: #f28a1d;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .chip-meaning {
+        min-width: 0;
+        font-size: 9px;
+        font-weight: 600;
+        color: #8d7b68;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .chip-plus {
+        margin-left: auto;
+        font-size: 11px;
+        font-weight: 700;
+        color: #f28a1d;
+      }
+
+      .collect {
+        margin: 10px 14px 14px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.8);
+        background: rgba(255, 248, 241, 0.96);
+        padding: 7px 12px;
+        text-align: center;
+        font-size: 11px;
+        font-weight: 700;
+        color: #d67f1f;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+        cursor: pointer;
+      }
+
+      .footer {
+        display: grid;
+        grid-template-columns: auto auto 1fr;
+        gap: 8px;
+      }
+
+      .pill {
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 38px;
+        padding: 0 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(74, 77, 83, 0.96);
+        color: #ffffff;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      }
+
+      .pill-text {
+        min-width: 0;
+        font-size: 14px;
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .language-button {
+        cursor: pointer;
+        transition: background 160ms ease, transform 160ms ease;
+      }
+
+      .language-button:hover {
+        background: rgba(86, 89, 95, 0.98);
+      }
+
+      .language-button:active {
+        transform: scale(0.985);
+      }
+
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: #5fe38c;
+        box-shadow: 0 0 10px rgba(95, 227, 140, 0.48);
+      }
+
+      .smart {
+        justify-content: space-between;
+        padding-right: 8px;
+        cursor: pointer;
+      }
+
+      .toggle {
+        width: 36px;
+        height: 22px;
+        padding: 3px;
+        border-radius: 999px;
+        background: #ff8a4c;
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+      }
+
+      .toggle::after {
+        content: "";
+        width: 16px;
+        height: 16px;
+        border-radius: 999px;
+        background: #ffffff;
+      }
+
+      .toggle.off {
+        justify-content: flex-start;
+        background: rgba(255, 255, 255, 0.2);
+      }
+
+      .empty {
+        margin: 0;
+        padding: 18px 16px;
+        border-radius: 18px;
+        background: rgba(255, 248, 241, 0.8);
+        color: #7f756d;
+        font-size: 13px;
+        line-height: 1.7;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <div class="shell">
+        <button class="close" id="closeButton" type="button">×</button>
+        <div class="content" id="content">
+          <section class="section ocr" id="ocrSection">
+            <div class="section-head">
+              <p class="section-title">OCR 原文</p>
+            </div>
+            <p class="body-text" id="ocrText">等待新的截图结果…</p>
+          </section>
+
+          <section class="section translation" id="translationSection">
+            <div class="section-head">
+              <p class="section-title">译文</p>
+              <p class="section-hint">点按复制</p>
+            </div>
+            <p class="body-text" id="translationText">完成翻译后会在这里显示译文。</p>
+          </section>
+
+          <section class="section vocab" id="vocabSection">
+            <p class="vocab-head" id="vocabTitle">识别到 0 个值得学习的词汇：</p>
+            <div class="chips" id="chips"></div>
+            <div class="collect" id="collectButton">一键收录 0 个陌生词汇</div>
+          </section>
+
+          <div class="footer">
+            <div class="pill">
+              <span class="status-dot"></span>
+              <span class="pill-text" id="statusLabel">OCR 已完成</span>
+            </div>
+            <button class="pill language-button" id="languageButton" type="button">
+              <span class="pill-text" id="languageLabel">英语 → 中文(简)</span>
+            </button>
+            <div class="pill smart">
+              <span class="pill-text">智慧识词</span>
+              <span class="toggle" aria-hidden="true"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+      const closeButton = document.getElementById('closeButton')
+      const ocrTextNode = document.getElementById('ocrText')
+      const translationTextNode = document.getElementById('translationText')
+      const vocabTitleNode = document.getElementById('vocabTitle')
+      const chipsRoot = document.getElementById('chips')
+      const collectButton = document.getElementById('collectButton')
+      const statusLabelNode = document.getElementById('statusLabel')
+      const languageLabelNode = document.getElementById('languageLabel')
+      const languageButton = document.getElementById('languageButton')
+      const vocabSection = document.getElementById('vocabSection')
+      const smartPill = document.querySelector('.smart')
+      const toggleNode = document.querySelector('.toggle')
+      let currentWords = []
+      let smartWordsEnabled = true
+      let currentTargetLang = '简体中文'
+      const languageCycle = ['简体中文', '繁體中文', 'English', '日本語']
+
+      closeButton.addEventListener('click', () => {
+        window.overlayBridge?.close?.()
+      })
+
+      async function copyText(text) {
+        const value = String(text || '').trim()
+        if (!value) return
+        try {
+          await window.overlayBridge?.writeClipboardText?.(value)
+        } catch {}
+      }
+
+      function escapeHtml(text) {
+        return String(text || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;')
+      }
+
+      function renderHighlightedText(text, words) {
+        const safeText = String(text || '').trim()
+        if (!safeText) return '等待新的截图结果…'
+
+        const safeWords = Array.isArray(words)
+          ? words.map((item) => String(item.word || '').trim()).filter(Boolean)
+          : []
+        if (!safeWords.length) return escapeHtml(safeText)
+
+        const escapedWords = safeWords
+          .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+          .sort((left, right) => right.length - left.length)
+        const pattern = new RegExp(`\\b(${escapedWords.join('|')})\\b`, 'gi')
+
+        return escapeHtml(safeText).replace(pattern, '<span class="highlight">$1</span>')
+      }
+
+      function renderChip(item) {
+        const chip = document.createElement('div')
+        chip.className = 'chip'
+
+        const word = document.createElement('span')
+        word.className = 'chip-word'
+        word.textContent = item.word || ''
+
+        const meaning = document.createElement('span')
+        meaning.className = 'chip-meaning'
+        meaning.textContent = item.meaning || ''
+
+        const plus = document.createElement('span')
+        plus.className = 'chip-plus'
+        plus.textContent = '+'
+
+        chip.appendChild(word)
+        chip.appendChild(meaning)
+        chip.appendChild(plus)
+        return chip
+      }
+
+      function renderPayload(payload) {
+        const ocrText = String(payload?.ocrText || '').trim()
+        const translatedText = String(payload?.translatedText || '').trim()
+        const words = Array.isArray(payload?.words) ? payload.words.slice(0, 5) : []
+        const wordCount = words.length
+        currentWords = words
+        smartWordsEnabled = payload?.smartWordsEnabled !== false
+        currentTargetLang = String(payload?.targetLang || currentTargetLang || '简体中文')
+
+        statusLabelNode.textContent = payload?.statusLabel || 'OCR 已完成'
+        languageLabelNode.textContent = payload?.languageLabel || '英语 → 中文(简)'
+        toggleNode.classList.toggle('off', !smartWordsEnabled)
+
+        ocrTextNode.innerHTML = renderHighlightedText(ocrText, words)
+        translationTextNode.textContent = translatedText || '完成翻译后会在这里显示译文。'
+
+        ocrTextNode.onclick = () => copyText(ocrText)
+        translationTextNode.onclick = () => copyText(translatedText)
+
+        vocabTitleNode.textContent = `识别到 ${wordCount} 个值得学习的词汇：`
+        collectButton.textContent = `一键收录 ${wordCount} 个陌生词汇`
+
+        chipsRoot.innerHTML = ''
+        if (!wordCount) {
+          vocabSection.style.display = 'none'
+        } else {
+          vocabSection.style.display = ''
+          words.forEach((item) => {
+            chipsRoot.appendChild(renderChip(item))
+          })
+        }
+      }
+
+      collectButton.addEventListener('click', async () => {
+        if (!currentWords.length) return
+        await window.overlayBridge?.collectWords?.(currentWords)
+        collectButton.textContent = `已收录 ${currentWords.length} 个陌生词汇`
+      })
+
+      smartPill.addEventListener('click', async () => {
+        const next = await window.overlayBridge?.updateSettings?.({
+          smartWordsEnabled: !smartWordsEnabled,
+        })
+        smartWordsEnabled = next?.smartWordsEnabled !== false
+        toggleNode.classList.toggle('off', !smartWordsEnabled)
+      })
+
+      languageButton.addEventListener('click', async () => {
+        const currentIndex = Math.max(0, languageCycle.indexOf(currentTargetLang))
+        const nextTargetLang = languageCycle[(currentIndex + 1) % languageCycle.length]
+        currentTargetLang = nextTargetLang
+        languageLabelNode.textContent =
+          `英语 → ${nextTargetLang === '简体中文' ? '中文(简)' : nextTargetLang === '繁體中文' ? '中文(繁)' : nextTargetLang}`
+        statusLabelNode.textContent = '翻译中…'
+        await window.overlayBridge?.requestLanguageChange?.(nextTargetLang)
+      })
+
+      window.overlayBridge?.onData?.((payload) => {
+        renderPayload(payload || {})
+      })
+    </script>
+  </body>
+</html>

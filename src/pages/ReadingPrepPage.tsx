@@ -15,6 +15,7 @@ import {
 } from '../lib/books'
 import { getClassicBookBySlug } from '../data/classicBooks'
 import ClassicBookCover from '../components/books/ClassicBookCover'
+import { navigateSafely } from '../lib/navigation'
 
 /**
  * 阅读准备页（V2：从数据库加载真实书籍）
@@ -168,7 +169,7 @@ export default function ReadingPrepPage() {
             请从书架选择一本书籍，或先导入 PDF
           </p>
           <button
-            onClick={() => navigate('/bookshelf')}
+            onClick={() => navigateSafely(navigate, '/bookshelf')}
             className="glass-card-interactive rounded-[18px] bg-[var(--color-primary)] px-6 py-2.5 text-[14px] font-semibold text-white"
           >
             前往书架

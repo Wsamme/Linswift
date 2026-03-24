@@ -47,9 +47,24 @@ export interface UnfamiliarWord {
 export interface WordDetail {
   word: string
   phonetic: string
+  phoneticBr?: string
+  phoneticAm?: string
   meaning: string
+  partOfSpeechBlocks?: Array<{
+    partOfSpeech: string
+    meanings: string[]
+  }>
   examples: string[]
   synonyms: string[]
+  phrasePatterns?: Array<{
+    phrase: string
+    meaning: string
+  }>
+  encyclopedia?: string[]
+  relatedWords?: Array<{
+    word: string
+    meaning: string
+  }>
   mnemonic: string
 }
 
@@ -145,9 +160,118 @@ async function callMoonshot(
  * 尝试解析 JSON，清理 markdown 包裹
  */
 function parseJSON<T>(raw: string): T | null {
+  const stripComments = (input: string) => {
+    let result = ''
+    let inString = false
+    let escaped = false
+    let inLineComment = false
+    let inBlockComment = false
+
+    for (let index = 0; index < input.length; index += 1) {
+      const current = input[index]
+      const next = input[index + 1]
+
+      if (inLineComment) {
+        if (current === '\n') {
+          inLineComment = false
+          result += current
+        }
+        continue
+      }
+
+      if (inBlockComment) {
+        if (current === '*' && next === '/') {
+          inBlockComment = false
+          index += 1
+        }
+        continue
+      }
+
+      if (inString) {
+        result += current
+        if (escaped) {
+          escaped = false
+        } else if (current === '\\') {
+          escaped = true
+        } else if (current === '"') {
+          inString = false
+        }
+        continue
+      }
+
+      if (current === '"') {
+        inString = true
+        result += current
+        continue
+      }
+
+      if (current === '/' && next === '/') {
+        inLineComment = true
+        index += 1
+        continue
+      }
+
+      if (current === '/' && next === '*') {
+        inBlockComment = true
+        index += 1
+        continue
+      }
+
+      result += current
+    }
+
+    return result
+  }
+
+  const extractJsonCandidate = (input: string) => {
+    const trimmed = input.trim()
+    const objectStart = trimmed.indexOf('{')
+    const arrayStart = trimmed.indexOf('[')
+    const startCandidates = [objectStart, arrayStart].filter(index => index >= 0)
+    if (startCandidates.length === 0) return trimmed
+
+    const start = Math.min(...startCandidates)
+    const opener = trimmed[start]
+    const closer = opener === '{' ? '}' : ']'
+    let depth = 0
+    let inString = false
+    let escaped = false
+
+    for (let index = start; index < trimmed.length; index += 1) {
+      const current = trimmed[index]
+
+      if (inString) {
+        if (escaped) {
+          escaped = false
+        } else if (current === '\\') {
+          escaped = true
+        } else if (current === '"') {
+          inString = false
+        }
+        continue
+      }
+
+      if (current === '"') {
+        inString = true
+        continue
+      }
+
+      if (current === opener) depth += 1
+      if (current === closer) {
+        depth -= 1
+        if (depth === 0) {
+          return trimmed.slice(start, index + 1)
+        }
+      }
+    }
+
+    return trimmed.slice(start)
+  }
+
   try {
     const cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    return JSON.parse(cleaned) as T
+    const normalized = stripComments(extractJsonCandidate(cleaned)).trim()
+    return JSON.parse(normalized) as T
   } catch {
     console.warn('JSON 解析失败:', raw.slice(0, 200))
     return null
@@ -179,12 +303,23 @@ function fallbackWordDetail(word: string): WordDetail {
   return {
     word,
     phonetic: '/---/',
+    phoneticBr: '/---/',
+    phoneticAm: '/---/',
     meaning: '（AI 暂时不可用，请稍后重试）',
+    partOfSpeechBlocks: [
+      {
+        partOfSpeech: 'n./v.',
+        meanings: ['（AI 暂时不可用，请稍后重试）'],
+      },
+    ],
     examples: [
       `The word "${word}" is commonly used in everyday English.`,
       `Can you use "${word}" in a sentence?`,
     ],
     synonyms: ['N/A'],
+    phrasePatterns: [],
+    encyclopedia: ['当前 AI 服务暂时不可用，百科说明暂未生成。'],
+    relatedWords: [],
     mnemonic: '当前 AI 服务暂时不可用，请检查网络或 API 配额。',
   }
 }
@@ -408,16 +543,43 @@ export async function getWordDetail(word: string): Promise<WordDetail> {
 {
   "word": "${word}",
   "phonetic": "音标",
+  "phoneticBr": "英式音标（没有就复用 phonetic）",
+  "phoneticAm": "美式音标（没有就复用 phonetic）",
   "meaning": "中文释义（多个义项用分号分隔）",
+  "partOfSpeechBlocks": [
+    {
+      "partOfSpeech": "det.",
+      "meanings": ["义项1", "义项2"]
+    }
+  ],
   "examples": [
     "含有该单词的英文例句1",
     "含有该单词的英文例句2"
   ],
   "synonyms": ["同义词1", "同义词2", "同义词3"],
+  "phrasePatterns": [
+    { "phrase": "固定搭配1", "meaning": "中文解释" },
+    { "phrase": "固定搭配2", "meaning": "中文解释" }
+  ],
+  "encyclopedia": [
+    "该词的核心用法说明 1",
+    "该词的常见语境说明 2"
+  ],
+  "relatedWords": [
+    { "word": "相关词1", "meaning": "中文释义" },
+    { "word": "相关词2", "meaning": "中文释义" }
+  ],
   "mnemonic": "一个帮助记忆该单词的技巧或联想记忆法（中文）"
 }
 
-注意：例句要实用、贴近日常；记忆技巧要有趣好记；返回合法 JSON`
+注意：
+- 例句要实用、贴近日常
+- partOfSpeechBlocks 尽量按真实词性拆开，不要把所有义项混成一行
+- phrasePatterns 返回 2-5 个高频搭配或短语
+- encyclopedia 返回 2-4 条更像词典备注/百科说明的短段落
+- relatedWords 返回 3-5 个相关词，便于继续查词
+- 记忆技巧要有趣好记
+- 返回合法 JSON`
 
   const raw = await callMoonshot([{ role: 'user', content: prompt }])
   if (raw) {

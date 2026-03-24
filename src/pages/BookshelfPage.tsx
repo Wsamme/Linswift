@@ -11,6 +11,7 @@ import { useLogicalBack } from '../hooks/useLogicalBack'
 import { CLASSIC_BOOKS, getClassicBookBySlug, type ClassicBookCatalogItem } from '../data/classicBooks'
 import { resolveUserBookMetadata } from '../lib/books'
 import ClassicBookCover from '../components/books/ClassicBookCover'
+import { navigateSafely } from '../lib/navigation'
 
 /**
  * 书架页 —— 阅读器模块入口（V3：PDF 阅读器）
@@ -99,11 +100,11 @@ export default function BookshelfPage() {
 
   const openBook = useCallback((book: UserBook) => {
     if (book.file_path) {
-      navigate(`/pdf-reader?bookId=${book.id}`)
+      navigateSafely(navigate, `/pdf-reader?bookId=${book.id}`)
       return
     }
 
-    navigate(book.shared_book_slug ? `/reading?bookId=${book.id}` : `/reading-prep?bookId=${book.id}`)
+    navigateSafely(navigate, book.shared_book_slug ? `/reading?bookId=${book.id}` : `/reading-prep?bookId=${book.id}`)
   }, [navigate])
 
   const getClassicCoverBook = useCallback((book: UserBook) => {
@@ -338,7 +339,7 @@ export default function BookshelfPage() {
       {/* ===== 直接打开 PDF 阅读器 ===== */}
       <div className="px-5 mt-4">
         <button
-          onClick={() => navigate('/pdf-reader')}
+          onClick={() => navigateSafely(navigate, '/pdf-reader')}
           className="glass-card glass-card-interactive w-full flex items-center justify-center gap-2 rounded-[22px] py-3 text-[var(--color-foreground)]"
         >
           <BookOpen size={16} className="text-[var(--color-primary)]" />

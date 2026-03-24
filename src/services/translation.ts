@@ -109,9 +109,118 @@ async function callMoonshot(
 }
 
 function parseJSON<T>(raw: string): T | null {
+  const stripComments = (input: string) => {
+    let result = ''
+    let inString = false
+    let escaped = false
+    let inLineComment = false
+    let inBlockComment = false
+
+    for (let index = 0; index < input.length; index += 1) {
+      const current = input[index]
+      const next = input[index + 1]
+
+      if (inLineComment) {
+        if (current === '\n') {
+          inLineComment = false
+          result += current
+        }
+        continue
+      }
+
+      if (inBlockComment) {
+        if (current === '*' && next === '/') {
+          inBlockComment = false
+          index += 1
+        }
+        continue
+      }
+
+      if (inString) {
+        result += current
+        if (escaped) {
+          escaped = false
+        } else if (current === '\\') {
+          escaped = true
+        } else if (current === '"') {
+          inString = false
+        }
+        continue
+      }
+
+      if (current === '"') {
+        inString = true
+        result += current
+        continue
+      }
+
+      if (current === '/' && next === '/') {
+        inLineComment = true
+        index += 1
+        continue
+      }
+
+      if (current === '/' && next === '*') {
+        inBlockComment = true
+        index += 1
+        continue
+      }
+
+      result += current
+    }
+
+    return result
+  }
+
+  const extractJsonCandidate = (input: string) => {
+    const trimmed = input.trim()
+    const objectStart = trimmed.indexOf('{')
+    const arrayStart = trimmed.indexOf('[')
+    const startCandidates = [objectStart, arrayStart].filter(index => index >= 0)
+    if (startCandidates.length === 0) return trimmed
+
+    const start = Math.min(...startCandidates)
+    const opener = trimmed[start]
+    const closer = opener === '{' ? '}' : ']'
+    let depth = 0
+    let inString = false
+    let escaped = false
+
+    for (let index = start; index < trimmed.length; index += 1) {
+      const current = trimmed[index]
+
+      if (inString) {
+        if (escaped) {
+          escaped = false
+        } else if (current === '\\') {
+          escaped = true
+        } else if (current === '"') {
+          inString = false
+        }
+        continue
+      }
+
+      if (current === '"') {
+        inString = true
+        continue
+      }
+
+      if (current === opener) depth += 1
+      if (current === closer) {
+        depth -= 1
+        if (depth === 0) {
+          return trimmed.slice(start, index + 1)
+        }
+      }
+    }
+
+    return trimmed.slice(start)
+  }
+
   try {
     const cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    return JSON.parse(cleaned) as T
+    const normalized = stripComments(extractJsonCandidate(cleaned)).trim()
+    return JSON.parse(normalized) as T
   } catch {
     return null
   }

@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import { Languages, BookOpen, Library, User } from 'lucide-react'
 import { t, useAppLanguage } from '../../lib/i18n'
+import { handleSafeRouteClick } from '../../lib/navigation'
 
 /* 底部 Tab 导航栏配置 */
 const tabs = [
@@ -14,23 +15,26 @@ export default function BottomNav() {
   const lang = useAppLanguage()
   return (
     <nav
-      className="glass-bottom-bar flex items-center justify-around border-t border-[var(--color-border)] pb-[max(env(safe-area-inset-bottom),8px)]"
-      style={{ boxShadow: 'var(--shadow-nav)' }}
+      className="glass-bottom-bar flex items-center justify-around rounded-[26px] border border-[var(--glass-border)] px-2 py-2"
+      style={{ boxShadow: '0 18px 38px rgba(15, 23, 42, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.58)' }}
     >
       {tabs.map(({ path, key, icon: Icon }) => (
         <NavLink
           key={path}
           to={path}
+          onClick={(event) => {
+            handleSafeRouteClick(event, path)
+          }}
           className={({ isActive }) =>
             /* 每个 Tab 占据等分宽度，垂直居中 */
-            `flex flex-col items-center justify-center flex-1 py-2 pt-2.5 gap-0.5 transition-colors ${
+            `flex flex-col items-center justify-center flex-1 rounded-[18px] py-2 gap-0.5 transition-colors ${
               isActive
-                ? 'text-[var(--color-primary)]'   /* 选中态：橙色 */
-                : 'text-[var(--color-muted)]'      /* 未选中：灰色 */
+                ? 'bg-[var(--color-primary-light)] text-[var(--color-primary)]'
+                : 'text-[var(--color-muted)]'
             }`
           }
         >
-          <Icon size={22} strokeWidth={1.8} />
+          <Icon size={21} strokeWidth={1.9} />
           <span className="text-[11px] font-medium">{t(lang, key)}</span>
         </NavLink>
       ))}

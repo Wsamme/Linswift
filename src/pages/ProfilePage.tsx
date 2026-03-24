@@ -19,8 +19,10 @@ import { useAuth } from '../contexts/AuthContext'
 import { useProfile } from '../hooks/useProfile'
 import { useStudyRecords } from '../hooks/useStudyRecords'
 import { useVocabulary } from '../hooks/useVocabulary'
+import { useVocabTestResults } from '../hooks/useVocabTestResults'
 import { useThemeSettings } from '../hooks/useThemeSettings'
 import { t, useAppLanguage } from '../lib/i18n'
+import { VOCAB_LEVEL_TARGETS } from '../data/vocab-test/openSourceVocab'
 
 // 设置菜单项 —— 学习设置已集成到 PDF 阅读器中
 const menuItems = [
@@ -36,6 +38,7 @@ export default function ProfilePage() {
   const { profile, fetchProfile } = useProfile()
   const { getStreakDays } = useStudyRecords()
   const { vocabulary, fetchVocabulary } = useVocabulary()
+  const { latestResult } = useVocabTestResults()
   const { settings } = useThemeSettings()
   const [streakDays, setStreakDays] = useState(0)
 
@@ -81,6 +84,35 @@ export default function ProfilePage() {
   const displayName = profile?.username || user?.user_metadata?.username || user?.email?.split('@')[0] || t(lang, 'profile_user_fallback')
   const displayEmail = user?.email || ''
   const avatarLetter = displayName.charAt(0).toUpperCase()
+  const latestVocabulary = latestResult && Number.isFinite(latestResult.estimated_vocabulary)
+    ? latestResult.estimated_vocabulary
+    : null
+
+  const getVocabularyLevelRecord = () => {
+    if (!latestVocabulary || latestVocabulary <= 0) {
+      return {
+        value: t(lang, 'profile_vocab_level_empty'),
+        helper: t(lang, 'profile_vocab_level_cta'),
+      }
+    }
+
+    const levelIndex = VOCAB_LEVEL_TARGETS.findIndex((target) => latestVocabulary <= target)
+    const safeIndex = levelIndex >= 0 ? levelIndex : VOCAB_LEVEL_TARGETS.length - 1
+    const levelValue = `Lv.${safeIndex + 1}`
+    const testedAt = latestResult?.created_at
+      ? new Date(latestResult.created_at).toLocaleDateString(
+          lang === 'en' ? 'en-US' : lang === 'ja' ? 'ja-JP' : 'zh-CN',
+          { month: 'numeric', day: 'numeric' },
+        )
+      : null
+
+    return {
+      value: levelValue,
+      helper: testedAt ? `${latestVocabulary.toLocaleString()} · ${testedAt}` : latestVocabulary.toLocaleString(),
+    }
+  }
+
+  const vocabularyLevelRecord = getVocabularyLevelRecord()
 
   return (
     <div className="flex flex-col h-full">
@@ -125,7 +157,14 @@ export default function ProfilePage() {
       <div className="grid grid-cols-3 gap-2.5 mx-5 mb-5">
         <StatCard value={String(streakDays)} label={t(lang, 'profile_days')} color="#FF8400" bgColor="#FFF5EB" />
         <StatCard value={vocabulary.length.toLocaleString()} label={t(lang, 'profile_words')} color="#8B5CF6" bgColor="#F5F3FF" />
-        <StatCard value={`${profile?.total_study_hours || 0}h`} label={t(lang, 'profile_hours')} color="#3B82F6" bgColor="#EFF6FF" />
+        <StatCard
+          value={vocabularyLevelRecord.value}
+          label={t(lang, 'profile_vocab_level')}
+          helper={vocabularyLevelRecord.helper}
+          color="#3B82F6"
+          bgColor="#EFF6FF"
+          onClick={() => navigate('/vocab-test')}
+        />
       </div>
 
       {/* ===== 设置区标题 ===== */}
@@ -180,18 +219,24 @@ export default function ProfilePage() {
 interface StatCardProps {
   value: string
   label: string
+  helper?: string
   color: string
   bgColor: string
+  onClick?: () => void
 }
 
-function StatCard({ value, label, color, bgColor }: StatCardProps) {
+function StatCard({ value, label, helper, color, bgColor, onClick }: StatCardProps) {
   return (
     <div
-      className="flex flex-col items-center gap-1 py-3 rounded-[var(--radius-lg)]"
+      className={`flex flex-col items-center gap-1 rounded-[var(--radius-lg)] py-3 ${onClick ? 'cursor-pointer active:scale-[0.98] transition-transform' : ''}`}
       style={{ backgroundColor: bgColor }}
+      onClick={onClick}
     >
       <span className="text-[20px] font-bold font-secondary" style={{ color }}>{value}</span>
       <span className="text-[11px] text-[var(--color-muted)]">{label}</span>
+      {helper && (
+        <span className="max-w-full px-2 text-center text-[10px] leading-[1.3] text-[var(--color-muted-light)]">{helper}</span>
+      )}
     </div>
   )
 }

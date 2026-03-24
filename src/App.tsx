@@ -58,6 +58,7 @@ import AboutPage from './pages/AboutPage'
 import UserAgreementPage from './pages/UserAgreementPage'
 import PrivacyPolicyPage from './pages/PrivacyPolicyPage'
 import BrowserExtensionPage from './pages/BrowserExtensionPage'
+import DesktopScreenshotLabPage from './pages/DesktopScreenshotLabPage'
 
 // ===== Phase 6 (V2): 词汇游戏 =====
 import WordMatchGame from './pages/WordMatchGame'
@@ -91,6 +92,7 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/browser-extension" element={<BrowserExtensionPage />} />
+      <Route path="/dev/screenshot-lab" element={<DesktopScreenshotLabPage />} />
       <Route path="/legal/user-agreement" element={<UserAgreementPage />} />
       <Route path="/legal/privacy-policy" element={<PrivacyPolicyPage />} />
 

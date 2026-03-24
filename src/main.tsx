@@ -35,17 +35,65 @@ const isDesktopShell =
   window.location.protocol === 'file:' || window.navigator.userAgent.includes('Electron')
 
 const Router = isDesktopShell ? HashRouter : BrowserRouter
+const LEGACY_WEB_CACHE_RESET_KEY = 'linswift.web-cache-reset.v2'
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <Router>
-      {/* QueryClientProvider 为整个应用提供 React Query 缓存能力 */}
-      <QueryClientProvider client={queryClient}>
-        {/* AuthProvider 包裹整个应用，让所有组件都能访问认证状态 */}
-        <AuthProvider>
-          <App />
-        </AuthProvider>
-      </QueryClientProvider>
-    </Router>
-  </StrictMode>,
-)
+async function cleanupLegacyWebCaches() {
+  if (isDesktopShell || typeof window === 'undefined') return false
+
+  let shouldReload = false
+
+  try {
+    if ('serviceWorker' in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations()
+      if (registrations.length > 0 || navigator.serviceWorker.controller) {
+        shouldReload = true
+      }
+      await Promise.all(registrations.map((registration) => registration.unregister()))
+    }
+
+    if ('caches' in window) {
+      const cacheKeys = await caches.keys()
+      if (cacheKeys.length > 0) {
+        shouldReload = true
+      }
+      await Promise.all(cacheKeys.map((key) => caches.delete(key)))
+    }
+  } catch (error) {
+    console.warn('清理旧版 PWA 缓存失败，继续普通网页模式运行', error)
+  }
+
+  return shouldReload
+}
+
+async function bootstrap() {
+  const shouldReload = await cleanupLegacyWebCaches()
+
+  if (!isDesktopShell && shouldReload) {
+    const alreadyReloaded = window.sessionStorage.getItem(LEGACY_WEB_CACHE_RESET_KEY) === '1'
+    if (!alreadyReloaded) {
+      window.sessionStorage.setItem(LEGACY_WEB_CACHE_RESET_KEY, '1')
+      window.location.reload()
+      return
+    }
+  }
+
+  if (!isDesktopShell) {
+    window.sessionStorage.removeItem(LEGACY_WEB_CACHE_RESET_KEY)
+  }
+
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <Router>
+        {/* QueryClientProvider 为整个应用提供 React Query 缓存能力 */}
+        <QueryClientProvider client={queryClient}>
+          {/* AuthProvider 包裹整个应用，让所有组件都能访问认证状态 */}
+          <AuthProvider>
+            <App />
+          </AuthProvider>
+        </QueryClientProvider>
+      </Router>
+    </StrictMode>,
+  )
+}
+
+void bootstrap()

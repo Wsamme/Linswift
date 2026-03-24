@@ -12,8 +12,8 @@
  * 8. 页脚
  */
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { gsap } from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import {
@@ -25,15 +25,43 @@ import SpotlightCard from '../components/reactbits/SpotlightCard'
 import AuroraCSS from '../components/reactbits/AuroraCSS'
 import { useAuth } from '../contexts/AuthContext'
 import BrandLogo from '../components/common/BrandLogo'
+import { navigateSafely } from '../lib/navigation'
 
 gsap.registerPlugin(ScrollTrigger)
 
 const WEBSITE_BASE_URL = 'https://www.linswift.com'
-const BROWSER_EXTENSION_GUIDE_URL = `${WEBSITE_BASE_URL}/browser-extension`
+const BROWSER_EXTENSION_GUIDE_URL = '/browser-extension'
 const BROWSER_EXTENSION_DOWNLOAD_URL = `${WEBSITE_BASE_URL}/downloads/linswift-browser-extension.zip`
+
+function isExternalHref(href: string) {
+  return /^(https?:|mailto:|tel:)/i.test(href)
+}
+
+function handleSiteLinkClick(
+  event: ReactMouseEvent<HTMLElement>,
+  href: string,
+  navigate: ReturnType<typeof useNavigate>,
+) {
+  if (!href || isExternalHref(href)) return
+
+  if (href.startsWith('#')) {
+    event.preventDefault()
+    const target = document.querySelector(href)
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+    return
+  }
+
+  if (href.startsWith('/')) {
+    event.preventDefault()
+    navigateSafely(navigate, href)
+  }
+}
 
 export default function LandingPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { user, loading: authLoading } = useAuth()
 
   // 已登录用户直接进入应用
@@ -43,24 +71,36 @@ export default function LandingPage() {
     }
   }, [user, authLoading, navigate])
 
+  useEffect(() => {
+    if (!location.hash) return
+    const id = window.setTimeout(() => {
+      const target = document.querySelector(location.hash)
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+    }, 60)
+    return () => window.clearTimeout(id)
+  }, [location.hash])
+
   if (authLoading) return null
 
   return (
     <div className="min-h-screen bg-white text-[#1A1A1A] overflow-x-hidden">
       <Navbar
-        onLogin={() => navigate('/login')}
-        onRegister={() => navigate('/register')}
+        onLogin={() => navigateSafely(navigate, '/login')}
+        onRegister={() => navigateSafely(navigate, '/register')}
+        onExtensionGuide={() => navigateSafely(navigate, '/browser-extension')}
       />
       <HeroSection
-        onGetStarted={() => navigate('/register')}
-        onExtensionGuide={() => window.location.assign(BROWSER_EXTENSION_GUIDE_URL)}
+        onGetStarted={() => navigateSafely(navigate, '/register')}
+        onExtensionGuide={() => navigateSafely(navigate, '/browser-extension')}
       />
       <AIWorkflowSection />
       <CoreFeatures />
-      <FeatureGrid onExtensionGuide={() => window.location.assign(BROWSER_EXTENSION_GUIDE_URL)} />
-      <PricingSection onGetStarted={() => navigate('/register')} />
+      <FeatureGrid onExtensionGuide={() => navigateSafely(navigate, '/browser-extension')} />
+      <PricingSection onGetStarted={() => navigateSafely(navigate, '/register')} />
       <TestimonialsSection />
-      <FinalCTA onGetStarted={() => navigate('/register')} />
+      <FinalCTA onGetStarted={() => navigateSafely(navigate, '/register')} />
       <Footer />
     </div>
   )
@@ -72,12 +112,15 @@ export default function LandingPage() {
 export function Navbar({
   onLogin,
   onRegister,
+  onExtensionGuide,
   linkBase = '',
 }: {
   onLogin: () => void
   onRegister: () => void
+  onExtensionGuide?: () => void
   linkBase?: string
 }) {
+  const navigate = useNavigate()
   const [scrolled, setScrolled] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const mobileMenuRef = useRef<HTMLDivElement>(null)
@@ -117,14 +160,14 @@ export function Navbar({
     { label: '功能', href: `${linkBase}#features`, icon: Zap, color: '#FF8400' },
     { label: '定价', href: `${linkBase}#pricing`, icon: BarChart3, color: '#8B5CF6' },
     { label: '评价', href: `${linkBase}#testimonials`, icon: Star, color: '#3B82F6' },
-    { label: '插件教程', href: BROWSER_EXTENSION_GUIDE_URL, icon: Puzzle, color: '#22C55E' },
+    { label: '插件教程', href: `${linkBase || ''}/browser-extension`, icon: Puzzle, color: '#22C55E' },
   ]
 
   const navLinks = [
     { label: '功能', href: `${linkBase}#features` },
     { label: '定价', href: `${linkBase}#pricing` },
     { label: '评价', href: `${linkBase}#testimonials` },
-    { label: '插件教程', href: BROWSER_EXTENSION_GUIDE_URL },
+    { label: '插件教程', href: `${linkBase || ''}/browser-extension` },
   ]
 
   return (
@@ -142,10 +185,22 @@ export function Navbar({
         {/* 桌面导航 */}
         <nav className="hidden md:flex items-center gap-8">
           {navLinks.map(l => (
-            <a key={l.href} href={l.href}
-              className="text-[15px] text-[#555] hover:text-[#1A1A1A] transition-colors font-medium">
-              {l.label}
-            </a>
+            l.label === '插件教程' && onExtensionGuide ? (
+              <button
+                key={l.href}
+                type="button"
+                onClick={onExtensionGuide}
+                className="text-[15px] text-[#555] hover:text-[#1A1A1A] transition-colors font-medium"
+              >
+                {l.label}
+              </button>
+            ) : (
+              <a key={l.href} href={l.href}
+                onClick={(event) => handleSiteLinkClick(event, l.href, navigate)}
+                className="text-[15px] text-[#555] hover:text-[#1A1A1A] transition-colors font-medium">
+                {l.label}
+              </a>
+            )
           ))}
         </nav>
 
@@ -175,19 +230,35 @@ export function Navbar({
           <div className="px-5 py-4 flex flex-col gap-2">
             {mobileNavCards.map((card, i) => {
               const Icon = card.icon
+              const isExtensionCard = card.label === '插件教程'
               return (
-                <a key={card.href} href={card.href}
-                  ref={el => { cardItemsRef.current[i] = el }}
-                  onClick={() => handleMobileClose()}
-                  className="flex items-center gap-3.5 px-4 py-3.5 rounded-2xl transition-all active:scale-[0.97]"
-                  style={{ backgroundColor: card.color + '12', border: `1px solid ${card.color}25` }}>
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-                    style={{ backgroundColor: card.color }}>
-                    <Icon size={18} className="text-white" />
-                  </div>
-                  <span className="text-[15px] font-semibold text-[#1A1A1A]">{card.label}</span>
-                  <ChevronRight size={16} className="text-[#bbb] ml-auto" />
-                </a>
+                isExtensionCard && onExtensionGuide ? (
+                  <button key={card.href}
+                    ref={el => { cardItemsRef.current[i] = el }}
+                    onClick={() => { handleMobileClose(); setTimeout(onExtensionGuide, 300) }}
+                    className="flex items-center gap-3.5 px-4 py-3.5 rounded-2xl transition-all active:scale-[0.97] text-left"
+                    style={{ backgroundColor: card.color + '12', border: `1px solid ${card.color}25` }}>
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+                      style={{ backgroundColor: card.color }}>
+                      <Icon size={18} className="text-white" />
+                    </div>
+                    <span className="text-[15px] font-semibold text-[#1A1A1A]">{card.label}</span>
+                    <ChevronRight size={16} className="text-[#bbb] ml-auto" />
+                  </button>
+                ) : (
+                  <a key={card.href} href={card.href}
+                    ref={el => { cardItemsRef.current[i] = el }}
+                    onClick={(event) => { handleSiteLinkClick(event, card.href, navigate); handleMobileClose() }}
+                    className="flex items-center gap-3.5 px-4 py-3.5 rounded-2xl transition-all active:scale-[0.97]"
+                    style={{ backgroundColor: card.color + '12', border: `1px solid ${card.color}25` }}>
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+                      style={{ backgroundColor: card.color }}>
+                      <Icon size={18} className="text-white" />
+                    </div>
+                    <span className="text-[15px] font-semibold text-[#1A1A1A]">{card.label}</span>
+                    <ChevronRight size={16} className="text-[#bbb] ml-auto" />
+                  </a>
+                )
               )
             })}
 
@@ -973,6 +1044,7 @@ function FinalCTA({ onGetStarted }: { onGetStarted: () => void }) {
  * 页脚
  * ============================================================ */
 export function Footer({ linkBase = '' }: { linkBase?: string }) {
+  const navigate = useNavigate()
   const productLinks = [
     { label: 'AI 翻译', href: `${linkBase}#feature-translate` },
     { label: '智能阅读', href: `${linkBase}#feature-reading` },
@@ -1017,7 +1089,7 @@ export function Footer({ linkBase = '' }: { linkBase?: string }) {
             <h5 className="text-[14px] font-semibold mb-4">产品</h5>
             <ul className="flex flex-col gap-2.5">
               {productLinks.map(l => (
-                <li key={l.label}><a href={l.href} className="text-[13px] text-white/50 hover:text-white/80 transition-colors">{l.label}</a></li>
+                <li key={l.label}><a href={l.href} onClick={(event) => handleSiteLinkClick(event, l.href, navigate)} className="text-[13px] text-white/50 hover:text-white/80 transition-colors">{l.label}</a></li>
               ))}
             </ul>
           </div>
@@ -1027,7 +1099,7 @@ export function Footer({ linkBase = '' }: { linkBase?: string }) {
             <h5 className="text-[14px] font-semibold mb-4">资源</h5>
             <ul className="flex flex-col gap-2.5">
               {resourceLinks.map(l => (
-                <li key={l.label}><a href={l.href} className="text-[13px] text-white/50 hover:text-white/80 transition-colors">{l.label}</a></li>
+                <li key={l.label}><a href={l.href} onClick={(event) => handleSiteLinkClick(event, l.href, navigate)} className="text-[13px] text-white/50 hover:text-white/80 transition-colors">{l.label}</a></li>
               ))}
             </ul>
           </div>
@@ -1037,7 +1109,7 @@ export function Footer({ linkBase = '' }: { linkBase?: string }) {
             <h5 className="text-[14px] font-semibold mb-4">法律</h5>
             <ul className="flex flex-col gap-2.5">
               {legalLinks.map(l => (
-                <li key={l.label}><a href={l.href} className="text-[13px] text-white/50 hover:text-white/80 transition-colors">{l.label}</a></li>
+                <li key={l.label}><a href={l.href} onClick={(event) => handleSiteLinkClick(event, l.href, navigate)} className="text-[13px] text-white/50 hover:text-white/80 transition-colors">{l.label}</a></li>
               ))}
             </ul>
           </div>
