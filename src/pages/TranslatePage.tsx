@@ -680,15 +680,16 @@ export default function TranslatePage() {
           <button
             onClick={handleTranslate}
             disabled={isLoading || !inputText.trim()}
-            className="flex items-center gap-2 rounded-[var(--radius-sm)] bg-[var(--color-primary)] px-5 py-2 text-[13px] font-semibold text-white transition-all active:scale-95 disabled:opacity-50"
+            aria-live="polite"
+            className="flex h-9 min-w-[104px] items-center justify-center gap-2 whitespace-nowrap rounded-[var(--radius-sm)] bg-[var(--color-primary)] px-4 py-2 text-[13px] font-semibold text-white transition-all active:scale-95 disabled:opacity-50"
           >
             {isLoading ? (
               <>
-                <Loader2 size={14} className="animate-spin" />
-                翻译中...
+                <Loader2 size={14} className="shrink-0 animate-spin" />
+                <span>翻译中…</span>
               </>
             ) : (
-              '翻译'
+              <span>翻译</span>
             )}
           </button>
         </div>
