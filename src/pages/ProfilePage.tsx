@@ -156,14 +156,14 @@ export default function ProfilePage() {
 
       {/* ===== 学习统计 ===== */}
       <div className="grid grid-cols-3 gap-2.5 mx-5 mb-5">
-        <StatCard value={String(streakDays)} label={t(lang, 'profile_days')} color="#FF8400" bgColor="#FFF5EB" />
-        <StatCard value={vocabulary.length.toLocaleString()} label={t(lang, 'profile_words')} color="#8B5CF6" bgColor="#F5F3FF" />
+        <StatCard value={String(streakDays)} label={t(lang, 'profile_days')} color="#FF8400" bgColor="rgba(255,132,0,0.1)" />
+        <StatCard value={vocabulary.length.toLocaleString()} label={t(lang, 'profile_words')} color="#8B5CF6" bgColor="rgba(139,92,246,0.1)" />
         <StatCard
           value={vocabularyLevelRecord.value}
           label={t(lang, 'profile_vocab_level')}
           helper={vocabularyLevelRecord.helper}
           color="#3B82F6"
-          bgColor="#EFF6FF"
+          bgColor="rgba(59,130,246,0.1)"
           onClick={() => navigate('/vocab-test')}
         />
       </div>
