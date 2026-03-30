@@ -1,15 +1,25 @@
 const KEYBOARD_SFX_STORAGE_KEY = 'linswift_spelling_sound'
+const KEYBOARD_SFX_TYPE_KEY = 'linswift_spelling_sound_type'
+
+export type SfxType = 'piano' | 'drum' | 'guitar' | 'marimba' | 'synth' | 'typewriter'
+
+export const SFX_OPTIONS: { value: SfxType; label: string; emoji: string }[] = [
+  { value: 'piano',      label: '钢琴',   emoji: '🎹' },
+  { value: 'guitar',     label: '吉他',   emoji: '🎸' },
+  { value: 'drum',       label: '架子鼓', emoji: '🥁' },
+  { value: 'marimba',    label: '木琴',   emoji: '🎵' },
+  { value: 'synth',      label: '合成器', emoji: '🎛️' },
+  { value: 'typewriter', label: '打字机', emoji: '⌨️' },
+]
 
 let sharedAudioContext: AudioContext | null = null
 
-function createAudioContext() {
-  const AudioCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-  return AudioCtor ? new AudioCtor() : null
-}
-
 function getAudioContext() {
   if (typeof window === 'undefined') return null
-  sharedAudioContext = sharedAudioContext || createAudioContext()
+  if (!sharedAudioContext) {
+    const Ctor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    sharedAudioContext = Ctor ? new Ctor() : null
+  }
   if (sharedAudioContext?.state === 'suspended') {
     sharedAudioContext.resume().catch(() => {})
   }
@@ -22,165 +32,354 @@ export function isKeyboardSfxEnabled() {
   return raw === null ? true : raw === '1'
 }
 
-// ── Piano note frequencies (C major pentatonic across 2 octaves) ──
-// Pentatonic scale sounds pleasant no matter which keys are hit
-const PIANO_NOTES = [
-  261.63, // C4
-  293.66, // D4
-  329.63, // E4
-  392.00, // G4
-  440.00, // A4
-  523.25, // C5
-  587.33, // D5
-  659.25, // E5
-  783.99, // G5
-  880.00, // A5
-  1046.50, // C6
-  1174.66, // D6
-  1318.51, // E6
+export function getSfxType(): SfxType {
+  if (typeof window === 'undefined') return 'piano'
+  return (localStorage.getItem(KEYBOARD_SFX_TYPE_KEY) as SfxType) || 'piano'
+}
+
+export function setSfxType(type: SfxType) {
+  localStorage.setItem(KEYBOARD_SFX_TYPE_KEY, type)
+}
+
+// ── Note mapping: C major pentatonic across 2 octaves ──
+const PENTATONIC = [
+  261.63, 293.66, 329.63, 392.00, 440.00,
+  523.25, 587.33, 659.25, 783.99, 880.00,
+  1046.50, 1174.66, 1318.51,
 ]
 
-// Map a-z to notes: QWERTY layout rows give different octave ranges
-const KEY_NOTE_MAP: Record<string, number> = {}
+const KEY_FREQ: Record<string, number> = {}
 ;(() => {
-  // Bottom row (lower notes): z x c v b n m
-  const bottom = 'zxcvbnm'
-  // Middle row (mid notes): a s d f g h j k l
-  const middle = 'asdfghjkl'
-  // Top row (higher notes): q w e r t y u i o p
-  const top = 'qwertyuiop'
-
-  bottom.split('').forEach((k, i) => {
-    KEY_NOTE_MAP[k] = PIANO_NOTES[i % PIANO_NOTES.length]
-  })
-  middle.split('').forEach((k, i) => {
-    KEY_NOTE_MAP[k] = PIANO_NOTES[(i + 3) % PIANO_NOTES.length]
-  })
-  top.split('').forEach((k, i) => {
-    KEY_NOTE_MAP[k] = PIANO_NOTES[(i + 5) % PIANO_NOTES.length]
+  const rows = ['zxcvbnm', 'asdfghjkl', 'qwertyuiop']
+  const offsets = [0, 3, 5]
+  rows.forEach((row, ri) => {
+    row.split('').forEach((k, i) => {
+      KEY_FREQ[k] = PENTATONIC[(i + offsets[ri]) % PENTATONIC.length]
+    })
   })
 })()
 
-// ── Piano voice: fundamental + harmonics with natural decay ──
-function playPianoNote(ctx: AudioContext, frequency: number, velocity = 0.7) {
+function getFreq(key: string) {
+  return KEY_FREQ[key.toLowerCase()] || 440
+}
+
+// ── Noise helper ──
+function noiseBuffer(ctx: AudioContext, len: number): AudioBuffer {
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate)
+  const d = buf.getChannelData(0)
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len)
+  return buf
+}
+
+// ════════════════════════════════════════════════
+// 1. PIANO — harmonics + hammer noise + long decay
+// ════════════════════════════════════════════════
+function playPiano(ctx: AudioContext, freq: number, vel: number) {
   const now = ctx.currentTime
   const master = ctx.createGain()
-  master.gain.setValueAtTime(0.0001, now)
   master.connect(ctx.destination)
-
-  // Harmonic structure: fundamental is loudest, overtones decay
-  const harmonics = [
-    { ratio: 1,    amp: 1.0,   decay: 0.8  },  // fundamental
-    { ratio: 2,    amp: 0.45,  decay: 0.55 },  // 2nd harmonic
-    { ratio: 3,    amp: 0.18,  decay: 0.4  },  // 3rd
-    { ratio: 4,    amp: 0.08,  decay: 0.3  },  // 4th
-    { ratio: 5.02, amp: 0.03,  decay: 0.2  },  // 5th (slightly detuned for warmth)
-  ]
-
-  const peak = 0.035 * velocity
-  const attack = 0.003
-
-  // Quick master envelope for the overall shape
-  master.gain.exponentialRampToValueAtTime(peak, now + attack)
-  master.gain.setTargetAtTime(peak * 0.6, now + attack, 0.08)
+  master.gain.setValueAtTime(0.0001, now)
+  master.gain.exponentialRampToValueAtTime(0.035 * vel, now + 0.003)
+  master.gain.setTargetAtTime(0.02 * vel, now + 0.003, 0.08)
   master.gain.setTargetAtTime(0.0001, now + 0.15, 0.25)
 
+  const harmonics = [
+    { r: 1, a: 1.0, d: 0.8 }, { r: 2, a: 0.45, d: 0.55 },
+    { r: 3, a: 0.18, d: 0.4 }, { r: 4, a: 0.08, d: 0.3 }, { r: 5.02, a: 0.03, d: 0.2 },
+  ]
   for (const h of harmonics) {
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-
-    osc.type = 'sine'
-    osc.frequency.setValueAtTime(frequency * h.ratio, now)
-    // Slight random detune for natural feel (±2 cents)
-    osc.detune.setValueAtTime((Math.random() - 0.5) * 4, now)
-
-    const harmonicPeak = h.amp
-    gain.gain.setValueAtTime(0.0001, now)
-    gain.gain.exponentialRampToValueAtTime(harmonicPeak, now + attack)
-    // Each harmonic decays at its own rate (higher harmonics die faster)
-    gain.gain.setTargetAtTime(0.0001, now + attack, h.decay)
-
-    osc.connect(gain)
-    gain.connect(master)
-    osc.start(now)
-    osc.stop(now + h.decay * 5 + 0.1)
+    const o = ctx.createOscillator()
+    const g = ctx.createGain()
+    o.type = 'sine'
+    o.frequency.setValueAtTime(freq * h.r, now)
+    o.detune.setValueAtTime((Math.random() - 0.5) * 4, now)
+    g.gain.setValueAtTime(0.0001, now)
+    g.gain.exponentialRampToValueAtTime(h.a, now + 0.003)
+    g.gain.setTargetAtTime(0.0001, now + 0.003, h.d)
+    o.connect(g).connect(master)
+    o.start(now)
+    o.stop(now + h.d * 5 + 0.1)
   }
+  // Hammer click
+  const ns = ctx.createBufferSource()
+  ns.buffer = noiseBuffer(ctx, 512)
+  const ng = ctx.createGain()
+  const nf = ctx.createBiquadFilter()
+  nf.type = 'bandpass'; nf.frequency.value = freq * 2.5; nf.Q.value = 2
+  ng.gain.setValueAtTime(0.012 * vel, now)
+  ng.gain.exponentialRampToValueAtTime(0.0001, now + 0.025)
+  ns.connect(nf).connect(ng).connect(master)
+  ns.start(now); ns.stop(now + 0.03)
+}
 
-  // Hammer knock — very short noise burst for attack realism
-  const noiseLen = 512
-  const noiseBuffer = ctx.createBuffer(1, noiseLen, ctx.sampleRate)
-  const noiseData = noiseBuffer.getChannelData(0)
-  for (let i = 0; i < noiseLen; i++) {
-    noiseData[i] = (Math.random() * 2 - 1) * (1 - i / noiseLen)
+// ════════════════════════════════════════════════
+// 2. GUITAR — plucked string (Karplus-Strong-like)
+// ════════════════════════════════════════════════
+function playGuitar(ctx: AudioContext, freq: number, vel: number) {
+  const now = ctx.currentTime
+  const master = ctx.createGain()
+  master.connect(ctx.destination)
+  master.gain.setValueAtTime(0.04 * vel, now)
+  master.gain.setTargetAtTime(0.0001, now + 0.01, 0.35)
+
+  // Fundamental + slight 2nd harmonic
+  for (const [ratio, amp] of [[1, 1.0], [2, 0.3], [3, 0.08]] as [number, number][]) {
+    const o = ctx.createOscillator()
+    const g = ctx.createGain()
+    o.type = 'triangle'
+    o.frequency.setValueAtTime(freq * ratio, now)
+    o.detune.setValueAtTime((Math.random() - 0.5) * 6, now)
+    g.gain.setValueAtTime(amp, now)
+    g.gain.setTargetAtTime(0.0001, now + 0.005, 0.2 / ratio)
+    o.connect(g).connect(master)
+    o.start(now)
+    o.stop(now + 1.5)
   }
-  const noiseSrc = ctx.createBufferSource()
-  noiseSrc.buffer = noiseBuffer
-  const noiseGain = ctx.createGain()
-  const noiseFilter = ctx.createBiquadFilter()
-  noiseFilter.type = 'bandpass'
-  noiseFilter.frequency.setValueAtTime(frequency * 2.5, now)
-  noiseFilter.Q.setValueAtTime(2, now)
-  noiseGain.gain.setValueAtTime(0.012 * velocity, now)
-  noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.025)
-  noiseSrc.connect(noiseFilter)
-  noiseFilter.connect(noiseGain)
-  noiseGain.connect(master)
-  noiseSrc.start(now)
-  noiseSrc.stop(now + 0.03)
+  // Pluck transient — short noise filtered to body resonance
+  const ns = ctx.createBufferSource()
+  ns.buffer = noiseBuffer(ctx, 256)
+  const ng = ctx.createGain()
+  const nf = ctx.createBiquadFilter()
+  nf.type = 'bandpass'; nf.frequency.value = freq * 1.5; nf.Q.value = 1.5
+  ng.gain.setValueAtTime(0.025 * vel, now)
+  ng.gain.exponentialRampToValueAtTime(0.0001, now + 0.015)
+  ns.connect(nf).connect(ng).connect(master)
+  ns.start(now); ns.stop(now + 0.02)
+}
+
+// ════════════════════════════════════════════════
+// 3. DRUM — kick/snare/hat based on keyboard row
+// ════════════════════════════════════════════════
+function playDrum(ctx: AudioContext, freq: number, vel: number) {
+  const now = ctx.currentTime
+  // Use frequency range to pick drum type
+  // Low freq → kick, mid → snare, high → hi-hat
+  if (freq < 350) {
+    // Kick drum
+    const o = ctx.createOscillator()
+    const g = ctx.createGain()
+    o.type = 'sine'
+    o.frequency.setValueAtTime(150, now)
+    o.frequency.exponentialRampToValueAtTime(40, now + 0.12)
+    g.gain.setValueAtTime(0.06 * vel, now)
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.2)
+    o.connect(g).connect(ctx.destination)
+    o.start(now); o.stop(now + 0.25)
+    // Punch noise
+    const ns = ctx.createBufferSource()
+    ns.buffer = noiseBuffer(ctx, 128)
+    const ng = ctx.createGain()
+    ng.gain.setValueAtTime(0.02 * vel, now)
+    ng.gain.exponentialRampToValueAtTime(0.0001, now + 0.03)
+    ns.connect(ng).connect(ctx.destination)
+    ns.start(now); ns.stop(now + 0.04)
+  } else if (freq < 700) {
+    // Snare
+    const o = ctx.createOscillator()
+    const g = ctx.createGain()
+    o.type = 'triangle'
+    o.frequency.setValueAtTime(200 + Math.random() * 40, now)
+    g.gain.setValueAtTime(0.03 * vel, now)
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.1)
+    o.connect(g).connect(ctx.destination)
+    o.start(now); o.stop(now + 0.12)
+    // Snare rattle (noise)
+    const ns = ctx.createBufferSource()
+    ns.buffer = noiseBuffer(ctx, 2048)
+    const nf = ctx.createBiquadFilter()
+    nf.type = 'highpass'; nf.frequency.value = 2000
+    const ng = ctx.createGain()
+    ng.gain.setValueAtTime(0.035 * vel, now)
+    ng.gain.exponentialRampToValueAtTime(0.0001, now + 0.08)
+    ns.connect(nf).connect(ng).connect(ctx.destination)
+    ns.start(now); ns.stop(now + 0.1)
+  } else {
+    // Hi-hat
+    const ns = ctx.createBufferSource()
+    ns.buffer = noiseBuffer(ctx, 1024)
+    const nf = ctx.createBiquadFilter()
+    nf.type = 'highpass'; nf.frequency.value = 6000
+    const ng = ctx.createGain()
+    ng.gain.setValueAtTime(0.025 * vel, now)
+    ng.gain.exponentialRampToValueAtTime(0.0001, now + 0.04)
+    ns.connect(nf).connect(ng).connect(ctx.destination)
+    ns.start(now); ns.stop(now + 0.05)
+  }
+}
+
+// ════════════════════════════════════════════════
+// 4. MARIMBA — wooden mallet hit, warm sine + fast decay
+// ════════════════════════════════════════════════
+function playMarimba(ctx: AudioContext, freq: number, vel: number) {
+  const now = ctx.currentTime
+  const master = ctx.createGain()
+  master.connect(ctx.destination)
+  master.gain.setValueAtTime(0.0001, now)
+  master.gain.exponentialRampToValueAtTime(0.045 * vel, now + 0.002)
+  master.gain.setTargetAtTime(0.0001, now + 0.002, 0.18)
+
+  // Fundamental (strong)
+  const o1 = ctx.createOscillator()
+  o1.type = 'sine'
+  o1.frequency.setValueAtTime(freq, now)
+  const g1 = ctx.createGain()
+  g1.gain.setValueAtTime(1.0, now)
+  g1.gain.setTargetAtTime(0.0001, now, 0.3)
+  o1.connect(g1).connect(master)
+  o1.start(now); o1.stop(now + 1.5)
+
+  // 4x harmonic (characteristic marimba overtone)
+  const o2 = ctx.createOscillator()
+  o2.type = 'sine'
+  o2.frequency.setValueAtTime(freq * 4, now)
+  const g2 = ctx.createGain()
+  g2.gain.setValueAtTime(0.25, now)
+  g2.gain.setTargetAtTime(0.0001, now, 0.08)
+  o2.connect(g2).connect(master)
+  o2.start(now); o2.stop(now + 0.5)
+
+  // 10x harmonic (brightness)
+  const o3 = ctx.createOscillator()
+  o3.type = 'sine'
+  o3.frequency.setValueAtTime(freq * 9.95, now)
+  const g3 = ctx.createGain()
+  g3.gain.setValueAtTime(0.06, now)
+  g3.gain.setTargetAtTime(0.0001, now, 0.03)
+  o3.connect(g3).connect(master)
+  o3.start(now); o3.stop(now + 0.2)
+
+  // Mallet thump
+  const ns = ctx.createBufferSource()
+  ns.buffer = noiseBuffer(ctx, 128)
+  const ng = ctx.createGain()
+  const nf = ctx.createBiquadFilter()
+  nf.type = 'lowpass'; nf.frequency.value = 800
+  ng.gain.setValueAtTime(0.02 * vel, now)
+  ng.gain.exponentialRampToValueAtTime(0.0001, now + 0.012)
+  ns.connect(nf).connect(ng).connect(master)
+  ns.start(now); ns.stop(now + 0.02)
+}
+
+// ════════════════════════════════════════════════
+// 5. SYNTH — retro sawtooth with filter sweep
+// ════════════════════════════════════════════════
+function playSynth(ctx: AudioContext, freq: number, vel: number) {
+  const now = ctx.currentTime
+  const o = ctx.createOscillator()
+  o.type = 'sawtooth'
+  o.frequency.setValueAtTime(freq, now)
+  o.detune.setValueAtTime((Math.random() - 0.5) * 10, now)
+
+  const filter = ctx.createBiquadFilter()
+  filter.type = 'lowpass'
+  filter.frequency.setValueAtTime(freq * 6, now)
+  filter.frequency.exponentialRampToValueAtTime(freq * 1.2, now + 0.2)
+  filter.Q.setValueAtTime(3, now)
+
+  const g = ctx.createGain()
+  g.gain.setValueAtTime(0.0001, now)
+  g.gain.exponentialRampToValueAtTime(0.03 * vel, now + 0.005)
+  g.gain.setTargetAtTime(0.02 * vel, now + 0.005, 0.05)
+  g.gain.setTargetAtTime(0.0001, now + 0.1, 0.12)
+
+  // Sub oscillator for thickness
+  const sub = ctx.createOscillator()
+  sub.type = 'square'
+  sub.frequency.setValueAtTime(freq * 0.5, now)
+  const sg = ctx.createGain()
+  sg.gain.setValueAtTime(0.3, now)
+
+  o.connect(filter)
+  sub.connect(sg).connect(filter)
+  filter.connect(g).connect(ctx.destination)
+  o.start(now); o.stop(now + 0.8)
+  sub.start(now); sub.stop(now + 0.8)
+}
+
+// ════════════════════════════════════════════════
+// 6. TYPEWRITER — mechanical click + bell
+// ════════════════════════════════════════════════
+function playTypewriter(ctx: AudioContext, _freq: number, vel: number) {
+  const now = ctx.currentTime
+  // Mechanical click — short filtered noise
+  const ns = ctx.createBufferSource()
+  ns.buffer = noiseBuffer(ctx, 256)
+  const nf = ctx.createBiquadFilter()
+  nf.type = 'bandpass'
+  nf.frequency.setValueAtTime(3000 + Math.random() * 1000, now)
+  nf.Q.setValueAtTime(4, now)
+  const ng = ctx.createGain()
+  ng.gain.setValueAtTime(0.04 * vel, now)
+  ng.gain.exponentialRampToValueAtTime(0.0001, now + 0.02)
+  ns.connect(nf).connect(ng).connect(ctx.destination)
+  ns.start(now); ns.stop(now + 0.025)
+
+  // Mechanical lever thud
+  const o = ctx.createOscillator()
+  o.type = 'sine'
+  o.frequency.setValueAtTime(400 + Math.random() * 100, now)
+  o.frequency.exponentialRampToValueAtTime(120, now + 0.03)
+  const g = ctx.createGain()
+  g.gain.setValueAtTime(0.015 * vel, now)
+  g.gain.exponentialRampToValueAtTime(0.0001, now + 0.035)
+  o.connect(g).connect(ctx.destination)
+  o.start(now); o.stop(now + 0.04)
+}
+
+// ── Dispatcher ──
+const PLAYERS: Record<SfxType, (ctx: AudioContext, freq: number, vel: number) => void> = {
+  piano: playPiano,
+  guitar: playGuitar,
+  drum: playDrum,
+  marimba: playMarimba,
+  synth: playSynth,
+  typewriter: playTypewriter,
 }
 
 export function playKeyboardTapSound(key: string, _sequence = 0) {
   if (!isKeyboardSfxEnabled()) return
-
   const ctx = getAudioContext()
   if (!ctx) return
 
   const lower = key.toLowerCase()
-
   if (lower === 'backspace') {
-    // Soft muted thud for delete
     const now = ctx.currentTime
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-    osc.type = 'sine'
-    osc.frequency.setValueAtTime(160, now)
-    osc.frequency.exponentialRampToValueAtTime(80, now + 0.06)
-    gain.gain.setValueAtTime(0.015, now)
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.06)
-    osc.connect(gain)
-    gain.connect(ctx.destination)
-    osc.start(now)
-    osc.stop(now + 0.07)
+    const o = ctx.createOscillator()
+    const g = ctx.createGain()
+    o.type = 'sine'
+    o.frequency.setValueAtTime(160, now)
+    o.frequency.exponentialRampToValueAtTime(80, now + 0.06)
+    g.gain.setValueAtTime(0.015, now)
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.06)
+    o.connect(g).connect(ctx.destination)
+    o.start(now); o.stop(now + 0.07)
     return
   }
 
   if (!/^[a-z]$/.test(lower)) return
 
-  const freq = KEY_NOTE_MAP[lower] || 440
-  // Slight velocity variation for natural feel
-  const velocity = 0.6 + Math.random() * 0.35
-  playPianoNote(ctx, freq, velocity)
+  const freq = getFreq(lower)
+  const vel = 0.6 + Math.random() * 0.35
+  const type = getSfxType()
+  PLAYERS[type](ctx, freq, vel)
 }
 
 export function playKeyboardSuccessSound(isFinal = false) {
   if (!isKeyboardSfxEnabled()) return
-
   const ctx = getAudioContext()
   if (!ctx) return
 
-  // Play a pleasant chord: C major (or C major 7th for final)
-  const baseVelocity = 0.5
+  const type = getSfxType()
+  const play = PLAYERS[type]
   if (isFinal) {
-    // C-E-G-C (bright major chord, higher octave)
-    playPianoNote(ctx, 523.25, baseVelocity)
-    setTimeout(() => playPianoNote(ctx, 659.25, baseVelocity * 0.8), 30)
-    setTimeout(() => playPianoNote(ctx, 783.99, baseVelocity * 0.7), 60)
-    setTimeout(() => playPianoNote(ctx, 1046.50, baseVelocity * 0.9), 90)
+    play(ctx, 523.25, 0.5)
+    setTimeout(() => play(ctx, 659.25, 0.4), 30)
+    setTimeout(() => play(ctx, 783.99, 0.35), 60)
+    setTimeout(() => play(ctx, 1046.50, 0.45), 90)
   } else {
-    // G-B arpeggio (quick two-note)
-    playPianoNote(ctx, 392.00, baseVelocity * 0.7)
-    setTimeout(() => playPianoNote(ctx, 493.88, baseVelocity * 0.8), 50)
+    play(ctx, 392.00, 0.35)
+    setTimeout(() => play(ctx, 493.88, 0.4), 50)
   }
 }
 
-export { KEYBOARD_SFX_STORAGE_KEY }
+export { KEYBOARD_SFX_STORAGE_KEY, KEYBOARD_SFX_TYPE_KEY }
