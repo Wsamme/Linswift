@@ -276,21 +276,23 @@ export default function MobileFlashcardThreeDeck({
         </div>
       </div>
 
-      {/* Edge gradient glow — red left, green right */}
+      {/* Edge gradient glow — fixed to screen edges, full height */}
       <div
-        className="pointer-events-none absolute inset-y-0 left-0 w-3 rounded-l-[4px]"
+        className="pointer-events-none fixed inset-y-0 left-0 z-50"
         style={{
-          background: `linear-gradient(to right, rgba(239,68,68,${swipeIntent === 'unknown' ? 0.3 + swipeProgress * 0.6 : 0}), transparent)`,
-          boxShadow: swipeIntent === 'unknown' ? `inset 2px 0 12px rgba(239,68,68,${swipeProgress * 0.5})` : 'none',
-          transition: 'all 0.15s ease',
+          width: 40 + swipeProgress * 20,
+          background: `linear-gradient(to right, rgba(239,68,68,${swipeIntent === 'unknown' ? 0.35 + swipeProgress * 0.55 : 0}), transparent)`,
+          boxShadow: swipeIntent === 'unknown' ? `0 0 ${24 + swipeProgress * 24}px rgba(239,68,68,${swipeProgress * 0.4})` : 'none',
+          transition: swipeIntent === 'unknown' ? 'none' : 'all 0.2s ease',
         }}
       />
       <div
-        className="pointer-events-none absolute inset-y-0 right-0 w-3 rounded-r-[4px]"
+        className="pointer-events-none fixed inset-y-0 right-0 z-50"
         style={{
-          background: `linear-gradient(to left, rgba(34,197,94,${swipeIntent === 'know' ? 0.3 + swipeProgress * 0.6 : 0}), transparent)`,
-          boxShadow: swipeIntent === 'know' ? `inset -2px 0 12px rgba(34,197,94,${swipeProgress * 0.5})` : 'none',
-          transition: 'all 0.15s ease',
+          width: 40 + swipeProgress * 20,
+          background: `linear-gradient(to left, rgba(34,197,94,${swipeIntent === 'know' ? 0.35 + swipeProgress * 0.55 : 0}), transparent)`,
+          boxShadow: swipeIntent === 'know' ? `0 0 ${24 + swipeProgress * 24}px rgba(34,197,94,${swipeProgress * 0.4})` : 'none',
+          transition: swipeIntent === 'know' ? 'none' : 'all 0.2s ease',
         }}
       />
     </div>
