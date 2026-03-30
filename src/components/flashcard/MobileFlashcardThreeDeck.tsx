@@ -1,6 +1,5 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
-import { Volume2, Lightbulb, Loader2 } from 'lucide-react'
-import { speakAuto } from '../../lib/tts'
+import { Lightbulb, Loader2 } from 'lucide-react'
 
 interface FlashcardContent {
   word: string
