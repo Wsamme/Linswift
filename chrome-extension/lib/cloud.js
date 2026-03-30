@@ -156,6 +156,90 @@ export async function fetchUserVocabulary(accessToken, userId, limit = 500) {
   return parseResponse(response)
 }
 
+function normalizePositiveInteger(value) {
+  const normalized = Math.round(Number(value))
+  return Number.isFinite(normalized) && normalized > 0 ? normalized : null
+}
+
+async function fetchLatestVocabularyTestResult(accessToken, userId) {
+  const response = await fetch(
+    restUrl('vocab_test_results', {
+      select: 'estimated_vocabulary,created_at',
+      user_id: `eq.${userId}`,
+      order: 'created_at.desc',
+      limit: 1,
+    }),
+    {
+      headers: buildHeaders(accessToken),
+    }
+  )
+
+  return parseResponse(response)
+}
+
+async function fetchProfileVocabularyCount(accessToken, userId) {
+  const response = await fetch(
+    restUrl('profiles', {
+      select: 'vocabulary_count',
+      id: `eq.${userId}`,
+      limit: 1,
+    }),
+    {
+      headers: buildHeaders(accessToken),
+    }
+  )
+
+  return parseResponse(response)
+}
+
+export async function fetchVocabularyEstimate(accessToken, userId) {
+  if (!accessToken || !userId) {
+    return {
+      estimatedVocabulary: null,
+      source: null,
+      testedAt: null,
+    }
+  }
+
+  const [latestResultResponse, profileResponse] = await Promise.allSettled([
+    fetchLatestVocabularyTestResult(accessToken, userId),
+    fetchProfileVocabularyCount(accessToken, userId),
+  ])
+
+  const latestResult =
+    latestResultResponse.status === 'fulfilled'
+      ? latestResultResponse.value?.[0] || null
+      : null
+  const profile =
+    profileResponse.status === 'fulfilled'
+      ? profileResponse.value?.[0] || null
+      : null
+
+  const latestEstimate = normalizePositiveInteger(latestResult?.estimated_vocabulary)
+  if (latestEstimate !== null) {
+    return {
+      estimatedVocabulary: latestEstimate,
+      source: 'vocab_test_results',
+      testedAt: latestResult?.created_at || null,
+    }
+  }
+
+  const profileEstimate = normalizePositiveInteger(profile?.vocabulary_count)
+  if (profileEstimate !== null) {
+    return {
+      estimatedVocabulary: profileEstimate,
+      source: 'profiles.vocabulary_count',
+      testedAt: null,
+    }
+  }
+
+  return {
+    estimatedVocabulary: null,
+    source: null,
+    testedAt: latestResult?.created_at || null,
+  }
+}
+
 export async function upsertVocabularyEntries(accessToken, entries) {
   if (!Array.isArray(entries) || entries.length === 0) return []
 

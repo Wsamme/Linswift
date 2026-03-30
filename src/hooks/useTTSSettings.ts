@@ -15,6 +15,7 @@ import {
   DEFAULT_TTS_SETTINGS,
   loadTTSSettings,
   saveTTSSettings,
+  findPreferredVoiceByLang,
   speakEnglish,
   stopSpeaking,
   waitForVoices,
@@ -86,6 +87,10 @@ export function useTTSSettings() {
     speakEnglish(sampleText)
   }, [])
 
+  const preferredVoice = voices.length > 0
+    ? findPreferredVoiceByLang(settings.accent)
+    : null
+
   /**
    * 重置所有设置为默认值
    */
@@ -104,6 +109,7 @@ export function useTTSSettings() {
   return {
     settings,          // 当前的完整设置对象
     voices,            // 可用的语音列表
+    preferredVoice,    // 当前口音对应的最佳语音
     updateSettings,    // 更新部分设置
     setAccent,         // 快捷：设置口音
     setRate,           // 快捷：设置语速

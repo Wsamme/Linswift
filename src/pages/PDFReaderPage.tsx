@@ -32,6 +32,13 @@ import { useVocabulary } from '../hooks/useVocabulary'
 import { useAuth } from '../contexts/AuthContext'
 import { useLogicalBack } from '../hooks/useLogicalBack'
 import { navigateSafely } from '../lib/navigation'
+import {
+  DAILY_GOAL_MAX,
+  DAILY_GOAL_MIN,
+  loadLearnSettings,
+  normalizeDailyGoal,
+  saveLearnSettings,
+} from '../lib/learnSettings'
 
 // ===== 阅读器设置类型 =====
 const READER_SETTINGS_KEY = 'linswift_reader_settings'
@@ -105,22 +112,35 @@ const MODE_OPTIONS = [
 
 function loadReaderSettings(): ReaderSettings {
   try {
+    const learnSettings = loadLearnSettings()
     const raw = localStorage.getItem(READER_SETTINGS_KEY)
-    return raw ? { ...DEFAULT_READER_SETTINGS, ...JSON.parse(raw) } : { ...DEFAULT_READER_SETTINGS }
+    const parsed = raw ? JSON.parse(raw) as Partial<ReaderSettings> : {}
+    return {
+      ...DEFAULT_READER_SETTINGS,
+      ...parsed,
+      dailyGoal: normalizeDailyGoal(learnSettings.dailyGoal ?? parsed.dailyGoal),
+      learningMode: learnSettings.learningMode ?? parsed.learningMode ?? DEFAULT_READER_SETTINGS.learningMode,
+      showExamples: learnSettings.showExamples ?? parsed.showExamples ?? DEFAULT_READER_SETTINGS.showExamples,
+      reviewReminder: learnSettings.reviewReminder ?? parsed.reviewReminder ?? DEFAULT_READER_SETTINGS.reviewReminder,
+    }
   } catch {
     return { ...DEFAULT_READER_SETTINGS }
   }
 }
 
 function saveReaderSettings(s: ReaderSettings) {
-  localStorage.setItem(READER_SETTINGS_KEY, JSON.stringify(s))
-  // 同时写入旧的学习设置 key（保持兼容）
-  localStorage.setItem('linswift_learn_settings', JSON.stringify({
-    dailyGoal: s.dailyGoal,
-    learningMode: s.learningMode,
-    showExamples: s.showExamples,
-    reviewReminder: s.reviewReminder,
-  }))
+  const normalized = {
+    ...s,
+    dailyGoal: normalizeDailyGoal(s.dailyGoal),
+  }
+  localStorage.setItem(READER_SETTINGS_KEY, JSON.stringify(normalized))
+  saveLearnSettings({
+    ...loadLearnSettings(),
+    dailyGoal: normalized.dailyGoal,
+    learningMode: normalized.learningMode,
+    showExamples: normalized.showExamples,
+    reviewReminder: normalized.reviewReminder,
+  })
 }
 
 /**
@@ -198,12 +218,26 @@ export default function PDFReaderPage() {
 
   // ===== 阅读器设置 =====
   const [readerSettings, setReaderSettings] = useState<ReaderSettings>(loadReaderSettings)
+  const [readerGoalDraft, setReaderGoalDraft] = useState(() => String(loadReaderSettings().dailyGoal))
   const updateReaderSettings = (partial: Partial<ReaderSettings>) => {
     setReaderSettings(prev => {
       const next = { ...prev, ...partial }
       saveReaderSettings(next)
       return next
     })
+  }
+  useEffect(() => {
+    setReaderGoalDraft(String(readerSettings.dailyGoal))
+  }, [readerSettings.dailyGoal])
+
+  const applyReaderDailyGoal = (value: string | number) => {
+    const nextGoal = normalizeDailyGoal(value)
+    setReaderGoalDraft(String(nextGoal))
+    updateReaderSettings({ dailyGoal: nextGoal })
+  }
+
+  const adjustReaderDailyGoal = (delta: number) => {
+    applyReaderDailyGoal(readerSettings.dailyGoal + delta)
   }
   // ===== UI 状态 =====
   const [showSettings, setShowSettings] = useState(false)
@@ -1431,6 +1465,40 @@ export default function PDFReaderPage() {
                         </button>
                       ))}
                     </div>
+                    <div className="mt-2 grid grid-cols-[56px_minmax(0,1fr)_56px] gap-2">
+                      <button
+                        type="button"
+                        onClick={() => adjustReaderDailyGoal(-5)}
+                        className="rounded-lg bg-white/10 py-2 text-[12px] font-medium text-white/70 transition-colors hover:bg-white/15"
+                      >
+                        -5
+                      </button>
+                      <input
+                        type="number"
+                        min={DAILY_GOAL_MIN}
+                        max={DAILY_GOAL_MAX}
+                        step={1}
+                        inputMode="numeric"
+                        value={readerGoalDraft}
+                        onChange={(event) => setReaderGoalDraft(event.target.value)}
+                        onBlur={() => applyReaderDailyGoal(readerGoalDraft)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.currentTarget.blur()
+                          }
+                        }}
+                        className="rounded-lg bg-white/10 px-3 py-2 text-center text-[13px] font-medium text-white outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                        placeholder="自定义"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => adjustReaderDailyGoal(5)}
+                        className="rounded-lg bg-white/10 py-2 text-[12px] font-medium text-white/70 transition-colors hover:bg-white/15"
+                      >
+                        +5
+                      </button>
+                    </div>
+                    <p className="mt-2 text-[11px] text-white/30">也可以自定义每天新学词数，系统会按这个上限分配新词。</p>
                   </div>
 
                   {/* 学习模式 */}

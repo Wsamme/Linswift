@@ -37,12 +37,17 @@ export function useStudyRecords() {
     queryFn: async () => {
       if (!user) return null
       const today = new Date().toISOString().split('T')[0]
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('study_records')
         .select('*')
         .eq('user_id', user.id)
         .eq('study_date', today)
-        .single()
+        .maybeSingle()
+
+      if (error) {
+        throw new Error(error.message)
+      }
+
       return data ?? null
     },
     enabled: !!user,

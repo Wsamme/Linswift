@@ -46,6 +46,29 @@ export const DEFAULT_TTS_SETTINGS: TTSSettings = {
 }
 
 const STORAGE_KEY = 'linswift_tts_settings'
+const NOVELTY_ENGLISH_VOICE_NAMES = [
+  'bad news',
+  'bahh',
+  'bells',
+  'boing',
+  'bubbles',
+  'cellos',
+  'fred',
+  'good news',
+  'jester',
+  'organ',
+  'superstar',
+  'trinoids',
+  'whisper',
+  'wobble',
+  'zarvox',
+] as const
+
+const PREFERRED_ENGLISH_VOICE_NAMES: Record<AccentType, string[]> = {
+  'en-US': ['samantha', 'allison', 'ava', 'sandy', 'shelley', 'reed', 'rocko', 'flo', 'eddy', 'kathy', 'albert'],
+  'en-GB': ['daniel', 'serena', 'arthur', 'sandy', 'shelley', 'reed', 'rocko', 'flo', 'eddy'],
+  'en-AU': ['karen', 'lee', 'olivia'],
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
@@ -120,19 +143,61 @@ export function waitForVoices(): Promise<SpeechSynthesisVoice[]> {
   })
 }
 
+function scoreEnglishVoice(voice: SpeechSynthesisVoice, accent: AccentType): number {
+  const lowerName = voice.name.trim().toLowerCase()
+  const preferredNames = PREFERRED_ENGLISH_VOICE_NAMES[accent]
+  let score = 0
+
+  if (voice.lang === accent) score += 500
+  else if (voice.lang.startsWith(accent.split('-')[0])) score += 180
+
+  if (voice.localService) score += 60
+  if (voice.default) score += 20
+
+  const preferredIndex = preferredNames.findIndex((name) => lowerName.includes(name))
+  if (preferredIndex >= 0) {
+    score += 220 - preferredIndex * 8
+  }
+
+  if (NOVELTY_ENGLISH_VOICE_NAMES.some((name) => lowerName.includes(name))) {
+    score -= 500
+  }
+
+  return score
+}
+
 function findBestVoice(accent: AccentType): SpeechSynthesisVoice | null {
   const voices = getAvailableVoices()
   if (voices.length === 0) return null
 
-  const exact = voices.find(v => v.lang === accent)
+  const ranked = voices
+    .filter((voice) => voice.lang.startsWith('en'))
+    .map((voice) => ({ voice, score: scoreEnglishVoice(voice, accent) }))
+    .sort((left, right) => right.score - left.score)
+
+  return ranked[0]?.voice || null
+}
+
+export function findPreferredVoiceByLang(languageCode: string): SpeechSynthesisVoice | null {
+  const normalized = String(languageCode || '').trim()
+  if (!normalized) return null
+
+  if (normalized === 'en-US' || normalized === 'en-GB' || normalized === 'en-AU') {
+    return findBestVoice(normalized)
+  }
+
+  const voices = getAvailableVoices()
+  const exactLocal = voices.find((voice) => voice.lang === normalized && voice.localService)
+  if (exactLocal) return exactLocal
+
+  const exact = voices.find((voice) => voice.lang === normalized)
   if (exact) return exact
 
-  const prefix = accent.split('-')[0]
-  const partial = voices.find(v => v.lang.startsWith(prefix) && v.localService)
-  if (partial) return partial
+  const prefix = normalized.split('-')[0]
+  const prefixLocal = voices.find((voice) => voice.lang.startsWith(prefix) && voice.localService)
+  if (prefixLocal) return prefixLocal
 
-  const anyEn = voices.find(v => v.lang.startsWith('en'))
-  return anyEn || null
+  return voices.find((voice) => voice.lang.startsWith(prefix)) || null
 }
 
 function findChineseVoice(): SpeechSynthesisVoice | null {

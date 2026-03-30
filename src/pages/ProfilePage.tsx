@@ -25,6 +25,7 @@ import { t, useAppLanguage } from '../lib/i18n'
 import { VOCAB_LEVEL_TARGETS } from '../data/vocab-test/openSourceVocab'
 
 // 设置菜单项 —— 学习设置已集成到 PDF 阅读器中
+// 系统后台仅通过直接 URL /admin/overview 访问，不对普通用户展示
 const menuItems = [
   { icon: '🔔', label: '提醒通知', desc: '推送通知管理', path: '/notification-settings' },
   { icon: '🎨', label: '主题设置', desc: '外观、字体、语言', path: '/theme-settings' },
@@ -43,7 +44,7 @@ export default function ProfilePage() {
   const [streakDays, setStreakDays] = useState(0)
 
   const themeDesc = settings.mode === 'system'
-    ? (lang === 'en' ? 'System' : lang === 'ja' ? 'システム' : '跟随系统')
+    ? (lang === 'en' ? 'Follow Browser' : lang === 'ja' ? 'ブラウザに従う' : '跟随浏览器')
     : settings.mode === 'dark'
       ? (lang === 'en' ? 'Dark' : lang === 'ja' ? 'ダーク' : '深色模式')
       : (lang === 'en' ? 'Light' : lang === 'ja' ? 'ライト' : '浅色模式')

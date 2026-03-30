@@ -1,14 +1,20 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { ChevronLeft, Volume2, RotateCcw, Check, HelpCircle, X, VolumeX } from 'lucide-react'
+import { ChevronLeft, Volume2, RotateCcw, Check, HelpCircle, X, VolumeX, Lightbulb, Loader2 } from 'lucide-react'
 import { useVocabulary } from '../hooks/useVocabulary'
 import { useStudyRecords } from '../hooks/useStudyRecords'
 import { calculateNextReview, getReviewCycleDaysFromLocalStorage } from '../lib/ebbinghaus'
+import { getDailyNewWordGoal } from '../lib/learnSettings'
 import { speakAuto } from '../lib/tts'
-import { type UserBook } from '../lib/supabase'
-import { analyzeUnfamiliarWords, type UnfamiliarWord } from '../services/gemini'
+import { supabase, type UserBook, type UserVocabulary, type UserVocabSet } from '../lib/supabase'
+import { analyzeUnfamiliarWords, getFlashcardMnemonic, type UnfamiliarWord } from '../services/gemini'
 import { useLogicalBack } from '../hooks/useLogicalBack'
 import { fetchResolvedUserBook, getBookAnalysisExcerpt } from '../lib/books'
+import { useAuth } from '../contexts/AuthContext'
+import { getVocabSetLearnSettings } from '../lib/vocabSetLearnSettings'
+import { buildTodayStudyQueue } from '../lib/vocabStudyQueue'
+import { useMediaQuery } from '../hooks/useMediaQuery'
+import MobileFlashcardThreeDeck from '../components/flashcard/MobileFlashcardThreeDeck'
 
 /**
  * 卡片学习页 —— 阅读器模块
@@ -26,13 +32,18 @@ interface StudyCard {
   phonetic: string
   meaning: string
   example: string
+  mnemonic?: string
 }
 
 const FLASHCARD_AUTO_AUDIO_KEY = 'linswift_flashcard_auto_audio'
 export default function FlashcardPage() {
   const goBack = useLogicalBack('/ebbinghaus')
+  const isDesktop = useMediaQuery('(min-width: 768px)')
   const [searchParams] = useSearchParams()
   const bookId = searchParams.get('bookId')
+  const setId = searchParams.get('setId')
+  const { user } = useAuth()
+  const dailyNewWordGoal = getDailyNewWordGoal()
   const { vocabulary, loading, fetchVocabulary, addReviewsBulk, updateNextReviewBulk } = useVocabulary()
   const { appendStudy } = useStudyRecords()
   const [currentIndex, setCurrentIndex] = useState(0)
@@ -44,17 +55,22 @@ export default function FlashcardPage() {
   })
   const [bookCards, setBookCards] = useState<StudyCard[] | null>(null)
   const [loadingBookCards, setLoadingBookCards] = useState(false)
+  const [setCards, setSetCards] = useState<StudyCard[] | null>(null)
+  const [setStudyRows, setSetStudyRows] = useState<UserVocabulary[]>([])
+  const [loadingSetCards, setLoadingSetCards] = useState(false)
+  const [mnemonicMap, setMnemonicMap] = useState<Record<string, string>>({})
+  const [mnemonicLoadingMap, setMnemonicLoadingMap] = useState<Record<string, boolean>>({})
   const pendingReviewsRef = useRef<Array<{ vocabularyId: number; result: 'known' | 'fuzzy' | 'unknown'; reviewType: string }>>([])
   const pendingProgressRef = useRef<Array<{ id: number; nextReviewAt: string | null; reviewCount: number; masteryLevel: number }>>([])
   const flushedRef = useRef(false)
 
   // 仅“无 bookId”时，才使用全局词库逻辑（兼容旧入口）
   useEffect(() => {
-    if (!bookId) {
+    if (!bookId && !setId) {
       // 全局词库模式读取“今天整天的学习任务”，与艾宾浩斯看板口径一致
       fetchVocabulary('today')
     }
-  }, [bookId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [bookId, setId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // “阅读准备页 -> 词汇学习”专用：优先使用阅读准备页缓存的同一批词
   useEffect(() => {
@@ -102,25 +118,129 @@ export default function FlashcardPage() {
     loadBookWords()
   }, [bookId])
 
+  useEffect(() => {
+    async function loadSetStudyCards() {
+      if (!setId || bookId || !user) {
+        setLoadingSetCards(false)
+        setSetCards(null)
+        setSetStudyRows([])
+        return
+      }
+
+      const parsedSetId = parseInt(setId, 10)
+      if (Number.isNaN(parsedSetId)) {
+        setLoadingSetCards(false)
+        setSetCards([])
+        setSetStudyRows([])
+        return
+      }
+
+      setLoadingSetCards(true)
+      try {
+        const { data: setMeta } = await supabase
+          .from('user_vocab_sets')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('id', parsedSetId)
+          .maybeSingle<UserVocabSet>()
+
+        const { data: mappingRows, error: mappingError } = await supabase
+          .from('user_vocab_set_words')
+          .select('vocabulary_id')
+          .eq('user_id', user.id)
+          .eq('set_id', parsedSetId)
+          .order('created_at', { ascending: true })
+
+        if (mappingError) throw mappingError
+
+        const vocabularyIds = Array.from(
+          new Set(
+            (mappingRows || [])
+              .map((row: { vocabulary_id: number | string | null }) => Number(row.vocabulary_id))
+              .filter(Boolean)
+          )
+        )
+
+        if (vocabularyIds.length === 0) {
+          setSetStudyRows([])
+          setSetCards([])
+          return
+        }
+
+        const { data: rows, error: rowsError } = await supabase
+          .from('user_vocabulary')
+          .select('*')
+          .eq('user_id', user.id)
+          .lt('mastery_level', 5)
+          .in('id', vocabularyIds)
+
+        if (rowsError) throw rowsError
+
+        const persistedDailyGoal = Number(setMeta?.daily_new_goal)
+        const queueRows = buildTodayStudyQueue(
+          (rows || []) as UserVocabulary[],
+          getVocabSetLearnSettings(
+            user.id,
+            parsedSetId,
+            dailyNewWordGoal,
+            {
+              dailyGoal: Number.isFinite(persistedDailyGoal) && persistedDailyGoal > 0
+                ? persistedDailyGoal
+                : undefined,
+            }
+          ).dailyGoal
+        ).queue
+
+        setSetStudyRows(queueRows)
+        setSetCards(queueRows.map((item) => ({
+          id: item.id,
+          word: item.word,
+          phonetic: item.phonetic || '',
+          meaning: item.meaning || '',
+          example: item.example_sentence || '',
+        })))
+      } catch {
+        setSetStudyRows([])
+        setSetCards([])
+      } finally {
+        setLoadingSetCards(false)
+      }
+    }
+
+    loadSetStudyCards()
+  }, [setId, bookId, user, dailyNewWordGoal])
+
   // 词卡来源优先级：
   // 1) 有 bookId：使用书籍专属词卡（和“建议先学习词汇”一致）
   // 2) 无 bookId：沿用原有全局词库/Mock 逻辑
-  const fallbackCards: StudyCard[] = vocabulary.length > 0
-    ? vocabulary
-      .filter(v => (v.mastery_level ?? 0) < 5)
-      .map(v => ({
-        id: v.id,
-        word: v.word,
-        phonetic: v.phonetic || '',
-        meaning: v.meaning || '',
-        example: v.example_sentence || '',
-      }))
-    : []
+  const fallbackCards = useMemo<StudyCard[]>(() => (
+    vocabulary.length > 0
+      ? vocabulary
+        .filter(v => (v.mastery_level ?? 0) < 5)
+        .map(v => ({
+          id: v.id,
+          word: v.word,
+          phonetic: v.phonetic || '',
+          meaning: v.meaning || '',
+          example: v.example_sentence || '',
+        }))
+      : []
+  ), [vocabulary])
 
-  const finalCards = bookId ? (bookCards ?? []) : fallbackCards
+  const activeVocabularyRows = setId ? setStudyRows : vocabulary
+  const finalCards = useMemo(() => (
+    bookId
+      ? (bookCards ?? [])
+      : setId
+        ? (setCards ?? [])
+        : fallbackCards
+  ), [bookId, bookCards, setId, setCards, fallbackCards])
   const currentCard = finalCards[currentIndex]
   const isFinished = currentIndex >= finalCards.length
   const spokenWordRef = useRef<string>('')
+  const currentMnemonicKey = `${currentCard?.id ?? 'none'}:${currentCard?.word ?? ''}`
+  const currentMnemonic = currentCard ? (mnemonicMap[currentMnemonicKey] || currentCard.mnemonic || '') : ''
+  const mnemonicLoading = currentCard ? Boolean(mnemonicLoadingMap[currentMnemonicKey]) : false
 
   useEffect(() => {
     localStorage.setItem(FLASHCARD_AUTO_AUDIO_KEY, autoPlayAudio ? '1' : '0')
@@ -133,6 +253,35 @@ export default function FlashcardPage() {
     spokenWordRef.current = key
     speakAuto(currentCard.word)
   }, [autoPlayAudio, isFinished, currentCard, currentIndex, isFlipped])
+
+  useEffect(() => {
+    if (!currentCard) return
+
+    const preloadCards = [currentCard, finalCards[currentIndex + 1]].filter((item): item is StudyCard => Boolean(item))
+    let disposed = false
+
+    preloadCards.forEach((item) => {
+      const key = `${item.id}:${item.word}`
+      if (mnemonicMap[key] || mnemonicLoadingMap[key]) return
+
+      setMnemonicLoadingMap((prev) => ({ ...prev, [key]: true }))
+
+      getFlashcardMnemonic(item.word, item.meaning)
+        .then((mnemonic) => {
+          if (disposed) return
+          setMnemonicMap((prev) => ({ ...prev, [key]: mnemonic }))
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (disposed) return
+          setMnemonicLoadingMap((prev) => ({ ...prev, [key]: false }))
+        })
+    })
+
+    return () => {
+      disposed = true
+    }
+  }, [currentCard, currentIndex, finalCards, mnemonicLoadingMap, mnemonicMap])
 
   const flushPendingReviews = useCallback(async () => {
     if (flushedRef.current || bookId) return
@@ -177,8 +326,8 @@ export default function FlashcardPage() {
     const resultMap = { know: 'known', vague: 'fuzzy', unknown: 'unknown' } as const
 
     // 仅全局词库模式才写入复习记录（书籍专属词卡是临时分析结果）
-    if (!bookId && currentCard && vocabulary.length > 0) {
-      const current = vocabulary.find(v => v.id === currentCard.id)
+    if (!bookId && currentCard && currentCard.id > 0) {
+      const current = activeVocabularyRows.find(v => v.id === currentCard.id)
 
       if (current) {
         const reviewCycleDays = getReviewCycleDaysFromLocalStorage()
@@ -223,6 +372,11 @@ export default function FlashcardPage() {
   const knowCount = results.filter(r => r === 'know').length
   const vagueCount = results.filter(r => r === 'vague').length
   const unknownCount = results.filter(r => r === 'unknown').length
+  const isLoadingCards = bookId
+    ? loadingBookCards
+    : setId
+      ? loadingSetCards
+      : loading
 
   return (
     <div className="min-h-screen bg-[var(--color-background)] flex flex-col">
@@ -258,10 +412,10 @@ export default function FlashcardPage() {
 
       {/* ===== 卡片区域 ===== */}
       <div className="flex-1 flex items-center justify-center px-8">
-        {loadingBookCards || (!bookId && loading) ? (
+        {isLoadingCards ? (
           <div className="text-center">
             <p className="text-[14px] text-[var(--color-muted)]">
-              {bookId ? '正在加载本书词汇...' : '正在加载今日学习任务...'}
+              {bookId ? '正在加载本书词汇...' : setId ? '正在加载该词本学习任务...' : '正在加载今日学习任务...'}
             </p>
           </div>
         ) : finalCards.length === 0 ? (
@@ -311,61 +465,96 @@ export default function FlashcardPage() {
           </div>
         ) : (
           /* 卡片堆叠效果 */
-          <div className="relative w-full max-w-[320px]" style={{ perspective: '1000px' }}>
-            {/* 底层卡片（装饰用，模拟堆叠） */}
-            {currentIndex + 2 < finalCards.length && (
-              <div className="absolute inset-0 top-4 mx-4 bg-[var(--color-card)] rounded-[var(--radius-lg)] border border-[var(--color-border)] opacity-40" />
-            )}
-            {currentIndex + 1 < finalCards.length && (
-              <div className="absolute inset-0 top-2 mx-2 bg-[var(--color-card)] rounded-[var(--radius-lg)] border border-[var(--color-border)] opacity-60" />
-            )}
-
-            {/* 当前卡片 */}
-            <div
-              className="relative w-full min-h-[280px] bg-[var(--color-card)] rounded-[var(--radius-lg)] border border-[var(--color-border)] p-6 cursor-pointer select-none active:scale-[0.98] transition-transform"
-              style={{ boxShadow: 'var(--shadow-card)' }}
-              onClick={handleFlip}
-            >
-              {!isFlipped ? (
-                /* 正面：单词 + 音标 */
-                <div className="flex flex-col items-center justify-center h-full min-h-[240px]">
-                  <h2 className="text-[28px] font-bold text-[var(--color-foreground)] mb-3">
-                    {currentCard.word}
-                  </h2>
-                  <p className="text-[14px] text-[var(--color-muted)] mb-4">{currentCard.phonetic}</p>
-                  <button
-                    className="p-2 rounded-full bg-[var(--color-primary-light)]"
-                    onClick={(e) => { e.stopPropagation(); speakAuto(currentCard.word) }}
-                  >
-                    <Volume2 size={20} className="text-[var(--color-primary)]" />
-                  </button>
-                  <p className="text-[12px] text-[var(--color-muted)] mt-6">点击翻转查看释义</p>
-                </div>
-              ) : (
-                /* 背面：释义 + 例句/助记提示 */
-                <div className="flex flex-col items-center justify-center h-full min-h-[240px]">
-                  <h2 className="text-[24px] font-bold text-[var(--color-foreground)] mb-2">
-                    {currentCard.word}
-                  </h2>
-                  <p className="text-[16px] text-[var(--color-primary)] font-semibold mb-3">
-                    {currentCard.meaning}
-                  </p>
-                  <div className="w-full p-3 bg-[var(--color-background-secondary)] rounded-[var(--radius-xs)]">
-                    {currentCard.example?.trim() ? (
-                      <p className="text-[13px] text-[var(--color-foreground)] leading-relaxed italic">
-                        "{currentCard.example}"
-                      </p>
-                    ) : (
-                      <p className="text-[13px] text-[var(--color-muted)] leading-relaxed">
-                        助记提示：尝试用 <span className="font-semibold text-[var(--color-foreground)]">{currentCard.word}</span> 自己造一个句子。
-                      </p>
-                    )}
-                  </div>
-                  <p className="text-[12px] text-[var(--color-muted)] mt-4">点击翻回正面</p>
-                </div>
+          isDesktop ? (
+            <div className="relative w-full max-w-[320px]" style={{ perspective: '1000px' }}>
+              {currentIndex + 2 < finalCards.length && (
+                <div className="absolute inset-0 top-4 mx-4 bg-[var(--color-card)] rounded-[var(--radius-lg)] border border-[var(--color-border)] opacity-40" />
               )}
+              {currentIndex + 1 < finalCards.length && (
+                <div className="absolute inset-0 top-2 mx-2 bg-[var(--color-card)] rounded-[var(--radius-lg)] border border-[var(--color-border)] opacity-60" />
+              )}
+
+              <div
+                className="relative w-full min-h-[280px] bg-[var(--color-card)] rounded-[var(--radius-lg)] border border-[var(--color-border)] p-6 cursor-pointer select-none active:scale-[0.98] transition-transform"
+                style={{ boxShadow: 'var(--shadow-card)' }}
+                onClick={handleFlip}
+              >
+                {!isFlipped ? (
+                  <div className="flex flex-col items-center justify-center h-full min-h-[240px]">
+                    <h2 className="text-[28px] font-bold text-[var(--color-foreground)] mb-3">
+                      {currentCard.word}
+                    </h2>
+                    <p className="text-[14px] text-[var(--color-muted)] mb-4">{currentCard.phonetic}</p>
+                    <button
+                      className="p-2 rounded-full bg-[var(--color-primary-light)]"
+                      onClick={(e) => { e.stopPropagation(); speakAuto(currentCard.word) }}
+                    >
+                      <Volume2 size={20} className="text-[var(--color-primary)]" />
+                    </button>
+                    <p className="text-[12px] text-[var(--color-muted)] mt-6">点击翻转查看释义</p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full min-h-[240px]">
+                    <h2 className="text-[24px] font-bold text-[var(--color-foreground)] mb-2">
+                      {currentCard.word}
+                    </h2>
+                    <p className="text-[16px] text-[var(--color-primary)] font-semibold mb-3">
+                      {currentCard.meaning}
+                    </p>
+                    <div className="w-full space-y-3">
+                      <div className="w-full rounded-[var(--radius-xs)] bg-[var(--color-primary)]/8 p-3 text-left">
+                        <div className="mb-2 flex items-center gap-2 text-[12px] font-semibold text-[var(--color-primary)]">
+                          <Lightbulb size={14} /> AI 助记
+                        </div>
+                        {mnemonicLoading ? (
+                          <div className="flex items-center gap-2 text-[12px] text-[var(--color-muted)]">
+                            <Loader2 size={14} className="animate-spin" /> 正在生成形象记忆...
+                          </div>
+                        ) : (
+                          <p className="text-[13px] leading-relaxed text-[var(--color-foreground)]">
+                            {currentMnemonic || `把 ${currentCard.word} 想成一个夸张鲜明的小场景，再和“${currentCard.meaning || '它的意思'}”牢牢绑在一起。`}
+                          </p>
+                        )}
+                      </div>
+                      {currentCard.example?.trim() ? (
+                        <div className="w-full rounded-[var(--radius-xs)] bg-[var(--color-background-secondary)] p-3 text-left">
+                          <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-muted)]">
+                            Example
+                          </p>
+                          <p className="text-[13px] text-[var(--color-foreground)] leading-relaxed italic">
+                            "{currentCard.example}"
+                          </p>
+                        </div>
+                      ) : null}
+                    </div>
+                    <p className="text-[12px] text-[var(--color-muted)] mt-4">点击翻回正面</p>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="w-full max-w-[380px]">
+              <MobileFlashcardThreeDeck
+                key={`${currentCard.id}:${isFlipped ? 'back' : 'front'}`}
+                card={currentCard}
+                flipped={isFlipped}
+                mnemonic={currentMnemonic}
+                mnemonicLoading={mnemonicLoading}
+                onFlip={handleFlip}
+                onSwipeKnow={() => void handleChoice('know')}
+                onSwipeUnknown={() => void handleChoice('unknown')}
+              />
+              <div className="mt-3 flex flex-col items-center gap-2 text-center">
+                <div className="flex items-center justify-center gap-2 text-[11px] text-[var(--color-muted)]">
+                  <span className="rounded-full bg-[var(--color-success)]/12 px-3 py-1 text-[var(--color-success)]">推到右边缘 = 会</span>
+                  <span className="rounded-full bg-[var(--color-error)]/12 px-3 py-1 text-[var(--color-error)]">推到左边缘 = 不会</span>
+                </div>
+                <p className="text-[11px] leading-5 text-[var(--color-muted)]">
+                  轻点卡片翻面，拖拽时会有 3D 倾斜反馈；如果只想标记“模糊”，也可以直接点下面按钮。
+                </p>
+              </div>
+            </div>
+          )
         )}
       </div>
 

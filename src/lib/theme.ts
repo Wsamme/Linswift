@@ -26,6 +26,15 @@ const primaryLightMap: Record<string, string> = {
   '#EC4899': '#FCE7F3',
 }
 
+const primaryDarkLightMap: Record<string, string> = {
+  '#FF8400': 'rgba(255, 132, 0, 0.18)',
+  '#3B82F6': 'rgba(59, 130, 246, 0.18)',
+  '#8B5CF6': 'rgba(139, 92, 246, 0.18)',
+  '#22C55E': 'rgba(34, 197, 94, 0.18)',
+  '#EF4444': 'rgba(239, 68, 68, 0.18)',
+  '#EC4899': 'rgba(236, 72, 153, 0.18)',
+}
+
 const fontSizeMap = [14, 16, 18]
 
 export function loadThemeSettings(): ThemeSettings {
@@ -62,7 +71,9 @@ export function applyThemeSettings(settings: ThemeSettings) {
 
   const root = document.documentElement
   const resolvedMode = resolveMode(settings.mode)
-  const primaryLight = primaryLightMap[settings.primaryColor] || primaryLightMap['#FF8400']
+  const primaryLight = resolvedMode === 'dark'
+    ? (primaryDarkLightMap[settings.primaryColor] || primaryDarkLightMap['#FF8400'])
+    : (primaryLightMap[settings.primaryColor] || primaryLightMap['#FF8400'])
   const fontPx = fontSizeMap[Math.max(0, Math.min(2, settings.fontSize))] || 16
 
   root.setAttribute('data-theme', resolvedMode)

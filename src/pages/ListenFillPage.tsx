@@ -3,11 +3,12 @@ import {
   ChevronLeft, Play, Pause, SkipBack, SkipForward, Check, X as XIcon,
   Volume2, RotateCcw,
 } from 'lucide-react'
-import { stopSpeaking, loadTTSSettings } from '../lib/tts'
+import { stopSpeaking, loadTTSSettings, findPreferredVoiceByLang } from '../lib/tts'
 import { supabase, type ListeningContent } from '../lib/supabase'
 import { useLogicalBack } from '../hooks/useLogicalBack'
 import { SPEED_OPTIONS } from '../lib/tts'
 import { mergeListeningContent } from '../data/listeningContent'
+import { playKeyboardSuccessSound, playKeyboardTapSound } from '../lib/keyboardSfx'
 
 interface LyricLine {
   fullText: string
@@ -79,6 +80,8 @@ export default function ListenFillPage() {
   const [playbackRate, setPlaybackRate] = useState(() => loadTTSSettings().rate)
   const isPlayingRef = useRef(false)
   const blankStatusesRef = useRef<BlankStatus[]>([])
+  const typingSequenceRef = useRef(0)
+  const keyboardDrivenChangeRef = useRef(false)
 
   const song = songs[songIndex]
 
@@ -149,6 +152,8 @@ export default function ListenFillPage() {
     utterance.rate = playbackRate * 0.85
     utterance.volume = settings.volume
     utterance.pitch = 1
+    const voice = findPreferredVoiceByLang(settings.accent)
+    if (voice) utterance.voice = voice
     utterance.onend = () => {
       if (line.blankWord && blankStatusesRef.current[index] === 'active') {
         setIsPlaying(false)
@@ -181,6 +186,9 @@ export default function ListenFillPage() {
     const line = song.lyrics[activeLineIndex]
     if (!line.blankWord) return
     const ok = activeInput.trim().toLowerCase() === line.blankWord.toLowerCase()
+    if (ok) {
+      playKeyboardSuccessSound(activeLineIndex >= song.lyrics.length - 1)
+    }
     setBlankStatuses((prev) => {
       const next = [...prev]
       next[activeLineIndex] = ok ? 'correct' : 'wrong'
@@ -191,6 +199,7 @@ export default function ListenFillPage() {
     setUserInputs((prev) => ({ ...prev, [activeLineIndex]: activeInput.trim() }))
     setScore((prev) => ({ correct: prev.correct + (ok ? 1 : 0), wrong: prev.wrong + (ok ? 0 : 1) }))
     setActiveInput('')
+    typingSequenceRef.current = 0
     if (ok) {
       const nextIdx = activeLineIndex + 1
       if (nextIdx < song.lyrics.length) {
@@ -210,6 +219,7 @@ export default function ListenFillPage() {
     setBlankStatuses(initBlankStatuses(song.lyrics))
     setUserInputs({})
     setActiveInput('')
+    typingSequenceRef.current = 0
     setScore({ correct: 0, wrong: 0 })
   }
 
@@ -224,8 +234,37 @@ export default function ListenFillPage() {
     blankStatusesRef.current = statuses
     setUserInputs({})
     setActiveInput('')
+    typingSequenceRef.current = 0
     setScore({ correct: 0, wrong: 0 })
     setIsPlaying(false)
+  }
+
+  const handleActiveInputChange = (value: string) => {
+    if (keyboardDrivenChangeRef.current) {
+      keyboardDrivenChangeRef.current = false
+      setActiveInput(value)
+      return
+    }
+
+    const previous = activeInput
+    const inserted = value.length > previous.length
+    const removed = value.length < previous.length
+
+    if (inserted) {
+      const typedSegment = value.slice(previous.length)
+      typedSegment
+        .split('')
+        .filter((char) => /^[a-z]$/i.test(char))
+        .forEach((char) => {
+          playKeyboardTapSound(char, typingSequenceRef.current)
+          typingSequenceRef.current += 1
+        })
+    } else if (removed) {
+      playKeyboardTapSound('Backspace', typingSequenceRef.current)
+      typingSequenceRef.current = Math.max(0, value.length)
+    }
+
+    setActiveInput(value)
   }
 
   if (!song) {
@@ -292,7 +331,24 @@ export default function ListenFillPage() {
                       <div className="flex gap-2">
                         <input
                           value={activeLineIndex === idx ? activeInput : userInputs[idx] || ''}
-                          onChange={(e) => activeLineIndex === idx && setActiveInput(e.target.value)}
+                          onChange={(e) => activeLineIndex === idx && handleActiveInputChange(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (activeLineIndex !== idx) return
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              submitAnswer()
+                              return
+                            }
+                            if (e.key === 'Backspace') {
+                              keyboardDrivenChangeRef.current = true
+                              playKeyboardTapSound('Backspace', typingSequenceRef.current)
+                              typingSequenceRef.current = Math.max(0, activeInput.length - 1)
+                            } else if (/^[a-z]$/i.test(e.key)) {
+                              keyboardDrivenChangeRef.current = true
+                              playKeyboardTapSound(e.key, typingSequenceRef.current)
+                              typingSequenceRef.current += 1
+                            }
+                          }}
                           placeholder="填入单词"
                           className="flex-1 px-2 py-1.5 rounded border border-[var(--color-border)] bg-white text-[var(--color-foreground)]"
                         />

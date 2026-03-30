@@ -1,3 +1,5 @@
+import { loadLearnSettings } from './learnSettings'
+
 /**
  * 艾宾浩斯复习算法（支持 7/15 天复习制）
  */
@@ -33,10 +35,7 @@ export function isMasteredLevel(level: number): boolean {
 
 export function getReviewCycleDaysFromLocalStorage(): ReviewCycleDays {
   try {
-    const raw = localStorage.getItem('linswift_learn_settings')
-    if (!raw) return DEFAULT_REVIEW_CYCLE_DAYS
-    const parsed = JSON.parse(raw) as { reviewCycleDays?: number }
-    return normalizeReviewCycleDays(parsed.reviewCycleDays)
+    return normalizeReviewCycleDays(loadLearnSettings().reviewCycleDays)
   } catch {
     return DEFAULT_REVIEW_CYCLE_DAYS
   }

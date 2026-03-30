@@ -8,6 +8,9 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
   const PANEL_STYLE_ID = 'linswift-floating-style'
   const PANEL_ROOT_ID = 'linswift-floating-root'
   const PANEL_POSITION_STORAGE_KEY = 'linswift_floating_position_v2'
+  const SETTINGS_STORAGE_KEY = 'linswift_extension_settings'
+  const KNOWN_WORDS_STORAGE_KEY = 'linswift_known_words'
+  const SAVED_WORDS_STORAGE_KEY = 'linswift_saved_words'
   const YOUTUBE_PAGE_BRIDGE_ID = 'linswift-youtube-page-bridge'
   const YOUTUBE_PAGE_BRIDGE_REQUEST_TYPE = 'linswift-youtube-page-request'
   const YOUTUBE_PAGE_BRIDGE_RESPONSE_TYPE = 'linswift-youtube-page-response'
@@ -24,6 +27,8 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
   const YOUTUBE_CUE_PERSIST_MS = 1400
   const YOUTUBE_DEFAULT_CUE_DURATION_MS = 2600
   const YOUTUBE_PAGE_BRIDGE_TIMEOUT_MS = 12000
+  const RUNTIME_MESSAGE_TIMEOUT_MS = 15000
+  const SENTENCE_SELECTION_MAX_CHARS = 2400
   const TRANSLATION_LANGUAGE_OPTIONS = {
     'zh-CN': '简中',
     'zh-TW': '繁中',
@@ -36,6 +41,18 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     deepl: 'DeepL',
     ai: 'AI',
   }
+  const PRONUNCIATION_VARIANT_OPTIONS = {
+    both: '音标展示 · 英 / 美',
+    uk: '默认发音 · 英式',
+    us: '默认发音 · 美式',
+  }
+  const UI_SCALE_STEPS = [
+    { value: 0.48, scale: 0.88, label: '超紧凑' },
+    { value: 0.56, scale: 0.94, label: '紧凑' },
+    { value: 0.72, scale: 1, label: '标准' },
+    { value: 0.88, scale: 1.08, label: '舒展' },
+    { value: 1.04, scale: 1.14, label: '宽松' },
+  ]
   const YOUTUBE_SUBTITLE_MODE_OPTIONS = {
     original: '原文',
     bilingual: '双语',
@@ -47,6 +64,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     minimized: false,
     hidden: true,
     activePage: 'translate',
+    sentenceDraft: null,
     showingSaved: false,
     loading: false,
     auth: {
@@ -62,10 +80,12 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
         inlineTranslateEnabled: false,
         autoTranslateOnLoad: true,
         translationLanguage: 'zh-CN',
-        translationMode: 'hybrid',
+        translationMode: 'ai',
+        pronunciationVariant: 'both',
         disabledAutoTranslateHosts: [],
         youtubeSubtitleMode: 'vocab',
-        uiScale: 0.56,
+        sentenceSmartVocabEnabled: true,
+        uiScale: 0.72,
       },
       knownWords: [],
       savedWords: {},
@@ -114,6 +134,10 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
   let activeInlineWord = ''
   let activeTooltipSource = ''
   let inlineTooltipPinned = false
+  let sentencePopupAnchor = null
+  let sentencePopupRange = null
+  let sentencePopupRect = null
+  let sentencePopupVisible = false
   let lastSelectionTooltipOpenedAt = 0
   let youtubePollTimer = null
   let youtubeBoundVideo = null
@@ -127,6 +151,12 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
   let residentPanelBootstrapped = false
   let floatingPositionLoaded = false
   let floatingPositionState = null
+  let pendingPanelSizeSaveTimer = null
+
+  const PANEL_MIN_WIDTH = 340
+  const PANEL_MAX_WIDTH = 520
+  const PANEL_MIN_HEIGHT = 560
+  const PANEL_MAX_HEIGHT = 920
 
   function shouldAutoOpenDemoPanel() {
     return document.querySelector('meta[name="linswift-demo-auto-open"][content="1"]') !== null
@@ -134,6 +164,63 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
 
   function clamp(value, min, max) {
     return Math.min(Math.max(value, min), max)
+  }
+
+  function getPanelResizeBounds() {
+    const scale = getUiScale()
+    const maxWidth = Math.min(PANEL_MAX_WIDTH, Math.floor((window.innerWidth - 24) / scale))
+    const maxHeight = Math.min(PANEL_MAX_HEIGHT, Math.floor((window.innerHeight - 24) / scale))
+    return {
+      minWidth: Math.min(PANEL_MIN_WIDTH, maxWidth),
+      maxWidth: Math.max(PANEL_MIN_WIDTH, maxWidth),
+      minHeight: Math.min(PANEL_MIN_HEIGHT, maxHeight),
+      maxHeight: Math.max(PANEL_MIN_HEIGHT, maxHeight),
+    }
+  }
+
+  function getPanelSizeSettings() {
+    const settings = panelState.extensionState?.settings || {}
+    const bounds = getPanelResizeBounds()
+    return {
+      width: clamp(Number(settings.panelWidth) || 380, bounds.minWidth, bounds.maxWidth),
+      height: clamp(Number(settings.panelHeight) || 760, bounds.minHeight, bounds.maxHeight),
+    }
+  }
+
+  function applyPanelSize() {
+    if (!refs?.panel) return
+    const { width, height } = getPanelSizeSettings()
+    const bounds = getPanelResizeBounds()
+    const clampedWidth = clamp(width, bounds.minWidth, bounds.maxWidth)
+    const clampedHeight = clamp(height, bounds.minHeight, bounds.maxHeight)
+    refs.panel.style.width = `${clampedWidth}px`
+    refs.panel.style.height = `${clampedHeight}px`
+    refs.panel.style.maxHeight = `${clampedHeight}px`
+  }
+
+  async function persistPanelSize() {
+    if (!panelState.extensionState?.settings) return
+    const nextSettings = {
+      ...panelState.extensionState.settings,
+      panelWidth: Number(panelState.extensionState.settings.panelWidth) || 380,
+      panelHeight: Number(panelState.extensionState.settings.panelHeight) || 760,
+    }
+    const response = await sendRuntimeMessage({
+      type: 'panel-save-settings',
+      settings: nextSettings,
+    })
+    panelState.extensionState.settings = response.settings
+    applyPanelSize()
+  }
+
+  function schedulePersistPanelSize() {
+    if (pendingPanelSizeSaveTimer) {
+      clearTimeout(pendingPanelSizeSaveTimer)
+    }
+    pendingPanelSizeSaveTimer = window.setTimeout(() => {
+      pendingPanelSizeSaveTimer = null
+      void persistPanelSize()
+    }, 180)
   }
 
   function getVisibleFloatingElement() {
@@ -327,6 +414,168 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
         pointer-events: none;
       }
 
+      .linswift-sentence-popup {
+        position: fixed;
+        width: min(324px, calc(100vw - 24px));
+        display: grid;
+        gap: 8px;
+        padding: 10px;
+        border-radius: 20px;
+        max-height: min(70vh, 540px);
+        overflow: hidden;
+        overflow-y: auto;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 250, 245, 0.9));
+        border: 1px solid rgba(255, 255, 255, 0.82);
+        box-shadow:
+          0 24px 64px rgba(31, 26, 22, 0.18),
+          0 8px 22px rgba(255, 132, 0, 0.08),
+          inset 0 1px 0 rgba(255, 255, 255, 0.5);
+        color: #2e241d;
+        backdrop-filter: blur(18px) saturate(1.04);
+        z-index: 2147483642;
+      }
+
+      .linswift-sentence-popup-card {
+        display: grid;
+        gap: 7px;
+        min-width: 0;
+        padding: 10px;
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.72);
+        border: 1px solid rgba(244, 228, 213, 0.92);
+      }
+
+      .linswift-sentence-popup-context {
+        gap: 8px;
+      }
+
+      .linswift-sentence-popup-top {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .linswift-sentence-popup-title {
+        margin: 0;
+        font-size: 10px;
+        line-height: 1.4;
+        color: #8d7f73;
+        font-weight: 800;
+      }
+
+      .linswift-sentence-popup-highlight {
+        margin: 0;
+        padding: 10px 11px;
+        min-width: 0;
+        max-height: 30vh;
+        border-radius: 14px;
+        background: rgba(255, 222, 194, 0.88);
+        color: #3a2c24;
+        font-size: 13px;
+        line-height: 1.45;
+        font-weight: 700;
+        display: block;
+        white-space: normal;
+        overflow: auto;
+        text-overflow: clip;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        -webkit-line-clamp: unset;
+        -webkit-box-orient: unset;
+      }
+
+      .linswift-sentence-popup-copy {
+        margin: 0;
+        min-width: 0;
+        color: #66594e;
+        font-size: 11px;
+        line-height: 1.45;
+        display: block;
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        -webkit-line-clamp: unset;
+        -webkit-box-orient: unset;
+      }
+
+      .linswift-sentence-popup-heading {
+        margin: 0;
+        font-size: 16px;
+        line-height: 1.28;
+        font-weight: 800;
+        color: #2e241d;
+        display: -webkit-box;
+        -webkit-line-clamp: 1;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+
+      .linswift-sentence-popup-translation {
+        display: grid;
+        gap: 6px;
+        min-width: 0;
+        max-height: 26vh;
+        padding: 10px 11px;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid rgba(245, 234, 223, 1);
+        overflow: auto;
+      }
+
+      .linswift-sentence-popup-translation strong {
+        font-size: 11px;
+        color: #b28b67;
+        letter-spacing: 0.04em;
+      }
+
+      .linswift-sentence-popup-translation p {
+        margin: 0;
+        color: #43362e;
+        font-size: 13px;
+        line-height: 1.5;
+        display: block;
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        -webkit-line-clamp: unset;
+        -webkit-box-orient: unset;
+      }
+
+      .linswift-sentence-popup-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+      }
+
+      .linswift-sentence-popup .linswift-button,
+      .linswift-sentence-popup .linswift-chip {
+        min-height: 36px;
+        border-radius: 14px;
+        font-size: 12px;
+      }
+
+      .linswift-sentence-popup-vocab {
+        display: grid;
+        gap: 6px;
+        padding: 10px;
+        border-radius: 14px;
+        background: rgba(247, 241, 234, 0.94);
+        border: 1px solid rgba(242, 230, 217, 0.92);
+      }
+
+      .linswift-sentence-popup-vocab-title {
+        margin: 0;
+        color: #77685b;
+        font-size: 10px;
+        line-height: 1.45;
+      }
+
       .linswift-tooltip-top,
       .linswift-tooltip-meta,
       .linswift-tooltip-actions {
@@ -340,9 +589,40 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
         align-items: flex-start;
       }
 
+      .linswift-tooltip-title-wrap {
+        min-width: 0;
+        display: grid;
+        gap: 4px;
+      }
+
+      .linswift-tooltip-top-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex: 0 0 auto;
+      }
+
+      .linswift-tooltip-icon-button {
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: #9a9086;
+        font-size: 22px;
+        line-height: 1;
+        cursor: pointer;
+      }
+
+      .linswift-tooltip-divider {
+        margin: 12px 0 0;
+        height: 1px;
+        background: rgba(233, 223, 212, 0.92);
+      }
+
       .linswift-tooltip-word {
         margin: 0;
-        font-size: 21px;
+        font-size: 24px;
         line-height: 1.1;
         font-weight: 800;
       }
@@ -354,11 +634,85 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
         line-height: 1.5;
       }
 
-      .linswift-tooltip-meaning {
-        margin: 10px 0 0;
-        font-size: 14px;
-        line-height: 1.55;
+      .linswift-tooltip-pronunciations {
+        margin-top: 14px;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 12px;
+        align-items: start;
+      }
+
+      .linswift-tooltip-pronunciation-list {
+        min-width: 0;
+        display: grid;
+        gap: 10px;
+      }
+
+      .linswift-tooltip-pronunciation {
+        display: grid;
+        grid-template-columns: 28px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .linswift-tooltip-pronunciation-label {
+        color: #6f655c;
+        font-size: 16px;
+        font-weight: 700;
+      }
+
+      .linswift-tooltip-pronunciation-value {
+        min-width: 0;
+        color: #6f655c;
+        font-size: 16px;
+        line-height: 1.4;
+      }
+
+      .linswift-tooltip-audio {
+        min-width: 34px;
+        height: 34px;
+        padding: 0;
+        border: 0;
+        border-radius: 999px;
+        background: transparent;
+        color: #8e8377;
+        font-size: 18px;
+        cursor: pointer;
+      }
+
+      .linswift-tooltip-save {
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: #a1978d;
+        font-size: 34px;
+        line-height: 1;
+        cursor: pointer;
+        align-self: center;
+      }
+
+      .linswift-tooltip-save[data-active="true"] {
+        color: #ff8a1d;
+      }
+
+      .linswift-tooltip-meanings {
+        margin-top: 14px;
+        display: grid;
+        gap: 14px;
+      }
+
+      .linswift-tooltip-meaning-row {
+        margin: 0;
+        font-size: 16px;
+        line-height: 1.7;
         color: #2f261f;
+      }
+
+      .linswift-tooltip-meaning-pos {
+        margin-right: 6px;
+        font-weight: 500;
       }
 
       .linswift-tooltip-note {
@@ -840,7 +1194,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
         z-index: 2147483640;
         color: #1f1a16;
         font-family: "SF Pro Text", "PingFang SC", "Noto Sans SC", sans-serif;
-        --linswift-ui-scale: 0.56;
+        --linswift-ui-scale: 1;
       }
 
       #${PANEL_ROOT_ID} * {
@@ -857,37 +1211,56 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       }
 
       .linswift-panel {
-        width: min(352px, calc(100vw - 28px));
-        max-height: min(82vh, 760px);
+        width: 380px;
+        height: 760px;
+        max-height: 760px;
         display: flex;
         flex-direction: column;
         overflow: hidden;
-        border-radius: 28px;
+        border-radius: 30px;
         background:
-          linear-gradient(180deg, rgba(255, 255, 255, 0.76), rgba(255, 248, 242, 0.68));
+          linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(255, 248, 242, 0.18));
         box-shadow:
-          0 28px 72px rgba(31, 26, 22, 0.22),
-          0 8px 24px rgba(255, 132, 0, 0.12),
-          inset 0 1px 0 rgba(255, 255, 255, 0.42);
-        border: 1px solid rgba(255, 255, 255, 0.34);
-        backdrop-filter: blur(22px) saturate(1.15);
-        -webkit-backdrop-filter: blur(22px) saturate(1.15);
+          0 22px 36px rgba(42, 29, 20, 0.12),
+          0 -2px 10px rgba(255, 255, 255, 0.4);
+        border: 1.4px solid rgba(255, 255, 255, 0.82);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
         zoom: var(--linswift-ui-scale);
         transform-origin: right bottom;
+      }
+
+      .linswift-resize-handle {
+        position: absolute;
+        right: 10px;
+        bottom: 10px;
+        width: 22px;
+        height: 22px;
+        border: 0;
+        border-radius: 10px;
+        background:
+          linear-gradient(135deg, rgba(255, 255, 255, 0) 0 44%, rgba(255, 255, 255, 0.9) 44% 52%, rgba(255, 255, 255, 0) 52% 64%, rgba(255, 255, 255, 0.9) 64% 72%, rgba(255, 255, 255, 0) 72%),
+          rgba(247, 237, 227, 0.84);
+        border: 1px solid rgba(236, 224, 212, 0.96);
+        box-shadow: 0 6px 14px rgba(42, 29, 20, 0.08);
+        cursor: nwse-resize;
+        z-index: 4;
       }
 
       .linswift-header {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 10px;
-        padding: 18px 18px 16px;
-        background:
-          linear-gradient(135deg, rgba(255, 138, 0, 0.88), rgba(255, 122, 0, 0.78)),
-          linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.02));
+        gap: 14px;
+        padding: 18px 20px 14px;
+        min-height: 102px;
+        background: linear-gradient(180deg, #ffb14b 0%, #ff8a1d 100%);
         color: #fff;
         cursor: move;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.3),
+          0 10px 18px rgba(197, 107, 17, 0.14);
       }
 
       .linswift-brand {
@@ -903,36 +1276,37 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       }
 
       .linswift-brand-badge {
-        width: 40px;
-        height: 40px;
-        border-radius: 14px;
+        width: 52px;
+        height: 52px;
+        border-radius: 18px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        background: rgba(255, 255, 255, 0.16);
-        border: 1px solid rgba(255, 255, 255, 0.16);
-        font-size: 24px;
+        background: rgba(255, 255, 255, 0.18);
+        border: 1.2px solid rgba(255, 255, 255, 0.54);
+        font-size: 26px;
         font-weight: 800;
       }
 
       .linswift-header-title {
         margin: 0;
-        font-size: 16px;
+        font-size: 22px;
         font-weight: 800;
         letter-spacing: 0.01em;
       }
 
       .linswift-header-subtitle {
         margin: 4px 0 0;
-        font-size: 11px;
+        font-size: 13px;
         line-height: 1.5;
-        opacity: 0.82;
+        color: #fff2e7;
+        opacity: 1;
       }
 
       .linswift-close {
-        width: 42px;
-        height: 42px;
-        border: 0;
+        width: 46px;
+        height: 46px;
+        border: 1.2px solid rgba(255, 255, 255, 0.5);
         border-radius: 999px;
         background: rgba(255, 255, 255, 0.16);
         color: #fff;
@@ -941,9 +1315,9 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       }
 
       .linswift-minimize {
-        width: 42px;
-        height: 42px;
-        border: 0;
+        width: 46px;
+        height: 46px;
+        border: 1.2px solid rgba(255, 255, 255, 0.5);
         border-radius: 999px;
         background: rgba(255, 255, 255, 0.16);
         color: #fff;
@@ -957,9 +1331,10 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
         flex-direction: column;
         gap: 12px;
         min-height: 0;
-        padding: 12px 12px 14px;
+        padding: 12px 14px 16px;
         overflow-y: auto;
         overscroll-behavior: contain;
+        background: linear-gradient(180deg, #fffaf5 0%, #fdf8f3 100%);
       }
 
       .linswift-page-tabs {
@@ -970,14 +1345,14 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
 
       .linswift-page {
         display: grid;
-        gap: 10px;
+        gap: 12px;
         min-height: 0;
       }
 
       .linswift-translate-actions,
       .linswift-settings-stack {
         display: grid;
-        gap: 8px;
+        gap: 12px;
       }
 
       .linswift-translate-actions {
@@ -987,21 +1362,22 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       .linswift-kicker {
         margin: 0;
         font-size: 11px;
-        color: #b9b0a7;
+        color: #a59687;
+        font-weight: 700;
       }
 
       .linswift-headline {
         margin: 4px 0 0;
-        font-size: 17px;
-        line-height: 1.2;
+        font-size: 15px;
+        line-height: 1.35;
         font-weight: 800;
       }
 
       .linswift-page-meta {
-        margin: 4px 0 0;
-        font-size: 11px;
-        line-height: 1.45;
-        color: #93897f;
+        margin: 6px 0 0;
+        font-size: 12px;
+        line-height: 1.55;
+        color: #9c8f81;
       }
 
       .linswift-metrics {
@@ -1011,18 +1387,18 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       }
 
       .linswift-metric {
-        padding: 11px 11px 10px;
-        border-radius: 16px;
-        border: 1px solid rgba(255, 255, 255, 0.34);
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.32);
+        padding: 12px 14px;
+        border-radius: 18px;
+        border: 1.2px solid rgba(255, 255, 255, 0.82);
+        background: rgba(255, 255, 255, 0.42);
       }
 
       .linswift-metric--warm {
-        background: #fff4e8;
+        background: rgba(255, 255, 255, 0.42);
       }
 
       .linswift-metric--cool {
-        background: #e8fbf2;
+        background: rgba(255, 255, 255, 0.34);
       }
 
       .linswift-metric strong {
@@ -1037,19 +1413,19 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       }
 
       .linswift-metric--cool strong {
-        color: #19b97a;
+        color: #2e241d;
       }
 
       .linswift-metric span {
         display: block;
-        margin-top: 6px;
-        color: #9d9388;
+        margin-top: 4px;
+        color: #8a7e72;
         font-size: 11px;
       }
 
       .linswift-cta-row {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: 1fr;
         gap: 8px;
       }
 
@@ -1064,34 +1440,41 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       .linswift-cta,
       .linswift-button,
       .linswift-tab {
-        min-height: 38px;
-        border-radius: 12px;
-        border: 2px solid transparent;
-        font-size: 12px;
+        min-height: 44px;
+        border-radius: 16px;
+        border: 1.2px solid transparent;
+        font-size: 13px;
         font-weight: 800;
         cursor: pointer;
       }
 
       .linswift-cta--ghost {
-        background: #fff;
-        border-color: #ff8400;
-        color: #ff8400;
+        background: rgba(238, 232, 225, 0.5);
+        border-color: rgba(255, 255, 255, 0.95);
+        color: #3a2e27;
       }
 
       .linswift-cta--primary,
       .linswift-button--primary,
       .linswift-tab--active {
-        background: linear-gradient(135deg, #ff8a00, #ff7a00);
+        background: rgba(255, 138, 29, 0.9);
+        border-color: rgba(255, 210, 165, 1);
         color: #fff;
-        box-shadow: 0 12px 24px rgba(255, 132, 0, 0.2);
+        box-shadow: 0 10px 18px rgba(255, 154, 42, 0.18);
       }
 
       .linswift-button {
-        border: 1px solid rgba(255, 255, 255, 0.32);
-        background: rgba(255, 255, 255, 0.62);
-        backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.95);
+        background: rgba(238, 232, 225, 0.5);
+        backdrop-filter: blur(8px);
         color: #342b23;
-        padding: 0 12px;
+        padding: 0 14px;
+      }
+
+      .linswift-button--soft {
+        background: rgba(255, 255, 255, 0.56);
+        border-color: rgba(255, 255, 255, 0.98);
+        box-shadow: 0 10px 18px rgba(42, 29, 20, 0.05);
       }
 
       .linswift-button[disabled] {
@@ -1100,22 +1483,269 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       }
 
       .linswift-auth-card,
-      .linswift-toolbar {
-        padding: 10px;
-        border-radius: 16px;
-        background: rgba(255, 250, 245, 0.54);
-        border: 1px solid rgba(255, 255, 255, 0.32);
+      .linswift-overview,
+      .linswift-sentence-context,
+      .linswift-sentence-card {
+        padding: 16px;
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.28);
+        border: 1.2px solid rgba(255, 255, 255, 0.78);
         backdrop-filter: blur(10px);
+        box-shadow: 0 16px 28px rgba(42, 29, 20, 0.06);
+      }
+
+      .linswift-settings-group,
+      .linswift-login-shell {
+        display: grid;
+        gap: 12px;
+        padding: 16px 16px 18px;
+        border-radius: 24px;
+        background: rgba(255, 255, 255, 0.36);
+        border: 1.2px solid rgba(255, 255, 255, 0.86);
+        box-shadow: 0 16px 26px rgba(42, 29, 20, 0.06);
+      }
+
+      .linswift-settings-header,
+      .linswift-login-header {
+        display: grid;
+        gap: 4px;
+      }
+
+      .linswift-settings-title,
+      .linswift-login-kicker {
+        margin: 0;
+        font-size: 14px;
+        line-height: 1.3;
+        font-weight: 800;
+        color: #2e241d;
+      }
+
+      .linswift-settings-desc,
+      .linswift-login-desc {
+        margin: 0;
+        color: #8d8176;
+        font-size: 10px;
+        line-height: 1.5;
+      }
+
+      .linswift-page[data-panel-page="settings"] .linswift-section-label {
+        font-size: 9px;
+      }
+
+      .linswift-page[data-panel-page="settings"] .linswift-settings-title {
+        font-size: 12px;
+      }
+
+      .linswift-page[data-panel-page="settings"] .linswift-settings-desc,
+      .linswift-page[data-panel-page="settings"] .linswift-settings-note,
+      .linswift-page[data-panel-page="settings"] .linswift-page-meta {
+        font-size: 9px;
+        line-height: 1.45;
+      }
+
+      .linswift-page[data-panel-page="settings"] .linswift-toolbar-row {
+        gap: 6px;
+      }
+
+      .linswift-page[data-panel-page="settings"] .linswift-select,
+      .linswift-page[data-panel-page="settings"] .linswift-button,
+      .linswift-page[data-panel-page="settings"] .linswift-tag {
+        min-height: 42px;
+        font-size: 11px;
+      }
+
+      .linswift-page[data-panel-page="settings"] .linswift-scale-control {
+        min-height: 42px;
+      }
+
+      .linswift-translate-shell {
+        display: grid;
+        gap: 12px;
+      }
+
+      .linswift-translate-dashboard,
+      .linswift-translate-results-shell {
+        display: grid;
+        gap: 10px;
+        padding: 15px;
+        border-radius: 24px;
+        background: rgba(255, 255, 255, 0.36);
+        border: 1.2px solid rgba(255, 255, 255, 0.86);
+        box-shadow: 0 16px 26px rgba(42, 29, 20, 0.06);
+      }
+
+      .linswift-translate-dashboard.linswift-translate-dashboard--compact {
+        gap: 8px;
+        padding: 12px 15px;
+      }
+
+      .linswift-translate-dashboard.linswift-translate-dashboard--compact .linswift-translate-spotlight {
+        grid-template-columns: 56px minmax(0, 1fr);
+        gap: 10px;
+      }
+
+      .linswift-translate-dashboard.linswift-translate-dashboard--compact .linswift-translate-meta {
+        gap: 8px;
+      }
+
+      .linswift-translate-dashboard.linswift-translate-dashboard--compact .linswift-translate-count strong {
+        font-size: 28px;
+      }
+
+      .linswift-translate-dashboard.linswift-translate-dashboard--compact .linswift-headline {
+        font-size: 13px;
+        line-height: 1.3;
+      }
+
+      .linswift-translate-dashboard.linswift-translate-dashboard--compact .linswift-translate-note,
+      .linswift-translate-dashboard.linswift-translate-dashboard--compact .linswift-translate-summary-line {
+        font-size: 10px;
+      }
+
+      .linswift-translate-dashboard.linswift-translate-dashboard--compact .linswift-cta,
+      .linswift-translate-dashboard.linswift-translate-dashboard--compact .linswift-button {
+        min-height: 38px;
+        font-size: 12px;
+      }
+
+      .linswift-translate-dashboard.linswift-translate-dashboard--compact .linswift-cta-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .linswift-translate-dashboard.linswift-translate-dashboard--compact .linswift-translate-links .linswift-chip-button {
+        min-height: 24px;
+        padding: 3px 8px;
+        font-size: 8px;
+      }
+
+      .linswift-translate-dashboard.linswift-translate-dashboard--compact .linswift-metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+      }
+
+      .linswift-translate-dashboard.linswift-translate-dashboard--compact .linswift-metric {
+        padding: 10px 10px 9px;
+      }
+
+      .linswift-translate-dashboard.linswift-translate-dashboard--compact .linswift-metric strong {
+        font-size: 18px;
+      }
+
+      .linswift-translate-dashboard.linswift-translate-dashboard--compact .linswift-metric span {
+        font-size: 10px;
+      }
+
+      .linswift-translate-summary-line {
+        margin: 0;
+        color: #8a7e72;
+        font-size: 11px;
+        font-weight: 600;
+      }
+
+      .linswift-translate-spotlight {
+        display: grid;
+        grid-template-columns: 72px minmax(0, 1fr);
+        gap: 12px;
+        align-items: start;
+      }
+
+      .linswift-translate-meta {
+        min-width: 0;
+        display: grid;
+        gap: 10px;
+        align-content: start;
+      }
+
+      .linswift-translate-meta-top {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 10px;
+      }
+
+      .linswift-translate-meta .linswift-kicker {
+        font-size: 12px;
+        color: #8a7e72;
+      }
+
+      .linswift-translate-count {
+        display: grid;
+        gap: 4px;
+        align-content: start;
+      }
+
+      .linswift-translate-count strong {
+        display: block;
+        color: #ff8a1d;
+        font-size: 36px;
+        line-height: 1;
+        font-weight: 800;
+      }
+
+      .linswift-translate-count span {
+        color: #8a7e72;
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .linswift-translate-note {
+        margin: 0;
+        color: #9c8f81;
+        font-size: 11px;
+        line-height: 1.5;
+      }
+
+      .linswift-translate-links {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+      }
+
+      .linswift-translate-links .linswift-chip-button {
+        min-height: 28px;
+        padding: 4px 8px;
+        font-size: 9px;
+        border-color: rgba(235, 224, 212, 0.7);
+        background: rgba(255, 255, 255, 0.18);
+        color: #8a7e72;
+      }
+
+      .linswift-translate-dashboard.linswift-translate-dashboard--compact .linswift-translate-links {
+        display: none;
+      }
+
+      .linswift-result-title {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 800;
+        color: #2b221c;
+      }
+
+      .linswift-result-copy {
+        margin: -2px 0 0;
+        color: #9c8f81;
+        font-size: 11px;
+        line-height: 1.5;
+      }
+
+      .linswift-results-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .linswift-results-list .linswift-empty {
+        padding: 18px 14px;
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.5);
       }
 
       .linswift-auth-top,
       .linswift-auth-actions,
-      .linswift-toolbar,
       .linswift-toolbar-row,
       .linswift-card-actions,
       .linswift-tabs {
         display: grid;
-        gap: 8px;
+        gap: 10px;
       }
 
       .linswift-auth-top {
@@ -1126,7 +1756,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       .linswift-auth-label,
       .linswift-section-label {
         margin: 0;
-        font-size: 11px;
+        font-size: 10px;
         font-weight: 700;
         color: #9b8d82;
         text-transform: uppercase;
@@ -1134,8 +1764,8 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       }
 
       .linswift-auth-email {
-        margin: 4px 0 0;
-        font-size: 13px;
+        margin: 3px 0 0;
+        font-size: 14px;
         font-weight: 700;
       }
 
@@ -1145,7 +1775,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       .linswift-card-meta {
         margin: 0;
         color: #8d8176;
-        font-size: 11px;
+        font-size: 12px;
         line-height: 1.45;
       }
 
@@ -1160,32 +1790,173 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       .linswift-toolbar-row {
         grid-template-columns: repeat(3, minmax(0, 1fr));
         align-items: center;
+        gap: 8px;
       }
 
       .linswift-toolbar-row--secondary {
         grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       }
 
+      .linswift-toolbar-row--full {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .linswift-toolbar-row--full .linswift-button {
+        width: 100%;
+      }
+
       .linswift-settings-note {
         margin: 0;
         color: #8d8176;
-        font-size: 11px;
+        font-size: 10px;
         line-height: 1.45;
+      }
+
+      .linswift-scale-control {
+        --linswift-scale-progress: 50%;
+        position: relative;
+        min-width: 0;
+        min-height: 42px;
+        display: grid;
+        gap: 8px;
+        padding: 11px 14px 10px;
+        border-radius: 18px;
+        border: 1.2px solid rgba(255, 255, 255, 0.82);
+        background: rgba(255, 255, 255, 0.52);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.46);
+      }
+
+      .linswift-scale-track {
+        position: relative;
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(228, 217, 205, 0.68);
+        overflow: hidden;
+      }
+
+      .linswift-scale-track-fill {
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: var(--linswift-scale-progress);
+        border-radius: inherit;
+        background: linear-gradient(90deg, rgba(255, 177, 97, 0.98), rgba(255, 138, 29, 0.95));
+        box-shadow: 0 4px 10px rgba(255, 154, 42, 0.2);
+      }
+
+      .linswift-scale-stop {
+        position: absolute;
+        top: 50%;
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        border: 2px solid rgba(255, 255, 255, 0.96);
+        background: rgba(252, 247, 241, 0.98);
+        transform: translate(-50%, -50%);
+        box-shadow: 0 2px 6px rgba(74, 55, 38, 0.08);
+      }
+
+      .linswift-scale-stop:nth-child(2) {
+        left: 0%;
+      }
+
+      .linswift-scale-stop:nth-child(3) {
+        left: 25%;
+      }
+
+      .linswift-scale-stop:nth-child(4) {
+        left: 50%;
+      }
+
+      .linswift-scale-stop:nth-child(5) {
+        left: 75%;
+      }
+
+      .linswift-scale-stop:nth-child(6) {
+        left: 100%;
+      }
+
+      .linswift-scale-range {
+        position: absolute;
+        inset: 8px 10px auto 10px;
+        width: calc(100% - 20px);
+        height: 16px;
+        margin: 0;
+        appearance: none;
+        background: transparent;
+        cursor: pointer;
+      }
+
+      .linswift-scale-range::-webkit-slider-runnable-track {
+        appearance: none;
+        height: 16px;
+        background: transparent;
+      }
+
+      .linswift-scale-range::-webkit-slider-thumb {
+        appearance: none;
+        width: 18px;
+        height: 18px;
+        margin-top: -1px;
+        border-radius: 999px;
+        border: 1.6px solid rgba(255, 255, 255, 0.98);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 1), rgba(255, 240, 225, 0.98));
+        box-shadow: 0 6px 16px rgba(255, 138, 29, 0.18);
+      }
+
+      .linswift-scale-range::-moz-range-track {
+        height: 16px;
+        background: transparent;
+        border: 0;
+      }
+
+      .linswift-scale-range::-moz-range-thumb {
+        width: 18px;
+        height: 18px;
+        border-radius: 999px;
+        border: 1.6px solid rgba(255, 255, 255, 0.98);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 1), rgba(255, 240, 225, 0.98));
+        box-shadow: 0 6px 16px rgba(255, 138, 29, 0.18);
+      }
+
+      .linswift-scale-range:focus-visible {
+        outline: none;
+      }
+
+      .linswift-scale-meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        min-width: 0;
+      }
+
+      .linswift-scale-title {
+        color: #9b8d82;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+      }
+
+      .linswift-scale-value {
+        color: #2e241d;
+        font-size: 11px;
+        font-weight: 800;
+        white-space: nowrap;
       }
 
       .linswift-auth-form {
         display: grid;
-        gap: 8px;
+        gap: 12px;
       }
 
       .linswift-select,
       .linswift-input {
         width: 100%;
-        min-height: 36px;
-        padding: 0 10px;
-        border-radius: 12px;
-        border: 1px solid rgba(255, 255, 255, 0.34);
-        background: rgba(255, 255, 255, 0.66);
+        min-height: 48px;
+        padding: 0 15px;
+        border-radius: 18px;
+        border: 1.2px solid rgba(255, 255, 255, 0.72);
+        background: rgba(255, 255, 255, 0.46);
         color: #2a221c;
         outline: none;
       }
@@ -1203,31 +1974,88 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       }
 
       .linswift-card {
-        padding: 10px;
-        border-radius: 14px;
-        border: 1px solid rgba(255, 255, 255, 0.34);
-        background: rgba(255, 255, 255, 0.66);
-        backdrop-filter: blur(12px);
+        display: grid;
+        gap: 12px;
+        padding: 18px;
+        border-radius: 24px;
+        border: 1.2px solid rgba(255, 255, 255, 0.86);
+        background: rgba(255, 255, 255, 0.44);
+        backdrop-filter: blur(10px);
+        box-shadow: 0 16px 24px rgba(42, 29, 20, 0.05);
+      }
+
+      .linswift-card--featured {
+        gap: 14px;
+        padding: 20px 20px 18px;
+        border-radius: 26px;
+        background: rgba(255, 255, 255, 0.6);
+        border-color: rgba(255, 255, 255, 0.94);
+        box-shadow: 0 18px 28px rgba(42, 29, 20, 0.06);
+      }
+
+      .linswift-card-feature-copy {
+        display: grid;
+        gap: 10px;
+      }
+
+      .linswift-card-feature-meaning {
+        padding: 14px 14px 13px;
+        border-radius: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.92);
+        background: rgba(255, 255, 255, 0.62);
+      }
+
+      .linswift-card-feature-meaning .linswift-card-meaning {
+        margin: 0;
+      }
+
+      .linswift-card-feature-note {
+        margin: 0;
+        color: #8d8176;
+        font-size: 11px;
+        line-height: 1.55;
       }
 
       .linswift-card-top {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 12px;
+        align-items: start;
+      }
+
+      .linswift-card-top-main {
+        min-width: 0;
+        display: grid;
+        gap: 6px;
+      }
+
+      .linswift-card-top-side {
         display: flex;
         align-items: flex-start;
-        justify-content: space-between;
-        gap: 12px;
+        justify-content: flex-end;
       }
 
       .linswift-card-word {
         margin: 0;
-        font-size: 16px;
+        font-size: 22px;
         font-weight: 800;
+      }
+
+      .linswift-card--featured .linswift-card-word {
+        font-size: 24px;
+        line-height: 1.12;
       }
 
       .linswift-card-meaning,
       .linswift-card-snippet {
-        margin: 7px 0 0;
-        font-size: 12px;
-        line-height: 1.5;
+        margin: 0;
+        font-size: 13px;
+        line-height: 1.58;
+      }
+
+      .linswift-card--featured .linswift-card-meaning {
+        font-size: 14px;
+        line-height: 1.62;
       }
 
       .linswift-card-snippet {
@@ -1238,18 +2066,87 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        min-width: 46px;
-        padding: 5px 9px;
+        min-width: 52px;
+        min-height: 34px;
+        padding: 6px 10px;
         border-radius: 999px;
-        background: rgba(255, 132, 0, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.92);
+        background: rgba(247, 239, 230, 0.86);
         color: #ff8400;
         font-size: 11px;
         font-weight: 800;
       }
 
+      .linswift-card--featured .linswift-tag {
+        min-width: 56px;
+        min-height: 36px;
+        background: rgba(255, 243, 231, 0.98);
+        color: #ff8a1d;
+      }
+
+      .linswift-save-star {
+        flex: 0 0 auto;
+        width: 36px;
+        height: 36px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.92);
+        background: rgba(247, 239, 230, 0.86);
+        color: #b8aa9e;
+        cursor: pointer;
+        transition: color 120ms ease, background 120ms ease, transform 120ms ease;
+      }
+
+      .linswift-save-star:hover {
+        transform: translateY(-1px);
+      }
+
+      .linswift-save-star svg {
+        width: 18px;
+        height: 18px;
+        display: block;
+        fill: currentColor;
+      }
+
+      .linswift-save-star--active {
+        background: rgba(255, 243, 231, 0.98);
+        color: #ff8a1d;
+      }
+
       .linswift-card-actions {
+        display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
-        margin-top: 8px;
+        gap: 8px;
+        margin-top: 0;
+      }
+
+      .linswift-card .linswift-button {
+        min-height: 36px;
+        padding: 0 10px;
+        font-size: 12px;
+      }
+
+      .linswift-card--featured .linswift-card-actions {
+        margin-top: 12px;
+      }
+
+      .linswift-card--featured .linswift-button {
+        min-height: 38px;
+        font-size: 12px;
+      }
+
+      .linswift-card--featured .linswift-button[data-action="save"] {
+        background: rgba(255, 138, 29, 0.9);
+        border-color: rgba(255, 210, 165, 1);
+        color: #fff;
+      }
+
+      .linswift-card .linswift-button[disabled],
+      .linswift-card-inline-link[disabled] {
+        opacity: 0.72;
+        cursor: default;
       }
 
       .linswift-footer-meta {
@@ -1260,14 +2157,322 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       }
 
       .linswift-empty {
+        padding: 16px;
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.42);
+        border: 1px dashed rgba(232, 221, 208, 1);
+        font-size: 12px;
+        color: #8c8176;
+        line-height: 1.65;
+        text-align: center;
+      }
+
+      .linswift-overview {
+        display: grid;
+        gap: 12px;
+      }
+
+      .linswift-overview-top,
+      .linswift-sync-line,
+      .linswift-result-head,
+      .linswift-chip-row,
+      .linswift-divider-row,
+      .linswift-oauth-row,
+      .linswift-register-row,
+      .linswift-sentence-top,
+      .linswift-sentence-actions,
+      .linswift-sentence-vocab {
+        display: flex;
+        gap: 8px;
+      }
+
+      .linswift-overview-top,
+      .linswift-result-head,
+      .linswift-sentence-top {
+        align-items: flex-start;
+        justify-content: space-between;
+      }
+
+      .linswift-sync-line,
+      .linswift-chip-row,
+      .linswift-register-row {
+        flex-wrap: wrap;
+        align-items: center;
+      }
+
+      .linswift-login-page,
+      .linswift-sentence-page {
+        display: grid;
+        gap: 16px;
+        min-width: 0;
+      }
+
+      .linswift-login-alt {
+        display: grid;
+        gap: 14px;
+      }
+
+      .linswift-login-title,
+      .linswift-sentence-title {
+        margin: 0;
+        font-size: 22px;
+        line-height: 1.28;
+        font-weight: 800;
+        color: #2e241d;
+      }
+
+      .linswift-login-shell--secondary {
+        gap: 16px;
+        background: rgba(255, 255, 255, 0.18);
+        border-color: rgba(237, 225, 212, 0.92);
+        box-shadow: none;
+      }
+
+      .linswift-inline-link {
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: #ff8a1d;
+        font-size: 14px;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      .linswift-divider-row {
+        align-items: center;
+      }
+
+      .linswift-divider-row span {
+        flex: 1;
+        height: 1px;
+        background: #e8ddd0;
+      }
+
+      .linswift-divider-row em {
+        color: #a59a90;
+        font-style: normal;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .linswift-oauth-row {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .linswift-oauth-button {
+        min-height: 50px;
+        border-radius: 18px;
+        font-size: 15px;
+        font-weight: 800;
+      }
+
+      .linswift-oauth-button--google {
+        border: 1px solid #eee3d6;
+        background: rgba(255, 255, 255, 0.8);
+        color: #2f251f;
+      }
+
+      .linswift-oauth-button--apple {
+        border: 1px solid #353230;
+        background: #353230;
+        color: #fff;
+      }
+
+      .linswift-result-head {
+        margin-bottom: 0;
+        padding-top: 0;
+      }
+
+      .linswift-result-tools {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+
+      .linswift-chip-button,
+      .linswift-chip {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 40px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.78);
+        background: rgba(255, 255, 255, 0.34);
+        color: #2e241d;
+        font-size: 12px;
+        font-weight: 800;
+        text-align: center;
+      }
+
+      .linswift-page-tabs .linswift-tab {
+        min-height: 38px;
+        font-size: 12px;
+        background: rgba(235, 234, 234, 0.9);
+        color: #2e241d;
+        border-color: rgba(234, 224, 214, 0.88);
+      }
+
+      .linswift-tabs .linswift-tab {
+        min-height: 38px;
+        font-size: 12px;
+      }
+
+      .linswift-page-tabs .linswift-tab.linswift-tab--active {
+        background: rgba(255, 138, 29, 0.92);
+        border-color: rgba(255, 210, 165, 1);
+        color: #fff;
+        box-shadow: 0 10px 18px rgba(255, 154, 42, 0.16);
+      }
+
+      .linswift-chip--accent {
+        background: rgba(255, 241, 227, 0.78);
+        color: #ff8a1d;
+      }
+
+      .linswift-card-note {
+        margin: 0;
+        font-size: 12px;
+        color: #b09d8e;
+      }
+
+      .linswift-card-inline-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .linswift-card-inline-link {
+        padding: 0;
+        border: 0;
+        background: transparent;
+        font-size: 11px;
+        font-weight: 700;
+        color: #4c7ee9;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      .linswift-card-inline-link--warm {
+        color: #ff8a1d;
+      }
+
+      .linswift-sentence-context {
+        display: grid;
+        gap: 12px;
+        min-width: 0;
+      }
+
+      .linswift-sentence-mode {
+        align-self: flex-start;
+      }
+
+      .linswift-sentence-copy {
+        margin: 0;
+        display: block;
+        min-width: 0;
+        color: #332823;
+        font-size: 16px;
+        line-height: 1.45;
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+
+      .linswift-sentence-highlight {
+        min-width: 0;
+        max-height: 32vh;
+        padding: 14px;
+        border-radius: 18px;
+        background: rgba(255, 220, 192, 0.82);
+        overflow: auto;
+      }
+
+      .linswift-sentence-highlight p {
+        margin: 0;
+        display: block;
+        color: #3a2c24;
+        font-size: 20px;
+        line-height: 1.3;
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        -webkit-line-clamp: unset;
+        -webkit-box-orient: unset;
+      }
+
+      .linswift-sentence-translation {
+        min-width: 0;
+        max-height: 28vh;
+        padding: 14px;
+        border-radius: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.94);
+        background: rgba(255, 255, 255, 0.44);
+        overflow: auto;
+      }
+
+      .linswift-sentence-translation strong {
+        display: block;
+        margin-bottom: 8px;
+        color: #b28b67;
+        font-size: 13px;
+      }
+
+      .linswift-sentence-translation p {
+        margin: 0;
+        display: block;
+        color: #43362e;
+        font-size: 17px;
+        line-height: 1.55;
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        -webkit-line-clamp: unset;
+        -webkit-box-orient: unset;
+      }
+
+      .linswift-sentence-vocab {
+        flex-direction: column;
         padding: 12px;
         border-radius: 16px;
-        background: rgba(255, 250, 245, 0.52);
-        border: 1px dashed rgba(255, 132, 0, 0.16);
-        font-size: 11px;
-        color: #8c8176;
-        line-height: 1.5;
-        text-align: center;
+        border: 1px solid rgba(255, 255, 255, 0.35);
+        background: rgba(244, 236, 224, 0.8);
+      }
+
+      .linswift-sentence-vocab-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .linswift-sentence-vocab-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.45);
+        background: rgba(255, 247, 238, 0.8);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .linswift-sentence-vocab-chip strong,
+      .linswift-sentence-vocab-chip span:last-child {
+        color: #f28a1d;
+      }
+
+      .linswift-sentence-vocab-chip span {
+        color: #6b5a4f;
       }
 
       .linswift-bubble {
@@ -2242,6 +3447,8 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
         const response = await sendRuntimeMessage({
           type: 'panel-translate-lines',
           lines: batch,
+          targetLanguage: getTranslationLanguage(),
+          translationMode: getTranslationMode(),
         })
         panelState.youtube.translationProvider = String(response.provider || '')
         panelState.youtube.translationNote = String(response.note || '')
@@ -2354,6 +3561,8 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       const response = await sendRuntimeMessage({
         type: 'panel-translate-lines',
         lines: [cueText],
+        targetLanguage: getTranslationLanguage(),
+        translationMode: getTranslationMode(),
       })
       panelState.youtube.translationProvider = String(response.provider || '')
       panelState.youtube.translationNote = String(response.note || '')
@@ -2572,7 +3781,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       overlay?.remove?.()
     })
     selectionHighlightRecord?.anchor?.remove?.()
-    selectionHighlightRecord.parent?.normalize?.()
+    selectionHighlightRecord?.parent?.normalize?.()
     selectionHighlightRecord = null
   }
 
@@ -2589,6 +3798,59 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     return normalized
       .toLowerCase()
       .replace(/[’]/g, "'")
+  }
+
+  function collapseWhitespace(text) {
+    return String(text || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
+
+  function normalizeSentenceSelection(text) {
+    const normalized = collapseWhitespace(text)
+      .replace(/^[“"'\s(\[]+/, '')
+      .replace(/[”"'\s)\].,;:!?]+$/, '')
+
+    if (!normalized || normalizeSelectionWord(normalized)) return ''
+    if (!/[A-Za-z]/.test(normalized)) return ''
+
+    const tokenCount = (normalized.match(/[A-Za-z]+(?:['’-][A-Za-z]+)*/g) || []).length
+    if (tokenCount < 3 || normalized.length < 14) return ''
+
+    return normalized.slice(0, SENTENCE_SELECTION_MAX_CHARS)
+  }
+
+  function buildSentenceSelectionContext(range, sentence) {
+    const baseElement =
+      range.commonAncestorContainer instanceof Element
+        ? range.commonAncestorContainer
+        : range.commonAncestorContainer.parentElement
+    const scopeElement = baseElement?.closest('p, li, blockquote, article, section, div') || baseElement
+    const scopeText = collapseWhitespace(scopeElement?.textContent || '')
+    const normalizedSentence = collapseWhitespace(sentence)
+
+    if (!scopeText || !normalizedSentence) {
+      return { before: '', after: '' }
+    }
+
+    const index = scopeText.indexOf(normalizedSentence)
+    if (index < 0) {
+      return { before: '', after: '' }
+    }
+
+    const before = scopeText.slice(Math.max(0, index - 88), index).trim()
+    const after = scopeText
+      .slice(index + normalizedSentence.length, index + normalizedSentence.length + 88)
+      .trim()
+
+    return {
+      before: before ? (index > 88 ? `…${before}` : before) : '',
+      after: after
+        ? index + normalizedSentence.length + 88 < scopeText.length
+          ? `${after}…`
+          : after
+        : '',
+    }
   }
 
   function applySelectionHighlight(range, word) {
@@ -2651,9 +3913,6 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null
 
     const rawText = selection.toString()
-    const word = normalizeSelectionWord(rawText)
-    if (!word) return null
-
     const range = selection.getRangeAt(0)
     const parentElement =
       range.commonAncestorContainer instanceof Element
@@ -2663,7 +3922,21 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     if (!parentElement || shouldIgnoreNode(parentElement)) return null
     if (parentElement.closest('.linswift-inline-annotation')) return null
 
-    return { selection, range, word }
+    const word = normalizeSelectionWord(rawText)
+    if (word) {
+      return { type: 'word', selection, range, word }
+    }
+
+    const sentence = normalizeSentenceSelection(rawText)
+    if (!sentence) return null
+
+    return {
+      type: 'sentence',
+      selection,
+      range,
+      sentence,
+      ...buildSentenceSelectionContext(range, sentence),
+    }
   }
 
   function removeInlineAnnotationsForWord(word) {
@@ -2719,12 +3992,84 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
   }
 
   function getTranslationMode() {
-    const key = panelState.extensionState.settings.translationMode || 'hybrid'
-    return TRANSLATION_MODE_OPTIONS[key] ? key : 'hybrid'
+    const key = panelState.extensionState.settings.translationMode || 'ai'
+    return TRANSLATION_MODE_OPTIONS[key] ? key : 'ai'
   }
 
   function getTranslationModeLabel() {
-    return TRANSLATION_MODE_OPTIONS[getTranslationMode()] || '混合模式'
+    return TRANSLATION_MODE_OPTIONS[getTranslationMode()] || 'AI'
+  }
+
+  function getPronunciationVariant() {
+    const key = panelState.extensionState.settings.pronunciationVariant || 'both'
+    return PRONUNCIATION_VARIANT_OPTIONS[key] ? key : 'both'
+  }
+
+  function getWordDetailCacheKey(word, targetLanguage = getTranslationLanguage()) {
+    const normalizedWord = String(word || '').trim().toLowerCase()
+    const safeLanguage = TRANSLATION_LANGUAGE_OPTIONS[targetLanguage] ? targetLanguage : 'zh-CN'
+    return `${safeLanguage}::${normalizedWord}`
+  }
+
+  function getCachedWordDetail(word, targetLanguage = getTranslationLanguage()) {
+    return wordDetailCache.get(getWordDetailCacheKey(word, targetLanguage)) || null
+  }
+
+  function applyStoredExtensionState(storedState = {}, options = {}) {
+    const { render = true } = options
+    const previousLanguage = getTranslationLanguage()
+    const previousMode = getTranslationMode()
+
+    if (
+      storedState &&
+      typeof storedState[SETTINGS_STORAGE_KEY] === 'object' &&
+      storedState[SETTINGS_STORAGE_KEY] !== null
+    ) {
+      panelState.extensionState.settings = {
+        ...panelState.extensionState.settings,
+        ...storedState[SETTINGS_STORAGE_KEY],
+      }
+    }
+
+    if (Array.isArray(storedState?.[KNOWN_WORDS_STORAGE_KEY])) {
+      panelState.extensionState.knownWords = storedState[KNOWN_WORDS_STORAGE_KEY]
+    }
+
+    if (
+      storedState &&
+      typeof storedState[SAVED_WORDS_STORAGE_KEY] === 'object' &&
+      storedState[SAVED_WORDS_STORAGE_KEY] !== null
+    ) {
+      panelState.extensionState.savedWords = storedState[SAVED_WORDS_STORAGE_KEY]
+    }
+
+    const nextLanguage = getTranslationLanguage()
+    const nextMode = getTranslationMode()
+
+    if (previousLanguage !== nextLanguage || previousMode !== nextMode) {
+      wordDetailCache.clear()
+      hideInlineTooltip(true)
+      hideSentencePopup(true)
+    }
+
+    applyUiScale()
+    applyPanelSize()
+
+    if (render && refs) {
+      renderSummary()
+      renderSavedWords()
+    }
+  }
+
+  async function refreshExtensionStateFromStorage(options = {}) {
+    try {
+      const storedState = await chrome.storage.sync.get([
+        SETTINGS_STORAGE_KEY,
+        KNOWN_WORDS_STORAGE_KEY,
+        SAVED_WORDS_STORAGE_KEY,
+      ])
+      applyStoredExtensionState(storedState, options)
+    } catch {}
   }
 
   function updateInlineTranslationForWord(word, meaning) {
@@ -2751,7 +4096,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     results.forEach((item) => {
       const normalizedWord = String(item?.word || '').trim().toLowerCase()
       if (!normalizedWord) return
-      const cached = wordDetailCache.get(normalizedWord)
+      const cached = getCachedWordDetail(normalizedWord)
       const meaning = cached?.meaning || item?.meaning || item?.note || ''
       if (!meaning) return
       updateInlineTranslationForWord(normalizedWord, meaning)
@@ -2782,8 +4127,15 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     return {
       word,
       phonetic: resultEntry?.phonetic || '',
+      phoneticUk: resultEntry?.phonetic || '',
+      phoneticUs: resultEntry?.phonetic || '',
+      audioUk: '',
+      audioUs: '',
       meaning: resultEntry?.meaning || '正在补充详细释义...',
       note: resultEntry?.note || '悬浮查看完整词卡',
+      senses: resultEntry?.meaning
+        ? [{ partOfSpeech: '', definition: resultEntry.meaning, example: '' }]
+        : [],
       examples: resultEntry?.snippet ? [resultEntry.snippet] : [],
     }
   }
@@ -2794,12 +4146,23 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     results.forEach((item) => {
       const normalizedWord = String(item?.word || '').trim().toLowerCase()
       if (!normalizedWord) return
-      const existing = wordDetailCache.get(normalizedWord) || {}
-      wordDetailCache.set(normalizedWord, {
+      const cacheKey = getWordDetailCacheKey(normalizedWord)
+      const existing = wordDetailCache.get(cacheKey) || {}
+      wordDetailCache.set(cacheKey, {
         word: normalizedWord,
         phonetic: item?.phonetic || existing.phonetic || '',
+        phoneticUk: item?.phoneticUk || existing.phoneticUk || item?.phonetic || '',
+        phoneticUs: item?.phoneticUs || existing.phoneticUs || item?.phonetic || '',
+        audioUk: item?.audioUk || existing.audioUk || '',
+        audioUs: item?.audioUs || existing.audioUs || '',
         meaning: item?.meaning || existing.meaning || '暂无释义',
         note: item?.note || existing.note || '',
+        senses:
+          Array.isArray(item?.senses) && item.senses.length > 0
+            ? item.senses
+            : Array.isArray(existing.senses)
+              ? existing.senses
+              : [],
         examples:
           Array.isArray(existing.examples) && existing.examples.length > 0
             ? existing.examples
@@ -2837,8 +4200,9 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     const savedEntry = getSavedEntryForWord(normalizedWord)
     const known = isKnownWord(normalizedWord)
     const examples = Array.isArray(detail?.examples) ? detail.examples.filter(Boolean).slice(0, 2) : []
-    const phonetic = detail?.phonetic ? escapeHtml(detail.phonetic) : ''
-    const meaning = escapeHtml(detail?.meaning || '暂无释义')
+    const senses = Array.isArray(detail?.senses) ? detail.senses.filter((item) => item?.definition).slice(0, 4) : []
+    const phoneticUk = detail?.phoneticUk || detail?.phonetic || ''
+    const phoneticUs = detail?.phoneticUs || detail?.phonetic || ''
     const note = detail?.note ? `<p class="linswift-tooltip-note">${escapeHtml(detail.note)}</p>` : ''
     const examplesHtml = examples.length
       ? `
@@ -2849,29 +4213,63 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
             )
             .join('')}
         </ul>
-      `
-      : ''
+        `
+        : ''
+    const meaningsHtml = (senses.length ? senses : [{ partOfSpeech: '', definition: detail?.meaning || '暂无释义' }])
+      .map((sense) => `
+        <p class="linswift-tooltip-meaning-row">
+          ${sense.partOfSpeech ? `<span class="linswift-tooltip-meaning-pos">${escapeHtml(`${sense.partOfSpeech}.`)}</span>` : ''}
+          ${escapeHtml(sense.definition || '')}
+        </p>
+      `)
+      .join('')
+    const pronunciationRows = [
+      phoneticUk
+        ? `
+          <div class="linswift-tooltip-pronunciation">
+            <span class="linswift-tooltip-pronunciation-label">英</span>
+            <span class="linswift-tooltip-pronunciation-value">${escapeHtml(phoneticUk)}</span>
+            <button class="linswift-tooltip-audio" type="button" data-tooltip-action="speak-uk" aria-label="播放英式发音">🔊</button>
+          </div>
+        `
+        : '',
+      phoneticUs
+        ? `
+          <div class="linswift-tooltip-pronunciation">
+            <span class="linswift-tooltip-pronunciation-label">美</span>
+            <span class="linswift-tooltip-pronunciation-value">${escapeHtml(phoneticUs)}</span>
+            <button class="linswift-tooltip-audio" type="button" data-tooltip-action="speak-us" aria-label="播放美式发音">🔊</button>
+          </div>
+        `
+        : '',
+    ].filter(Boolean).join('')
 
     refs.tooltip.dataset.loading = 'false'
     refs.tooltip.innerHTML = `
       <div class="linswift-tooltip-top">
-        <div>
+        <div class="linswift-tooltip-title-wrap">
           <p class="linswift-tooltip-word">${escapeHtml(normalizedWord || detail?.word || '')}</p>
-          ${phonetic ? `<p class="linswift-tooltip-phonetic">${phonetic}</p>` : ''}
         </div>
-        <span class="linswift-tag">${known ? '已会' : savedEntry ? '已收藏' : '生词'}</span>
+        <div class="linswift-tooltip-top-actions">
+          <button class="linswift-tooltip-icon-button" type="button" data-tooltip-action="close" aria-label="关闭">×</button>
+          <button class="linswift-tooltip-icon-button" type="button" data-tooltip-action="search" aria-label="搜索">⌕</button>
+        </div>
       </div>
-      <p class="linswift-tooltip-meaning">${meaning}</p>
+      <div class="linswift-tooltip-divider"></div>
+      ${pronunciationRows ? `
+        <div class="linswift-tooltip-pronunciations">
+          <div class="linswift-tooltip-pronunciation-list">${pronunciationRows}</div>
+          <button class="linswift-tooltip-save" type="button" data-tooltip-action="save" data-active="${savedEntry ? 'true' : 'false'}" aria-label="${savedEntry ? '取消收藏' : '收藏'}">${savedEntry ? '★' : '☆'}</button>
+        </div>
+      ` : ''}
+      <div class="linswift-tooltip-meanings">${meaningsHtml}</div>
       ${note}
       <div class="linswift-tooltip-meta">
-        <span class="linswift-tooltip-chip">${activeTooltipSource === 'selection' ? '选词翻译' : '点击可定位与操作'}</span>
+        <span class="linswift-tooltip-chip">${known ? '已会' : activeTooltipSource === 'selection' ? '选词翻译' : '点击可定位与操作'}</span>
       </div>
       ${examplesHtml}
       <div class="linswift-tooltip-actions">
-        <button class="linswift-button" type="button" data-tooltip-action="speak">发音</button>
-        <button class="linswift-button ${savedEntry ? 'linswift-tab--active' : ''}" type="button" data-tooltip-action="save">
-          ${savedEntry ? '取消收藏' : '收藏'}
-        </button>
+        <button class="linswift-button" type="button" data-tooltip-action="speak">默认发音</button>
         <button class="linswift-button ${known ? 'linswift-button--primary' : ''}" type="button" data-tooltip-action="known">
           ${known ? '已会' : '标记已会'}
         </button>
@@ -2880,11 +4278,27 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
 
     refs.tooltip
       .querySelector('[data-tooltip-action="speak"]')
-      ?.addEventListener('click', () => pronounceWord(normalizedWord))
+      ?.addEventListener('click', () => pronounceWord(normalizedWord, getPronunciationVariant(), detail))
+    refs.tooltip
+      .querySelector('[data-tooltip-action="speak-uk"]')
+      ?.addEventListener('click', () => pronounceWord(normalizedWord, 'uk', detail))
+    refs.tooltip
+      .querySelector('[data-tooltip-action="speak-us"]')
+      ?.addEventListener('click', () => pronounceWord(normalizedWord, 'us', detail))
     refs.tooltip
       .querySelector('[data-tooltip-action="save"]')
       ?.addEventListener('click', () => {
         void handleTooltipSave(normalizedWord)
+      })
+    refs.tooltip
+      .querySelector('[data-tooltip-action="close"]')
+      ?.addEventListener('click', () => {
+        hideInlineTooltip(true)
+      })
+    refs.tooltip
+      .querySelector('[data-tooltip-action="search"]')
+      ?.addEventListener('click', () => {
+        window.open(`https://www.google.com/search?q=${encodeURIComponent(`${normalizedWord} meaning`)}`, '_blank')
       })
     refs.tooltip
       .querySelector('[data-tooltip-action="known"]')
@@ -2925,8 +4339,36 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
   function positionInlineTooltip(anchorElement) {
     if (!refs?.tooltip || !anchorElement?.isConnected) return
 
-    const rect = anchorElement.getBoundingClientRect()
-    const tooltipRect = refs.tooltip.getBoundingClientRect()
+    positionFloatingCard(refs.tooltip, anchorElement)
+  }
+
+  function resolveFloatingAnchorRect(anchorTarget) {
+    if (!anchorTarget) return null
+    if (
+      typeof anchorTarget?.left === 'number' &&
+      typeof anchorTarget?.top === 'number' &&
+      typeof anchorTarget?.width === 'number' &&
+      typeof anchorTarget?.height === 'number'
+    ) {
+      return anchorTarget
+    }
+    if (anchorTarget instanceof Range) {
+      const rect = anchorTarget.getBoundingClientRect()
+      if (rect?.width > 0 || rect?.height > 0) return rect
+      return null
+    }
+    if (anchorTarget?.isConnected && typeof anchorTarget.getBoundingClientRect === 'function') {
+      return anchorTarget.getBoundingClientRect()
+    }
+    return null
+  }
+
+  function positionFloatingCard(cardElement, anchorTarget) {
+    if (!cardElement) return
+
+    const rect = resolveFloatingAnchorRect(anchorTarget)
+    if (!rect) return
+    const tooltipRect = cardElement.getBoundingClientRect()
     const gap = 10
     let left = rect.left
     let top = rect.bottom + gap
@@ -2943,8 +4385,21 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       top = Math.min(window.innerHeight - tooltipRect.height - 12, rect.bottom + gap)
     }
 
-    refs.tooltip.style.left = `${Math.round(left)}px`
-    refs.tooltip.style.top = `${Math.round(top)}px`
+    cardElement.style.left = `${Math.round(left)}px`
+    cardElement.style.top = `${Math.round(top)}px`
+  }
+
+  function snapshotFloatingAnchorRect(anchorTarget) {
+    const rect = resolveFloatingAnchorRect(anchorTarget)
+    if (!rect) return null
+    return {
+      left: Number(rect.left) || 0,
+      top: Number(rect.top) || 0,
+      width: Number(rect.width) || 0,
+      height: Number(rect.height) || 0,
+      right: Number(rect.right) || (Number(rect.left) || 0) + (Number(rect.width) || 0),
+      bottom: Number(rect.bottom) || (Number(rect.top) || 0) + (Number(rect.height) || 0),
+    }
   }
 
   function hideInlineTooltip(force = false) {
@@ -2971,6 +4426,134 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     }
   }
 
+  function hideSentencePopup(clearSelection = true) {
+    if (!refs?.sentencePopup) return
+    sentencePopupVisible = false
+    sentencePopupAnchor = null
+    sentencePopupRange = null
+    sentencePopupRect = null
+    refs.sentencePopup.classList.add('linswift-hidden')
+    refs.sentencePopup.style.left = ''
+    refs.sentencePopup.style.top = ''
+    refs.sentencePopup.innerHTML = ''
+    if (clearSelection) {
+      clearSelectionHighlight()
+    }
+  }
+
+  function renderSentencePopup(draft) {
+    if (!refs?.sentencePopup) return
+    const smartVocabEnabled = isSentenceSmartVocabEnabled()
+
+    const vocabHtml = smartVocabEnabled && draft.vocab.length
+      ? draft.vocab
+          .slice(0, 2)
+          .map((entry) => `
+            <span class="linswift-sentence-vocab-chip">
+              <strong>${escapeHtml(entry.word)}</strong>
+              <span>${escapeHtml(shortMeaning(entry.meaning))}</span>
+              <span>+</span>
+            </span>
+          `)
+          .join('')
+      : smartVocabEnabled
+        ? '<span class="linswift-page-meta">当前句子里暂时没有明显需要收录的词。</span>'
+        : '<span class="linswift-page-meta">智慧识词已关闭，当前只进行整句翻译。</span>'
+
+    refs.sentencePopup.innerHTML = `
+      <section class="linswift-sentence-popup-card">
+        <div class="linswift-sentence-popup-top">
+          <h3 class="linswift-sentence-popup-heading">整句翻译</h3>
+        </div>
+        <div class="linswift-sentence-popup-translation">
+          <strong>中文翻译</strong>
+          <p>${escapeHtml(draft.translation)}</p>
+        </div>
+        <div class="linswift-sentence-popup-actions">
+          <button class="linswift-button ${smartVocabEnabled ? 'linswift-button--primary' : ''}" type="button" data-sentence-popup-action="smart-vocab">智慧识词：${smartVocabEnabled ? '开' : '关'}</button>
+          <button class="linswift-button" type="button" data-sentence-popup-action="speak">朗读整句</button>
+        </div>
+        <div class="linswift-sentence-popup-vocab">
+          <p class="linswift-sentence-popup-vocab-title">${
+            smartVocabEnabled
+              ? draft.vocab.length
+                ? `识别到 ${Math.min(draft.vocab.length, 2)} 个值得学习的词汇：`
+                : '当前句子里还没有明显需要单独收录的生词。'
+              : '智慧识词已关闭'
+          }</p>
+          <div class="linswift-sentence-vocab-list">${vocabHtml}</div>
+          <button class="linswift-button" type="button" data-sentence-popup-action="collect" ${smartVocabEnabled && draft.vocab.length ? '' : 'disabled'}>
+            ${smartVocabEnabled ? (draft.vocab.length ? '收录这句里的生词' : '暂时没有句中生词可收录') : '开启智慧识词后可收录'}
+          </button>
+        </div>
+      </section>
+      <section class="linswift-sentence-popup-card linswift-sentence-popup-context">
+        <div class="linswift-sentence-popup-top">
+          <p class="linswift-sentence-popup-title">${escapeHtml(draft.mode)}</p>
+          <span class="linswift-chip linswift-chip--accent">划句</span>
+        </div>
+        ${draft.before ? `<p class="linswift-sentence-popup-copy">${escapeHtml(draft.before)}</p>` : ''}
+        <p class="linswift-sentence-popup-highlight">${escapeHtml(draft.sentence)}</p>
+        ${draft.after ? `<p class="linswift-sentence-popup-copy">${escapeHtml(draft.after)}</p>` : ''}
+      </section>
+    `
+
+    refs.sentencePopup
+      .querySelector('[data-sentence-popup-action="smart-vocab"]')
+      ?.addEventListener('click', async () => {
+        const nextEnabled = !isSentenceSmartVocabEnabled()
+        await setSentenceSmartVocabEnabled(nextEnabled)
+        if (nextEnabled) {
+          setStatus('智慧识词已开启，正在识别句中词汇。')
+          await enrichSentenceDraft(draft)
+        } else {
+          draft.vocab = []
+          setStatus('智慧识词已关闭，当前只做整句翻译。')
+        }
+        renderSentencePopup(draft)
+      })
+    refs.sentencePopup
+      .querySelector('[data-sentence-popup-action="speak"]')
+      ?.addEventListener('click', () => {
+        const sentence = draft.sentence || ''
+        if (!sentence || !window.speechSynthesis) {
+          setStatus('当前环境暂不支持朗读。')
+          return
+        }
+        window.speechSynthesis.cancel()
+        const utterance = new SpeechSynthesisUtterance(sentence)
+        utterance.lang = 'en-US'
+        window.speechSynthesis.speak(utterance)
+        setStatus('正在朗读整句。')
+      })
+    refs.sentencePopup
+      .querySelector('[data-sentence-popup-action="collect"]')
+      ?.addEventListener('click', async () => {
+        for (const entry of draft.vocab || []) {
+          if (!panelState.extensionState.savedWords?.[entry.word]) {
+            await handleSave(buildWordEntry(entry.word))
+          }
+        }
+        setStatus('句中生词已收录到收藏夹。')
+      })
+  }
+
+  function showSentencePopupLoading(anchorTarget) {
+    if (!refs?.sentencePopup) return
+    sentencePopupVisible = true
+    sentencePopupAnchor = anchorTarget instanceof Range ? null : anchorTarget
+    sentencePopupRange = anchorTarget instanceof Range ? anchorTarget : null
+    sentencePopupRect = snapshotFloatingAnchorRect(anchorTarget)
+    refs.sentencePopup.classList.remove('linswift-hidden')
+    refs.sentencePopup.innerHTML = `
+      <section class="linswift-sentence-popup-card">
+        <p class="linswift-sentence-popup-title">划句翻译</p>
+        <p class="linswift-tooltip-loading">正在生成整句译文与句中词汇…</p>
+      </section>
+    `
+    positionFloatingCard(refs.sentencePopup, sentencePopupRect || sentencePopupRange || sentencePopupAnchor)
+  }
+
   function scheduleHideInlineTooltip() {
     clearInlineTooltipHideTimer()
     inlineTooltipHideTimer = window.setTimeout(() => {
@@ -2982,16 +4565,19 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
 
   async function fetchWordDetail(word) {
     const normalizedWord = String(word || '').trim().toLowerCase()
+    const targetLanguage = getTranslationLanguage()
+    const translationMode = getTranslationMode()
     if (!normalizedWord) {
       throw new Error('缺少单词')
     }
 
-    if (wordDetailCache.has(normalizedWord)) {
-      return wordDetailCache.get(normalizedWord)
+    const cacheKey = getWordDetailCacheKey(normalizedWord, targetLanguage)
+    if (wordDetailCache.has(cacheKey)) {
+      return wordDetailCache.get(cacheKey)
     }
 
     const fallback = getWordDetailFallback(normalizedWord)
-    wordDetailCache.set(normalizedWord, fallback)
+    wordDetailCache.set(cacheKey, fallback)
 
     try {
       const resultEntry = getResultEntry(normalizedWord)
@@ -2999,6 +4585,8 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
         type: 'panel-word-detail',
         word: normalizedWord,
         context: String(resultEntry?.snippet || '').trim(),
+        targetLanguage,
+        translationMode,
       })
 
       const detail = {
@@ -3006,7 +4594,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
         ...(response.detail || {}),
         word: normalizedWord,
       }
-      wordDetailCache.set(normalizedWord, detail)
+      wordDetailCache.set(cacheKey, detail)
       updateInlineTranslationForWord(normalizedWord, detail.meaning || detail.note || '')
       return detail
     } catch {
@@ -3044,14 +4632,39 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     if (!selectionTarget) return
 
     try {
-      await initializePanelState()
+      await initializePanelState(true)
     } catch {}
 
     hideInlineTooltip(true)
+    hideSentencePopup(false)
     clearHighlights()
 
+    if (selectionTarget.type === 'sentence') {
+      const sentenceRange = selectionTarget.range.cloneRange()
+      const anchor = applySelectionHighlight(selectionTarget.range, selectionTarget.sentence)
+      if (!anchor) return
+      lastSelectionTooltipOpenedAt = Date.now()
+      const draft = buildSentenceDraft({
+        sentence: selectionTarget.sentence,
+        before: selectionTarget.before,
+        after: selectionTarget.after,
+      })
+      panelState.sentenceDraft = draft
+      showSentencePopupLoading(sentenceRange)
+      await enrichSentenceDraft(draft)
+      panelState.sentenceDraft = draft
+      renderSentencePopup(draft)
+      sentencePopupVisible = true
+      sentencePopupAnchor = anchor
+      sentencePopupRange = sentenceRange
+      sentencePopupRect = snapshotFloatingAnchorRect(sentenceRange) || snapshotFloatingAnchorRect(anchor)
+      refs.sentencePopup.classList.remove('linswift-hidden')
+      positionFloatingCard(refs.sentencePopup, sentencePopupRect || sentencePopupRange || sentencePopupAnchor)
+      setStatus('已显示划句翻译弹窗。')
+      return
+    }
+
     const highlight = applySelectionHighlight(selectionTarget.range, selectionTarget.word)
-    selectionTarget.selection.removeAllRanges()
     if (!highlight) return
 
     lastSelectionTooltipOpenedAt = Date.now()
@@ -3061,14 +4674,31 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     })
   }
 
-  function pronounceWord(word) {
+  function pronounceWord(word, variant = getPronunciationVariant(), detail = null) {
     const normalizedWord = String(word || '').trim()
     if (!normalizedWord || !('speechSynthesis' in window)) return
 
     try {
+      const normalizedVariant = variant === 'uk' || variant === 'us' ? variant : 'us'
+      const preferredDetail = detail || getCachedWordDetail(normalizedWord) || null
+      const preferredAudio = normalizedVariant === 'uk'
+        ? preferredDetail?.audioUk || preferredDetail?.audioUs || ''
+        : preferredDetail?.audioUs || preferredDetail?.audioUk || ''
+      if (preferredAudio) {
+        const audio = new Audio(preferredAudio)
+        void audio.play().catch(() => {})
+        return
+      }
       window.speechSynthesis.cancel()
       const utterance = new SpeechSynthesisUtterance(normalizedWord)
-      utterance.lang = 'en-US'
+      utterance.lang = normalizedVariant === 'uk' ? 'en-GB' : 'en-US'
+      const voices = window.speechSynthesis.getVoices?.() || []
+      const matchedVoice = voices.find((voice) =>
+        normalizedVariant === 'uk'
+          ? /^en(-|_)?gb/i.test(voice.lang)
+          : /^en(-|_)?us/i.test(voice.lang)
+      )
+      if (matchedVoice) utterance.voice = matchedVoice
       window.speechSynthesis.speak(utterance)
     } catch {}
   }
@@ -3562,19 +5192,57 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
   }
 
   function getUiScale() {
-    const rawScale = Number(panelState.extensionState.settings.uiScale || 0.56)
-    if (!Number.isFinite(rawScale)) return 0.56
-    return Math.min(0.88, Math.max(0.5, rawScale))
+    return getUiScaleStep().scale
+  }
+
+  function getUiScaleStep(rawValue = panelState.extensionState.settings.uiScale) {
+    const numericValue = Number(rawValue)
+    if (!Number.isFinite(numericValue)) return { ...UI_SCALE_STEPS[2], index: 2 }
+    let matchedIndex = 0
+    let smallestDiff = Number.POSITIVE_INFINITY
+    UI_SCALE_STEPS.forEach((step, index) => {
+      const diff = Math.abs(step.value - numericValue)
+      if (diff < smallestDiff) {
+        smallestDiff = diff
+        matchedIndex = index
+      }
+    })
+    return { ...UI_SCALE_STEPS[matchedIndex], index: matchedIndex }
+  }
+
+  function getUiScaleStepByIndex(index) {
+    const safeIndex = Math.min(
+      UI_SCALE_STEPS.length - 1,
+      Math.max(0, Number.isFinite(Number(index)) ? Number(index) : 2)
+    )
+    return { ...UI_SCALE_STEPS[safeIndex], index: safeIndex }
+  }
+
+  function syncUiScaleControl(rawValue = panelState.extensionState.settings.uiScale) {
+    const step = getUiScaleStep(rawValue)
+    const progress = `${(step.index / (UI_SCALE_STEPS.length - 1)) * 100}%`
+    if (refs?.sizeSlider) {
+      refs.sizeSlider.value = String(step.index)
+      refs.sizeSlider.setAttribute('aria-valuetext', step.label)
+    }
+    if (refs?.sizeSliderWrap) {
+      refs.sizeSliderWrap.style.setProperty('--linswift-scale-progress', progress)
+    }
+    if (refs?.sizeSliderLabel) {
+      refs.sizeSliderLabel.textContent = step.label
+    }
+  }
+
+  function previewUiScale(stepIndex) {
+    const step = getUiScaleStepByIndex(stepIndex)
+    if (refs?.root) {
+      refs.root.style.setProperty('--linswift-ui-scale', String(step.scale))
+    }
+    syncUiScaleControl(step.value)
   }
 
   function applyUiScale() {
-    const scale = getUiScale()
-    if (refs?.root) {
-      refs.root.style.setProperty('--linswift-ui-scale', String(scale))
-    }
-    if (refs?.sizeSelect) {
-      refs.sizeSelect.value = String(scale)
-    }
+    previewUiScale(getUiScaleStep().index)
   }
 
   function setLoading(isLoading) {
@@ -3593,27 +5261,58 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
   }
 
   function syncListVisibility() {
-    if (!refs) return
-
-    refs.saved.classList.toggle('linswift-hidden', !panelState.showingSaved)
-    refs.results.classList.toggle('linswift-hidden', panelState.showingSaved)
-    refs.savedToggle.classList.toggle('linswift-tab--active', panelState.showingSaved)
-    refs.resultsToggle.classList.toggle('linswift-tab--active', !panelState.showingSaved)
+    if (!refs?.results) return
   }
 
   function syncPanelPageVisibility() {
     if (!refs) return
 
+    const showingTranslate = panelState.activePage === 'translate'
     const showingSettings = panelState.activePage === 'settings'
-    refs.translatePage.classList.toggle('linswift-hidden', showingSettings)
+    const showingLogin = panelState.activePage === 'login'
+    const showingSentence = panelState.activePage === 'sentence'
+    refs.translatePage.classList.toggle('linswift-hidden', !showingTranslate)
     refs.settingsPage.classList.toggle('linswift-hidden', !showingSettings)
-    refs.translatePageToggle.classList.toggle('linswift-tab--active', !showingSettings)
+    refs.loginPage?.classList.toggle('linswift-hidden', !showingLogin)
+    refs.sentencePage?.classList.toggle('linswift-hidden', !showingSentence)
+    refs.translatePageToggle.classList.toggle('linswift-tab--active', showingTranslate)
     refs.settingsPageToggle.classList.toggle('linswift-tab--active', showingSettings)
   }
 
   function setActivePanelPage(nextPage) {
-    panelState.activePage = nextPage === 'settings' ? 'settings' : 'translate'
+    if (!panelState.auth?.isAuthenticated && nextPage !== 'login') {
+      panelState.activePage = 'login'
+    } else {
+      panelState.activePage =
+      nextPage === 'settings' || nextPage === 'login' || nextPage === 'sentence'
+        ? nextPage
+        : 'translate'
+    }
     syncPanelPageVisibility()
+    if (refs?.body) refs.body.scrollTop = 0
+  }
+
+  function restoreDefaultPageForLoggedOutState() {
+    if (!panelState.auth?.isAuthenticated) {
+      panelState.activePage = 'login'
+      syncPanelPageVisibility()
+    }
+  }
+
+  function isSentenceSmartVocabEnabled() {
+    return panelState.extensionState?.settings?.sentenceSmartVocabEnabled !== false
+  }
+
+  async function setSentenceSmartVocabEnabled(enabled) {
+    const nextSettings = {
+      ...panelState.extensionState.settings,
+      sentenceSmartVocabEnabled: Boolean(enabled),
+    }
+    const response = await sendRuntimeMessage({
+      type: 'panel-save-settings',
+      settings: nextSettings,
+    })
+    panelState.extensionState.settings = response.settings
   }
 
   function renderYouTubeCard() {
@@ -3701,6 +5400,123 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       })
   }
 
+  function buildSentenceDraft(payload = {}) {
+    const seedWord = String(payload.seedWord || '').trim().toLowerCase()
+    const explicitSentence = collapseWhitespace(payload.sentence || '')
+    const segments = extractVisibleSegments()
+    const preferredSegments = segments.filter((segment) =>
+      ['p', 'li', 'blockquote'].includes(String(segment?.tagName || '').toLowerCase())
+    )
+    const segmentSource = preferredSegments.length > 0 ? preferredSegments : segments
+    const matchedSegment = seedWord
+      ? segmentSource.find((segment) =>
+          String(segment?.text || '').toLowerCase().includes(seedWord)
+        )
+      : segmentSource[0]
+    const resultSnippet = seedWord
+      ? panelState.lastAnalysis?.results?.find(
+          (item) => String(item.word || '').trim().toLowerCase() === seedWord
+        )?.snippet
+      : panelState.lastAnalysis?.results?.[0]?.snippet
+    const sentence = explicitSentence ||
+      collapseWhitespace(matchedSegment?.text || resultSnippet || 'Select a sentence to translate with Linswift.')
+
+    return {
+      mode: payload.mode || `${getCurrentHostname() || '当前网页'} · 划句模式`,
+      before: collapseWhitespace(payload.before || ''),
+      sentence,
+      after: collapseWhitespace(payload.after || ''),
+      title: payload.title || '整句翻译',
+      translation: '正在生成整句译文...',
+      vocab: Array.isArray(payload.vocab) ? payload.vocab : [],
+    }
+  }
+
+  function buildSentenceVocab(results) {
+    return (results || []).slice(0, 5).map((item) => ({
+      word: item.word,
+      meaning: item.meaning || item.note || item.snippet || '',
+    }))
+  }
+
+  async function enrichSentenceDraft(draft) {
+    if (!draft?.sentence) return draft
+
+    try {
+      const response = await sendRuntimeMessage({
+        type: 'panel-translate-lines',
+        lines: [draft.sentence],
+        targetLanguage: getTranslationLanguage(),
+        translationMode: getTranslationMode(),
+      })
+      draft.translation = response.lines?.[0] || draft.sentence
+    } catch {
+      draft.translation = draft.sentence
+    }
+
+    if (!isSentenceSmartVocabEnabled()) {
+      draft.vocab = []
+      return draft
+    }
+
+    try {
+      const analysisResponse = await sendRuntimeMessage({
+        type: 'panel-analyze-page',
+        pageData: {
+          title: document.title,
+          url: window.location.href,
+          segments: [{ text: draft.sentence, tagName: 'p' }],
+        },
+      })
+      draft.vocab = buildSentenceVocab(analysisResponse.analysis?.results)
+    } catch {
+      draft.vocab = draft.vocab || []
+    }
+
+    return draft
+  }
+
+  async function openSentencePage(source = '') {
+    createPanel()
+
+    try {
+      await initializePanelState(true)
+    } catch {}
+
+    let draft
+
+    if (typeof source === 'object' && source?.sentence) {
+      draft = buildSentenceDraft({
+        sentence: source.sentence,
+        before: source.before,
+        after: source.after,
+      })
+    } else {
+      const currentSelectionTarget = getSelectionLookupTarget()
+      if (currentSelectionTarget?.type === 'sentence') {
+        draft = buildSentenceDraft({
+          sentence: currentSelectionTarget.sentence,
+          before: currentSelectionTarget.before,
+          after: currentSelectionTarget.after,
+        })
+      } else {
+      draft = buildSentenceDraft({
+        seedWord: String(source || panelState.lastAnalysis?.results?.[0]?.word || ''),
+      })
+      }
+    }
+
+    panelState.sentenceDraft = draft
+    renderSentencePage()
+    setActivePanelPage('sentence')
+    setStatus('正在生成整句翻译...')
+
+    await enrichSentenceDraft(draft)
+    panelState.sentenceDraft = draft
+    renderSentencePage()
+    setStatus('已切换到划句翻译模式。')
+  }
+
   function renderSummary() {
     if (!refs) return
 
@@ -3718,13 +5534,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       panelState.lastAnalysis?.results
     )
 
-    refs.headline.textContent = resultCount
-      ? isYouTubeContext
-        ? `本视频识别出 ${resultCount} 个陌生词`
-        : `检测到 ${resultCount} 个陌生词汇`
-      : isYouTubeContext
-        ? '准备分析当前视频字幕'
-        : '检测当前网页里的生词'
+    refs.headline.textContent = ''
 
     try {
       const hostname = new URL(pageUrl).hostname
@@ -3740,16 +5550,36 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
                     ? '当前视频没有可用字幕轨道'
                     : '等待连接 Linswift 字幕'
             }`
-          : `准备扫描当前网页 · ${hostname}`
+          : `当前网页 · ${hostname}`
     } catch {
       refs.pageMeta.textContent = pageTitle
     }
 
     refs.detectedCount.textContent = String(resultCount)
+    refs.translateDashboard?.classList.toggle(
+      'linswift-translate-dashboard--compact',
+      resultCount > 0
+    )
+    if (refs.scanCount) {
+      refs.scanCount.textContent = String(panelState.lastAnalysis?.meta?.totalTokens || 0)
+    }
     refs.comprehension.textContent = Number.isFinite(comprehension) ? `${comprehension}%` : '--'
     refs.knownCount.textContent = String(panelState.extensionState.knownWords.length)
+    if (refs.authChip && refs.authMeta) {
+      if (panelState.auth.isAuthenticated) {
+        refs.authChip.textContent = '账号已连接'
+        refs.authChip.classList.add('linswift-chip--accent')
+        refs.authMeta.textContent = ''
+        if (refs.openLoginButton) refs.openLoginButton.textContent = '同步完成'
+      } else {
+        refs.authChip.textContent = '请先登录'
+        refs.authChip.classList.remove('linswift-chip--accent')
+        refs.authMeta.textContent = ''
+        if (refs.openLoginButton) refs.openLoginButton.textContent = '登录账号'
+      }
+    }
     refs.headerSubtitle.textContent = isYouTubeContext ? 'YouTube 字幕模式' : '网页生词雷达'
-    refs.kicker.textContent = isYouTubeContext ? '视频字幕' : '词汇弹窗'
+    refs.kicker.textContent = isYouTubeContext ? '视频字幕' : '翻译插件'
     refs.studyButton.textContent = isYouTubeContext ? '先学字幕词' : '先学习'
     if (refs.scanButton && !panelState.loading) {
       refs.scanButton.textContent = isYouTubeContext ? '刷新字幕' : '重新扫描'
@@ -3769,9 +5599,10 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     if (refs.translationModeSelect) {
       refs.translationModeSelect.value = getTranslationMode()
     }
-    if (refs.sizeSelect) {
-      refs.sizeSelect.value = String(getUiScale())
+    if (refs.pronunciationVariantSelect) {
+      refs.pronunciationVariantSelect.value = getPronunciationVariant()
     }
+    syncUiScaleControl()
     if (refs.autoTranslateToggle) {
       refs.autoTranslateToggle.textContent = `自动翻译网页：${
         panelState.extensionState.settings.autoTranslateOnLoad ? '开' : '关'
@@ -3795,8 +5626,44 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     syncBubble()
   }
 
+  function renderSentencePage() {
+    if (!refs?.sentencePage) return
+    const draft = panelState.sentenceDraft || buildSentenceDraft()
+    const smartVocabEnabled = isSentenceSmartVocabEnabled()
+    refs.sentenceMode.textContent = draft.mode
+    refs.sentenceBefore.textContent = draft.before || '选中一整句后，Linswift 会在这里保留它的上文。'
+    refs.sentenceHighlight.textContent = draft.sentence
+    refs.sentenceAfter.textContent = draft.after || '下文会一起保留，方便你在阅读流中理解整句。'
+    refs.sentenceTitle.textContent = draft.title
+    refs.sentenceTranslation.textContent = draft.translation
+    refs.sentenceSaveButton.textContent = `智慧识词：${smartVocabEnabled ? '开' : '关'}`
+    refs.sentenceSaveButton.classList.toggle('linswift-button--primary', smartVocabEnabled)
+    refs.sentenceVocabTitle.textContent = smartVocabEnabled
+      ? draft.vocab.length
+        ? `识别到 ${draft.vocab.length} 个值得学习的词汇：`
+        : '当前句子里还没有明显需要单独收录的生词。'
+      : '智慧识词已关闭，当前只进行整句翻译。'
+    refs.sentenceVocabList.innerHTML = smartVocabEnabled && draft.vocab.length
+      ? draft.vocab.map((entry) => `
+        <span class="linswift-sentence-vocab-chip">
+          <strong>${escapeHtml(entry.word)}</strong>
+          <span>${escapeHtml(entry.meaning)}</span>
+          <span>+</span>
+        </span>
+      `).join('')
+      : smartVocabEnabled
+        ? '<span class="linswift-page-meta">继续划句，或先扫描整页后再回来看句中词。</span>'
+        : '<span class="linswift-page-meta">开启智慧识词后，这里会显示句中值得学习的词汇。</span>'
+    refs.sentenceCollectButton.textContent = smartVocabEnabled
+      ? draft.vocab.length
+        ? `一键收录 ${draft.vocab.length} 个句中生词`
+        : '暂时没有句中生词可收录'
+      : '开启智慧识词后可收录'
+    refs.sentenceCollectButton.disabled = !smartVocabEnabled || draft.vocab.length === 0
+  }
+
   function renderSavedWords() {
-    if (!refs) return
+    if (!refs?.saved) return
 
     const savedWords = Object.values(panelState.extensionState.savedWords || {}).sort((a, b) => {
       return new Date(b.savedAt || 0).getTime() - new Date(a.savedAt || 0).getTime()
@@ -3823,16 +5690,20 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
             <p class="linswift-card-word">${escapeHtml(entry.word)}</p>
             <p class="linswift-card-meta">${escapeHtml(entry.pageTitle || 'Linswift 云端词库')}</p>
           </div>
-          <span class="linswift-tag">收藏</span>
+          <span class="linswift-chip linswift-chip--accent">收藏</span>
         </div>
         <p class="linswift-card-meaning">${escapeHtml(entry.meaning || entry.note || '暂无释义')}</p>
         <div class="linswift-card-actions">
           <button class="linswift-button" data-action="locate">定位</button>
+          <button class="linswift-button" data-action="sentence">整句</button>
           <button class="linswift-button" data-action="remove">移除</button>
         </div>
       `
 
       card.querySelector('[data-action="locate"]').addEventListener('click', () => handleHighlight(entry.word))
+      card.querySelector('[data-action="sentence"]').addEventListener('click', () => {
+        void openSentencePage(entry.word)
+      })
       card.querySelector('[data-action="remove"]').addEventListener('click', async () => {
         const response = await sendRuntimeMessage({ type: 'panel-toggle-saved', entry })
         panelState.extensionState.savedWords = response.savedWords
@@ -3848,6 +5719,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
   function renderResults(results) {
     if (!refs) return
 
+    if (!refs?.results) return
     refs.results.innerHTML = ''
 
     if (!results || results.length === 0) {
@@ -3855,42 +5727,77 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
         <div class="linswift-empty">
           ${
             panelState.youtube.enabled
-              ? '当前视频字幕里还没有识别到明显超出你阶段的词。<br />先播放几句并打开字幕，再刷新一次。'
-              : '当前页没有识别到明显超出你阶段的词。<br />可以切换词汇阶段后重新扫描。'
+              ? '当前视频字幕里还没有识别到明显超出你当前词库阶段的词。<br />先播放几句并打开字幕，再刷新一次。'
+              : '当前页没有识别到明显超出你当前词库阶段的词。<br />同步词库后再重新扫描会更准确。'
           }
         </div>
       `
       return
     }
 
-    results.forEach((item) => {
+    results.forEach((item, index) => {
       const saved = Boolean(panelState.extensionState.savedWords[item.word])
+      const saveCtaLabel = saved ? '已在生词本' : '加入生词本'
       const card = document.createElement('article')
-      card.className = 'linswift-card'
+      card.className = `linswift-card${index === 0 ? ' linswift-card--featured' : ''}`
+      const detailText = item.note || item.snippet || ''
+      const meaningMarkup = index === 0
+        ? `
+          <div class="linswift-card-feature-copy">
+            <div class="linswift-card-feature-meaning">
+              <p class="linswift-card-meaning">${escapeHtml(item.meaning || '释义补全中...')}</p>
+            </div>
+            ${detailText ? `<p class="linswift-card-feature-note">${escapeHtml(detailText.slice(0, 88))}</p>` : ''}
+          </div>
+        `
+        : `
+          <p class="linswift-card-meaning">${escapeHtml(item.meaning || '释义补全中...')}</p>
+          ${detailText ? `<p class="linswift-card-note">${escapeHtml(detailText)}</p>` : ''}
+        `
       card.innerHTML = `
         <div class="linswift-card-top">
-          <div>
+          <div class="linswift-card-top-main">
             <p class="linswift-card-word">${escapeHtml(item.word)}</p>
             <p class="linswift-card-meta">
               出现 ${item.count} 次 · ${escapeHtml(item.difficulty)}${item.rank ? ` · 词频 ${item.rank}` : ''}
             </p>
           </div>
-          <span class="linswift-tag">${Math.round(item.score * 100)}%</span>
+          <div class="linswift-card-top-side">
+            <button
+              class="linswift-save-star ${saved ? 'linswift-save-star--active' : ''}"
+              type="button"
+              data-action="save"
+              aria-label="${saved ? '取消收藏' : '收藏'}"
+              title="${saved ? '取消收藏' : '收藏'}"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 2.6l2.86 5.8 6.4.93-4.63 4.51 1.09 6.37L12 17.2l-5.72 3.01 1.09-6.37L2.74 9.33l6.4-.93L12 2.6z"></path>
+              </svg>
+            </button>
+          </div>
         </div>
-        <p class="linswift-card-snippet">${escapeHtml(item.snippet)}</p>
-        <p class="linswift-card-meaning">${escapeHtml(item.meaning || '释义补全中...')}</p>
-        ${item.note ? `<p class="linswift-card-note">${escapeHtml(item.note)}</p>` : ''}
+        <div class="linswift-card-inline-links">
+          <button class="linswift-card-inline-link linswift-card-inline-link--warm" type="button" data-action="known-link">标记掌握</button>
+          <button class="linswift-card-inline-link" type="button" data-action="save-link" ${saved ? 'disabled' : ''}>${saveCtaLabel}</button>
+        </div>
+        ${meaningMarkup}
         <div class="linswift-card-actions">
           <button class="linswift-button" data-action="locate">定位</button>
           <button class="linswift-button" data-action="known">掌握</button>
-          <button class="linswift-button ${saved ? 'linswift-tab--active' : ''}" data-action="save">
-            ${saved ? '取消收藏' : '收藏'}
-          </button>
+          <button class="linswift-button" data-action="save-cta" ${saved ? 'disabled' : ''}>${saveCtaLabel}</button>
         </div>
       `
 
       card.querySelector('[data-action="locate"]').addEventListener('click', () => handleHighlight(item.word))
       card.querySelector('[data-action="known"]').addEventListener('click', () => handleKnown(item.word))
+      card.querySelector('[data-action="known-link"]').addEventListener('click', () => handleKnown(item.word))
+      card.querySelector('[data-action="save-link"]')?.addEventListener('click', () => {
+        if (saved) {
+          setStatus(`${item.word} 已在生词本中。`)
+          return
+        }
+        void handleSave(buildWordEntry(item.word))
+      })
       card.querySelector('[data-action="save"]').addEventListener('click', () => handleSave({
         word: item.word,
         meaning: item.meaning || '',
@@ -3900,6 +5807,13 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
         pageUrl: panelState.lastAnalysis?.meta?.pageUrl || window.location.href,
         savedAt: new Date().toISOString(),
       }))
+      card.querySelector('[data-action="save-cta"]')?.addEventListener('click', () => {
+        if (saved) {
+          setStatus(`${item.word} 已在生词本中。`)
+          return
+        }
+        void handleSave(buildWordEntry(item.word))
+      })
 
       refs.results.appendChild(card)
     })
@@ -3910,15 +5824,20 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
 
     if (panelState.auth.isAuthenticated) {
       refs.authCard.innerHTML = `
+        <div class="linswift-settings-header">
+          <p class="linswift-auth-label">账户与同步</p>
+          <h3 class="linswift-settings-title">当前账号已连接</h3>
+          <p class="linswift-settings-desc">插件、网页和桌面端会使用同一份词库与设置。</p>
+        </div>
         <div class="linswift-auth-top">
           <div>
-            <p class="linswift-auth-label">账号</p>
             <p class="linswift-auth-email">${escapeHtml(panelState.auth.email || '已登录')}</p>
+            <p class="linswift-auth-note">同步状态稳定，可随时手动刷新云端数据。</p>
           </div>
-          <span class="linswift-tag">已连接</span>
+          <span class="linswift-chip linswift-chip--accent">已连接</span>
         </div>
         <div class="linswift-auth-actions">
-          <button class="linswift-button linswift-button--primary" type="button" data-auth-action="sync">同步词库</button>
+          <button class="linswift-button linswift-button--primary" type="button" data-auth-action="sync">立即同步</button>
           <button class="linswift-button" type="button" data-auth-action="signout">退出登录</button>
         </div>
       `
@@ -3933,26 +5852,96 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     }
 
     refs.authCard.innerHTML = `
-      <form class="linswift-auth-form" data-auth-form>
-        <div>
-          <p class="linswift-auth-label">登录账号</p>
-        </div>
-        <input class="linswift-input" type="email" placeholder="邮箱" autocomplete="email" data-auth-email />
-        <input class="linswift-input" type="password" placeholder="密码" autocomplete="current-password" data-auth-password />
-        <button class="linswift-button linswift-button--primary" type="submit" data-auth-action="signin">登录并同步</button>
-      </form>
+      <div class="linswift-settings-header">
+        <p class="linswift-auth-label">账户与同步</p>
+        <h3 class="linswift-settings-title">请先登录 Linswift 账号</h3>
+        <p class="linswift-settings-desc">登录后即可同步生词夹、阅读进度与插件设置。</p>
+      </div>
+      <div class="linswift-auth-actions">
+        <button class="linswift-button linswift-button--primary" type="button" data-auth-action="open-login">登录账号</button>
+      </div>
     `
 
     refs.authCard
+      .querySelector('[data-auth-action="open-login"]')
+      .addEventListener('click', () => {
+        renderLoginPage()
+        setActivePanelPage('login')
+      })
+    renderLoginPage()
+  }
+
+  function renderLoginPage() {
+    if (!refs?.loginAuthCard) return
+
+    refs.loginAuthCard.innerHTML = `
+      <section class="linswift-login-shell">
+        <div class="linswift-login-header">
+          <p class="linswift-auth-label">账号同步</p>
+          <h3 class="linswift-login-title">登录后同步生词夹、阅读进度与插件设置</h3>
+          <p class="linswift-login-desc">继续使用同一账户，即可在网页划词、翻译结果和桌面端设置之间无缝接续。</p>
+        </div>
+        <form class="linswift-auth-form" data-auth-form>
+          <input class="linswift-input" type="email" placeholder="name@example.com" autocomplete="email" data-auth-email />
+          <input class="linswift-input" type="password" placeholder="••••••••••••" autocomplete="current-password" data-auth-password />
+          <button class="linswift-inline-link" type="button" data-auth-forgot>忘记密码？</button>
+          <button class="linswift-button linswift-button--primary" type="submit" data-auth-action="signin">登录并同步</button>
+        </form>
+      </section>
+      <section class="linswift-login-shell linswift-login-shell--secondary">
+        <div class="linswift-login-header">
+          <p class="linswift-auth-label">其他方式</p>
+          <h3 class="linswift-login-kicker">使用其他方式继续</h3>
+          <p class="linswift-login-desc">第三方登录和注册入口保留为辅助操作。</p>
+        </div>
+        <div class="linswift-login-alt">
+          <div class="linswift-divider-row">
+            <span></span>
+            <em>其他方式登录</em>
+            <span></span>
+          </div>
+          <div class="linswift-oauth-row">
+            <button class="linswift-oauth-button linswift-oauth-button--google" type="button" data-auth-oauth="google">Google</button>
+            <button class="linswift-oauth-button linswift-oauth-button--apple" type="button" data-auth-oauth="apple">Apple</button>
+          </div>
+          <div class="linswift-register-row">
+            <span class="linswift-page-meta">还没有账号？</span>
+            <button class="linswift-inline-link" type="button" data-auth-register>注册</button>
+          </div>
+        </div>
+      </section>
+    `
+
+    refs.loginAuthCard
       .querySelector('[data-auth-form]')
       .addEventListener('submit', (event) => {
         event.preventDefault()
         void handleSignIn()
       })
+    refs.loginAuthCard
+      .querySelector('[data-auth-forgot]')
+      .addEventListener('click', () => window.open('https://www.linswift.com/login', '_blank'))
+    refs.loginAuthCard
+      .querySelector('[data-auth-register]')
+      .addEventListener('click', () => window.open('https://www.linswift.com/register', '_blank'))
+    refs.loginAuthCard
+      .querySelectorAll('[data-auth-oauth]')
+      .forEach((button) => {
+        button.addEventListener('click', () => {
+          setStatus('当前插件先支持邮箱登录，第三方登录入口稍后开放。')
+        })
+      })
   }
 
   async function sendRuntimeMessage(payload) {
-    const response = await chrome.runtime.sendMessage(payload)
+    const response = await Promise.race([
+      chrome.runtime.sendMessage(payload),
+      new Promise((_, reject) => {
+        globalThis.setTimeout(() => {
+          reject(new Error('扩展服务响应超时，请刷新插件后重试'))
+        }, RUNTIME_MESSAGE_TIMEOUT_MS)
+      }),
+    ])
     if (!response?.ok) {
       throw new Error(response?.error || '扩展消息失败')
     }
@@ -3983,7 +5972,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
 
   function buildWordEntry(word) {
     const normalizedWord = String(word || '').trim().toLowerCase()
-    const detail = wordDetailCache.get(normalizedWord) || getWordDetailFallback(normalizedWord)
+    const detail = getCachedWordDetail(normalizedWord) || getWordDetailFallback(normalizedWord)
     return {
       word: normalizedWord,
       meaning: detail.meaning || '',
@@ -4025,7 +6014,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     renderResults(panelState.lastAnalysis?.results || [])
     renderSavedWords()
     if (activeInlineWord) {
-      const detail = wordDetailCache.get(activeInlineWord) || getWordDetailFallback(activeInlineWord)
+      const detail = getCachedWordDetail(activeInlineWord) || getWordDetailFallback(activeInlineWord)
       renderTooltipContent(detail)
     }
     setStatus('收藏状态已更新。')
@@ -4040,8 +6029,8 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
   }
 
   async function handleSignIn() {
-    const emailInput = refs.authCard.querySelector('[data-auth-email]')
-    const passwordInput = refs.authCard.querySelector('[data-auth-password]')
+    const emailInput = refs.loginAuthCard?.querySelector('[data-auth-email]')
+    const passwordInput = refs.loginAuthCard?.querySelector('[data-auth-password]')
     const email = emailInput?.value?.trim() || ''
     const password = passwordInput?.value || ''
 
@@ -4058,9 +6047,9 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       renderAuthState()
       renderSavedWords()
       renderSummary()
-      setStatus(
-        `登录成功，已同步 ${response.syncSummary?.cloudWords || 0} 条云端词汇。`
-      )
+      setActivePanelPage('translate')
+      setStatus('登录成功，正在同步云端词库...')
+      void handleSyncCloud()
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '登录失败')
     }
@@ -4076,6 +6065,8 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
         expiresAt: null,
       }
       renderAuthState()
+      renderLoginPage()
+      setActivePanelPage('login')
       setStatus('已退出 Linswift 账号。')
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '退出失败')
@@ -4100,36 +6091,57 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
   }
 
   async function saveSettings() {
+    const previousSettings = typeof structuredClone === 'function'
+      ? structuredClone(panelState.extensionState.settings || {})
+      : JSON.parse(JSON.stringify(panelState.extensionState.settings || {}))
     const previousInlineTranslateEnabled = Boolean(
-      panelState.extensionState.settings.inlineTranslateEnabled
+      previousSettings.inlineTranslateEnabled
     )
-    const previousLanguage = panelState.extensionState.settings.translationLanguage || 'zh-CN'
-    const previousTranslationMode = panelState.extensionState.settings.translationMode || 'hybrid'
-    const previousYouTubeMode = panelState.extensionState.settings.youtubeSubtitleMode || 'vocab'
+    const previousLanguage = previousSettings.translationLanguage || 'zh-CN'
+    const previousTranslationMode = previousSettings.translationMode || 'ai'
+    const previousPronunciationVariant = previousSettings.pronunciationVariant || 'both'
+    const previousYouTubeMode = previousSettings.youtubeSubtitleMode || 'vocab'
     const nextSettings = {
-      ...panelState.extensionState.settings,
-      level: refs.levelSelect.value,
-      inlineTranslateEnabled: panelState.extensionState.settings.inlineTranslateEnabled,
+      ...previousSettings,
+      inlineTranslateEnabled: Boolean(panelState.extensionState.settings.inlineTranslateEnabled),
       autoTranslateOnLoad: Boolean(panelState.extensionState.settings.autoTranslateOnLoad),
       translationLanguage: refs.translationLanguageSelect.value || previousLanguage,
       translationMode: refs.translationModeSelect?.value || previousTranslationMode,
+      pronunciationVariant: refs.pronunciationVariantSelect?.value || previousPronunciationVariant,
       disabledAutoTranslateHosts: getDisabledAutoTranslateHosts(),
       youtubeSubtitleMode:
         refs.youtubeCard?.querySelector?.('[data-youtube-mode-select]')?.value || previousYouTubeMode,
-      uiScale: Number(refs.sizeSelect.value || panelState.extensionState.settings.uiScale || 0.56),
+      uiScale: getUiScaleStepByIndex(
+        refs.sizeSlider?.value ?? getUiScaleStep().index
+      ).value,
     }
 
-    const response = await sendRuntimeMessage({
-      type: 'panel-save-settings',
-      settings: nextSettings,
-    })
+    panelState.extensionState.settings = nextSettings
+    applyUiScale()
+    renderSummary()
+
+    let response
+    try {
+      response = await sendRuntimeMessage({
+        type: 'panel-save-settings',
+        settings: nextSettings,
+      })
+    } catch (error) {
+      panelState.extensionState.settings = previousSettings
+      applyUiScale()
+      renderSummary()
+      throw error
+    }
 
     panelState.extensionState.settings = response.settings
     applyUiScale()
 
     if (
       panelState.lastAnalysis?.results?.length &&
-      previousLanguage !== panelState.extensionState.settings.translationLanguage
+      (
+        previousLanguage !== panelState.extensionState.settings.translationLanguage ||
+        previousTranslationMode !== panelState.extensionState.settings.translationMode
+      )
     ) {
       wordDetailCache.clear()
       hideInlineTooltip(true)
@@ -4137,6 +6149,8 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       const enrichResponse = await sendRuntimeMessage({
         type: 'panel-enrich-results',
         results: panelState.lastAnalysis.results,
+        targetLanguage: getTranslationLanguage(),
+        translationMode: getTranslationMode(),
       })
       panelState.lastAnalysis.results = enrichResponse.results
       primeWordDetailCache(panelState.lastAnalysis.results)
@@ -4186,15 +6200,25 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
   }
 
   async function toggleInlineTranslate() {
-    panelState.extensionState.settings.inlineTranslateEnabled =
-      !panelState.extensionState.settings.inlineTranslateEnabled
-    await saveSettings()
+    const nextValue = !Boolean(panelState.extensionState.settings.inlineTranslateEnabled)
+    panelState.extensionState.settings.inlineTranslateEnabled = nextValue
+    try {
+      await saveSettings()
+      setStatus(`页内直译已${nextValue ? '开启' : '关闭'}。`)
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '页内直译设置保存失败')
+    }
   }
 
   async function toggleAutoTranslateOnLoad() {
     panelState.extensionState.settings.autoTranslateOnLoad =
       !Boolean(panelState.extensionState.settings.autoTranslateOnLoad)
-    await saveSettings()
+    try {
+      await saveSettings()
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '自动翻译设置保存失败')
+      return
+    }
 
     if (!panelState.extensionState.settings.autoTranslateOnLoad) {
       setStatus('已关闭网页自动翻译，圆球仍会常驻显示。')
@@ -4301,7 +6325,6 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       panelState.extensionState = analysisResponse.state
       panelState.lastAnalysis = analysisResponse.analysis
       primeWordDetailCache(panelState.lastAnalysis?.results)
-      refs.levelSelect.value = panelState.extensionState.settings.level || 'intermediate'
       renderSummary()
       renderResults(panelState.lastAnalysis.results)
       renderSavedWords()
@@ -4320,6 +6343,8 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       const enrichResponse = await sendRuntimeMessage({
         type: 'panel-enrich-results',
         results: panelState.lastAnalysis.results,
+        targetLanguage: getTranslationLanguage(),
+        translationMode: getTranslationMode(),
       })
 
       panelState.lastAnalysis.results = enrichResponse.results
@@ -4366,6 +6391,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
   function minimizePanel() {
     if (!refs) return
     hideInlineTooltip(true)
+    hideSentencePopup(true)
     panelState.minimized = true
     panelState.hidden = false
     refs.panel.classList.add('linswift-hidden')
@@ -4388,13 +6414,12 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
   function hidePanel() {
     if (!refs) return
     hideInlineTooltip(true)
-    panelState.hidden = false
-    panelState.minimized = true
+    hideSentencePopup(true)
+    panelState.hidden = true
+    panelState.minimized = false
     refs.panel.classList.add('linswift-hidden')
-    refs.bubble.classList.remove('linswift-hidden')
-    applyFloatingPosition(floatingPositionState)
-    syncBubble()
-    setStatus('Linswift 已收起为常驻圆球。')
+    refs.bubble.classList.add('linswift-hidden')
+    setStatus('Linswift 已关闭。点击浏览器工具栏图标可重新打开。')
     void persistCurrentFloatingPosition()
   }
 
@@ -4404,6 +6429,8 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     refs = {
       root,
       panel: root.querySelector('.linswift-panel'),
+      resizeHandle: root.querySelector('.linswift-resize-handle'),
+      body: root.querySelector('.linswift-body'),
       bubble: root.querySelector('.linswift-bubble'),
       bubbleBadge: root.querySelector('[data-bubble-count]'),
       youtubeOverlay: root.querySelector('[data-youtube-overlay]'),
@@ -4412,32 +6439,54 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       settingsPageToggle: root.querySelector('[data-panel-view="settings"]'),
       translatePage: root.querySelector('[data-panel-page="translate"]'),
       settingsPage: root.querySelector('[data-panel-page="settings"]'),
+      loginPage: root.querySelector('[data-panel-page="login"]'),
+      sentencePage: root.querySelector('[data-panel-page="sentence"]'),
       kicker: root.querySelector('[data-panel-kicker]'),
       headline: root.querySelector('[data-headline]'),
       pageMeta: root.querySelector('[data-page-meta]'),
+      translateDashboard: root.querySelector('.linswift-translate-dashboard'),
+      authChip: root.querySelector('[data-auth-chip]'),
+      authMeta: root.querySelector('[data-auth-meta]'),
       detectedCount: root.querySelector('[data-detected-count]'),
       comprehension: root.querySelector('[data-comprehension]'),
       knownCount: root.querySelector('[data-known-count]'),
+      scanCount: root.querySelector('[data-scan-count]'),
       authCard: root.querySelector('[data-auth-card]'),
       youtubeCard: root.querySelector('[data-youtube-card]'),
-      levelSelect: root.querySelector('[data-level-select]'),
       scanButton: root.querySelector('[data-scan-button]'),
       inlineToggle: root.querySelector('[data-inline-toggle]'),
       translationLanguageSelect: root.querySelector('[data-translation-language]'),
       translationModeSelect: root.querySelector('[data-translation-mode]'),
-      sizeSelect: root.querySelector('[data-size-select]'),
+      pronunciationVariantSelect: root.querySelector('[data-pronunciation-variant]'),
+      sizeSliderWrap: root.querySelector('[data-size-slider-wrap]'),
+      sizeSlider: root.querySelector('[data-size-slider]'),
+      sizeSliderLabel: root.querySelector('[data-size-slider-label]'),
       autoTranslateToggle: root.querySelector('[data-auto-translate-toggle]'),
       siteAutoTranslateToggle: root.querySelector('[data-site-auto-translate-toggle]'),
-      resultsToggle: root.querySelector('[data-view-results]'),
-      savedToggle: root.querySelector('[data-view-saved]'),
+      displaySettingsAction: root.querySelector('[data-display-settings-action]'),
       results: root.querySelector('[data-results-list]'),
-      saved: root.querySelector('[data-saved-list]'),
       status: root.querySelector('[data-status]'),
       studyButton: root.querySelector('[data-study-button]'),
+      openSentenceButton: root.querySelector('[data-open-sentence]'),
+      openLoginButton: root.querySelector('[data-open-login]'),
       header: root.querySelector('.linswift-header'),
       tooltip: root.querySelector('[data-inline-tooltip]'),
+      sentencePopup: root.querySelector('[data-sentence-popup]'),
       studyOverlay: root.querySelector('[data-study-overlay]'),
       openSettingsButton: root.querySelector('[data-open-settings]'),
+      loginAuthCard: root.querySelector('[data-login-auth-card]'),
+      sentenceMode: root.querySelector('[data-sentence-mode]'),
+      sentenceBefore: root.querySelector('[data-sentence-before]'),
+      sentenceHighlight: root.querySelector('[data-sentence-highlight]'),
+      sentenceAfter: root.querySelector('[data-sentence-after]'),
+      sentenceTitle: root.querySelector('[data-sentence-title]'),
+      sentenceTranslation: root.querySelector('[data-sentence-translation]'),
+      sentenceVocabTitle: root.querySelector('[data-sentence-vocab-title]'),
+      sentenceVocabList: root.querySelector('[data-sentence-vocab-list]'),
+      sentenceCollectButton: root.querySelector('[data-sentence-collect]'),
+      sentenceResumeButton: root.querySelector('[data-sentence-resume]'),
+      sentenceSpeakButton: root.querySelector('[data-sentence-speak]'),
+      sentenceSaveButton: root.querySelector('[data-sentence-save]'),
     }
 
     if (
@@ -4452,9 +6501,11 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       !refs.settingsPage ||
       !refs.kicker ||
       !refs.tooltip ||
+      !refs.sentencePopup ||
       !refs.studyOverlay ||
       !refs.translationLanguageSelect ||
-      !refs.translationModeSelect
+      !refs.translationModeSelect ||
+      !refs.pronunciationVariantSelect
     ) {
       refs = null
       return null
@@ -4480,6 +6531,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       </button>
       <section class="linswift-youtube-overlay linswift-hidden" data-youtube-overlay></section>
       <aside class="linswift-word-tooltip linswift-hidden" data-inline-tooltip></aside>
+      <aside class="linswift-sentence-popup linswift-hidden" data-sentence-popup></aside>
       <section class="linswift-study-overlay linswift-hidden" data-study-overlay></section>
       <section class="linswift-panel linswift-hidden">
         <header class="linswift-header">
@@ -4492,7 +6544,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
           </div>
           <div class="linswift-header-actions">
             <button class="linswift-minimize" type="button" data-action="minimize" title="缩成圆球">−</button>
-            <button class="linswift-close" type="button" data-action="close" title="收起为常驻圆球">×</button>
+            <button class="linswift-close" type="button" data-action="close" title="彻底关闭插件">×</button>
           </div>
         </header>
         <div class="linswift-body">
@@ -4501,54 +6553,61 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
             <button class="linswift-tab" type="button" data-panel-view="settings">设置</button>
           </section>
           <section class="linswift-page" data-panel-page="translate">
-            <section>
-              <p class="linswift-kicker" data-panel-kicker>词汇弹窗</p>
-              <h3 class="linswift-headline" data-headline>检测当前网页里的生词</h3>
-              <p class="linswift-page-meta" data-page-meta>准备扫描当前网页</p>
+            <section class="linswift-translate-shell">
+              <section class="linswift-translate-dashboard">
+                <p class="linswift-translate-summary-line" data-page-meta>当前网页 · 准备扫描</p>
+                <section class="linswift-translate-spotlight">
+                  <div class="linswift-translate-count">
+                    <strong data-detected-count>0</strong>
+                    <span>陌生词汇</span>
+                  </div>
+                  <div class="linswift-translate-meta">
+                    <div class="linswift-translate-meta-top">
+                      <p class="linswift-kicker" data-panel-kicker>词汇弹窗</p>
+                      <h3 class="linswift-headline linswift-hidden" data-headline></h3>
+                      <p class="linswift-translate-note linswift-hidden" data-auth-meta></p>
+                    </div>
+                    <section class="linswift-metrics">
+                      <article class="linswift-metric linswift-metric--cool">
+                        <strong data-scan-count>0</strong>
+                        <span>扫描词数</span>
+                      </article>
+                      <article class="linswift-metric linswift-metric--cool">
+                        <strong data-known-count>0</strong>
+                        <span>已掌握</span>
+                      </article>
+                      <article class="linswift-metric linswift-hidden">
+                        <strong data-comprehension>100%</strong>
+                        <span>可理解度</span>
+                      </article>
+                    </section>
+                  </div>
+                </section>
+                <section class="linswift-cta-row">
+                  <button class="linswift-cta linswift-cta--primary" type="button" data-study-button>先学习</button>
+                  <button class="linswift-cta linswift-cta--ghost" type="button" data-scan-button>重新扫描</button>
+                </section>
+                <section class="linswift-translate-links">
+                  <button class="linswift-chip-button" type="button" data-open-sentence>整句模式</button>
+                  <button class="linswift-chip-button" type="button" data-open-settings>翻译设置</button>
+                  <button class="linswift-chip-button" type="button" data-open-login>账号同步</button>
+                </section>
+                <section class="linswift-youtube-card linswift-hidden" data-youtube-card></section>
+              </section>
+              <section class="linswift-result-head">
+                <h3 class="linswift-result-title">识别结果</h3>
+              </section>
+              <p class="linswift-result-copy" data-status>点击“先学习”开始扫描当前网页。</p>
+              <section class="linswift-results-list" data-results-list></section>
             </section>
-            <section class="linswift-metrics">
-              <article class="linswift-metric linswift-metric--warm">
-                <strong data-detected-count>0</strong>
-                <span>陌生词汇</span>
-              </article>
-              <article class="linswift-metric linswift-metric--cool">
-                <strong data-comprehension>100%</strong>
-                <span>可理解度</span>
-              </article>
-            </section>
-            <section class="linswift-cta-row">
-              <button class="linswift-cta linswift-cta--ghost" type="button" data-study-button>先学习</button>
-              <button class="linswift-cta linswift-cta--primary" type="button" data-action="minimize">继续阅读</button>
-            </section>
-            <section class="linswift-youtube-card linswift-hidden" data-youtube-card></section>
-            <section class="linswift-translate-actions">
-              <button class="linswift-button linswift-button--primary" type="button" data-scan-button>重新扫描</button>
-              <button class="linswift-button" type="button" data-open-settings>翻译设置</button>
-            </section>
-            <section class="linswift-tabs">
-              <button class="linswift-tab linswift-tab--active" type="button" data-view-results>识别结果</button>
-              <button class="linswift-tab" type="button" data-view-saved>收藏夹 0</button>
-            </section>
-            <p class="linswift-status" data-status>点击“先学习”开始扫描当前网页。</p>
-            <div class="linswift-list-wrap">
-              <section data-results-list></section>
-              <section class="linswift-hidden" data-saved-list></section>
-            </div>
-            <div class="linswift-footer-meta">
-              <p class="linswift-kicker">已掌握：<span data-known-count>0</span></p>
-            </div>
           </section>
           <section class="linswift-page linswift-hidden" data-panel-page="settings">
             <div class="linswift-settings-stack">
-              <section class="linswift-auth-card" data-auth-card></section>
-              <section class="linswift-toolbar">
-                <p class="linswift-section-label">语言与识别</p>
+              <section class="linswift-settings-group">
+                <div class="linswift-settings-header">
+                  <p class="linswift-section-label">语言与识别</p>
+                </div>
                 <div class="linswift-toolbar-row linswift-toolbar-row--secondary">
-                  <select class="linswift-select" data-level-select>
-                    <option value="beginner">初级</option>
-                    <option value="intermediate">中级</option>
-                    <option value="advanced">高级</option>
-                  </select>
                   <select class="linswift-select" data-translation-language aria-label="页内直译语言">
                     <option value="zh-CN">页内直译 · 简中</option>
                     <option value="zh-TW">页内直译 · 繁中</option>
@@ -4566,30 +6625,86 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
                   <div class="linswift-tag">网页 / 字幕</div>
                 </div>
                 <div class="linswift-toolbar-row linswift-toolbar-row--secondary">
+                  <select class="linswift-select" data-pronunciation-variant aria-label="默认发音类型">
+                    <option value="both">音标展示 · 英 / 美</option>
+                    <option value="uk">默认发音 · 英式</option>
+                    <option value="us">默认发音 · 美式</option>
+                  </select>
+                  <div class="linswift-tag">音标 / 发音</div>
+                </div>
+                <div class="linswift-toolbar-row linswift-toolbar-row--secondary">
                   <button class="linswift-button" type="button" data-inline-toggle>页内直译：关</button>
                   <button class="linswift-button" type="button" data-auto-translate-toggle>自动翻译网页：开</button>
                 </div>
-                <div class="linswift-toolbar-row linswift-toolbar-row--secondary">
+                <div class="linswift-toolbar-row linswift-toolbar-row--full">
                   <button class="linswift-button" type="button" data-site-auto-translate-toggle>当前网站自动翻译</button>
-                  <button class="linswift-button" type="button" data-panel-view-back="translate">查看翻译页</button>
                 </div>
-                <p class="linswift-settings-note">网页 / 字幕翻译引擎现在可选混合、DeepL 或 AI。开启自动翻译后，刷新网页会自动重新识别并标注。关闭当前网站后会记住该站点，下次不再自动翻译。</p>
+                <p class="linswift-settings-note">词汇筛选会自动同步你的云端词库阶段。网页 / 字幕翻译引擎可选 DeepL 或 AI。</p>
               </section>
-              <section class="linswift-toolbar">
-                <p class="linswift-section-label">界面与显示</p>
+              <section class="linswift-settings-group">
+                <div class="linswift-settings-header">
+                  <p class="linswift-section-label">界面与显示</p>
+                  <h3 class="linswift-settings-title">面板尺寸与呈现方式</h3>
+                  <p class="linswift-settings-desc">统一控制插件面板体量和阅读密度。</p>
+                </div>
                 <div class="linswift-toolbar-row linswift-toolbar-row--secondary">
-                  <select class="linswift-select" data-size-select aria-label="界面尺寸">
-                    <option value="0.56">界面 56%</option>
-                    <option value="0.72">界面 72%</option>
-                    <option value="0.88">界面 88%</option>
-                  </select>
-                  <div class="linswift-tag">Glass UI</div>
+                  <div class="linswift-scale-control" data-size-slider-wrap>
+                    <div class="linswift-scale-track" aria-hidden="true">
+                      <span class="linswift-scale-track-fill"></span>
+                      <span class="linswift-scale-stop"></span>
+                      <span class="linswift-scale-stop"></span>
+                      <span class="linswift-scale-stop"></span>
+                      <span class="linswift-scale-stop"></span>
+                      <span class="linswift-scale-stop"></span>
+                    </div>
+                    <input class="linswift-scale-range" data-size-slider type="range" min="0" max="4" step="1" value="2" aria-label="界面尺寸" />
+                    <div class="linswift-scale-meta">
+                      <span class="linswift-scale-title">拖动调节</span>
+                      <strong class="linswift-scale-value" data-size-slider-label>标准</strong>
+                    </div>
+                  </div>
+                  <button class="linswift-button linswift-button--soft" type="button" data-display-settings-action>点击设置</button>
                 </div>
-                <p class="linswift-settings-note">这里统一控制账户、目标语言、页内直译和界面大小。翻译结果与 YouTube 字幕会同步使用这些设置。</p>
+                <p class="linswift-settings-note">这里统一控制账户、目标语言、页内直译和界面大小。翻译结果与字幕页会同步使用这些设置。</p>
               </section>
+              <section class="linswift-auth-card" data-auth-card></section>
             </div>
           </section>
+          <section class="linswift-page linswift-hidden linswift-login-page" data-panel-page="login">
+            <section class="linswift-auth-card" data-login-auth-card></section>
+          </section>
+          <section class="linswift-page linswift-hidden linswift-sentence-page" data-panel-page="sentence">
+            <section class="linswift-sentence-card">
+              <div class="linswift-sentence-top">
+                <h3 class="linswift-sentence-title" data-sentence-title></h3>
+                <span class="linswift-chip linswift-chip--accent">划句</span>
+              </div>
+              <div class="linswift-sentence-translation">
+                <strong>中文翻译</strong>
+                <p data-sentence-translation></p>
+              </div>
+              <div class="linswift-sentence-actions">
+                <button class="linswift-button linswift-button--primary" type="button" data-sentence-save>智慧识词：开</button>
+                <button class="linswift-button" type="button" data-sentence-speak>朗读整句</button>
+              </div>
+              <div class="linswift-sentence-vocab">
+                <p class="linswift-page-meta" data-sentence-vocab-title></p>
+                <div class="linswift-sentence-vocab-list" data-sentence-vocab-list></div>
+                <button class="linswift-button" type="button" data-sentence-collect>一键收录句中生词</button>
+              </div>
+              <button class="linswift-button" type="button" data-sentence-resume>加入阅读例句，下次继续出现</button>
+            </section>
+            <section class="linswift-sentence-context">
+              <span class="linswift-chip linswift-sentence-mode" data-sentence-mode>当前网页 · 划句模式</span>
+              <p class="linswift-sentence-copy" data-sentence-before></p>
+              <div class="linswift-sentence-highlight">
+                <p data-sentence-highlight></p>
+              </div>
+              <p class="linswift-sentence-copy" data-sentence-after></p>
+            </section>
+          </section>
         </div>
+        <button class="linswift-resize-handle" type="button" aria-label="调整面板大小" title="拖动调整面板大小"></button>
       </section>
     `
 
@@ -4609,8 +6724,12 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     refs.openSettingsButton?.addEventListener('click', () => {
       setActivePanelPage('settings')
     })
-    root.querySelector('[data-panel-view-back="translate"]')?.addEventListener('click', () => {
-      setActivePanelPage('translate')
+    refs.openLoginButton?.addEventListener('click', () => {
+      renderLoginPage()
+      setActivePanelPage('login')
+    })
+    refs.openSentenceButton?.addEventListener('click', () => {
+      void openSentencePage()
     })
     refs.inlineToggle.addEventListener('click', () => {
       void toggleInlineTranslate()
@@ -4621,21 +6740,62 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     refs.siteAutoTranslateToggle?.addEventListener('click', () => {
       void toggleCurrentSiteAutoTranslate()
     })
-    refs.levelSelect.addEventListener('change', saveSettings)
     refs.translationLanguageSelect.addEventListener('change', saveSettings)
     refs.translationModeSelect.addEventListener('change', saveSettings)
-    refs.sizeSelect.addEventListener('change', saveSettings)
-    refs.resultsToggle.addEventListener('click', () => {
-      panelState.showingSaved = false
-      syncListVisibility()
-      setStatus('查看本页识别结果。')
+    refs.pronunciationVariantSelect.addEventListener('change', saveSettings)
+    refs.sizeSlider?.addEventListener('input', () => {
+      previewUiScale(refs.sizeSlider.value)
     })
-    refs.savedToggle.addEventListener('click', () => {
-      panelState.showingSaved = true
-      syncListVisibility()
-      clearHighlights()
-      clearInlineTranslations()
-      setStatus('查看收藏夹与云端同步状态。')
+    refs.sizeSlider?.addEventListener('change', saveSettings)
+    refs.displaySettingsAction?.addEventListener('click', () => {
+      const currentStep = getUiScaleStepByIndex(refs.sizeSlider?.value ?? getUiScaleStep().index)
+      const nextStep = getUiScaleStepByIndex((currentStep.index + 1) % UI_SCALE_STEPS.length)
+      if (refs.sizeSlider) {
+        refs.sizeSlider.value = String(nextStep.index)
+      }
+      previewUiScale(nextStep.index)
+      void saveSettings()
+    })
+    refs.sentenceCollectButton?.addEventListener('click', async () => {
+      const entries = panelState.sentenceDraft?.vocab || []
+      for (const entry of entries) {
+        if (!panelState.extensionState.savedWords?.[entry.word]) {
+          await handleSave(buildWordEntry(entry.word))
+        }
+      }
+      setStatus('句中生词已收录到收藏夹。')
+    })
+    refs.sentenceResumeButton?.addEventListener('click', () => {
+      setActivePanelPage('translate')
+      setStatus('已加入阅读例句，下次继续出现。')
+    })
+    refs.sentenceSaveButton?.addEventListener('click', async () => {
+      const draft = panelState.sentenceDraft
+      const nextEnabled = !isSentenceSmartVocabEnabled()
+      await setSentenceSmartVocabEnabled(nextEnabled)
+      if (draft) {
+        if (nextEnabled) {
+          setStatus('智慧识词已开启，正在识别句中词汇。')
+          await enrichSentenceDraft(draft)
+        } else {
+          draft.vocab = []
+          setStatus('智慧识词已关闭，当前只做整句翻译。')
+        }
+        panelState.sentenceDraft = draft
+        renderSentencePage()
+      }
+    })
+    refs.sentenceSpeakButton?.addEventListener('click', () => {
+      const sentence = panelState.sentenceDraft?.sentence || ''
+      if (!sentence || !window.speechSynthesis) {
+        setStatus('当前环境暂不支持朗读。')
+        return
+      }
+      window.speechSynthesis.cancel()
+      const utterance = new SpeechSynthesisUtterance(sentence)
+      utterance.lang = 'en-US'
+      window.speechSynthesis.speak(utterance)
+      setStatus('正在朗读整句。')
     })
     refs.tooltip.addEventListener('mouseenter', clearInlineTooltipHideTimer)
     refs.tooltip.addEventListener('mouseleave', () => {
@@ -4686,8 +6846,40 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       document.documentElement.classList.add('linswift-dragging')
     })
 
+    refs.resizeHandle?.addEventListener('mousedown', (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      if (panelState.hidden || panelState.minimized) return
+      const { width, height } = getPanelSizeSettings()
+      dragState = {
+        mode: 'resize-panel',
+        startX: event.clientX,
+        startY: event.clientY,
+        startWidth: width,
+        startHeight: height,
+      }
+      document.documentElement.classList.add('linswift-dragging')
+    })
+
     window.addEventListener('mousemove', (event) => {
       if (!dragState || panelState.hidden) return
+      if (dragState.mode === 'resize-panel') {
+        const scale = getUiScale()
+        const bounds = getPanelResizeBounds()
+        panelState.extensionState.settings.panelWidth = clamp(
+          Math.round(dragState.startWidth + (event.clientX - dragState.startX) / scale),
+          bounds.minWidth,
+          bounds.maxWidth
+        )
+        panelState.extensionState.settings.panelHeight = clamp(
+          Math.round(dragState.startHeight + (event.clientY - dragState.startY) / scale),
+          bounds.minHeight,
+          bounds.maxHeight
+        )
+        applyPanelSize()
+        applyFloatingPosition(floatingPositionState)
+        return
+      }
       const moved =
         Math.abs(event.clientX - dragState.startX) > 4 ||
         Math.abs(event.clientY - dragState.startY) > 4
@@ -4715,43 +6907,77 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
 
     window.addEventListener('mouseup', () => {
       const hadDragState = Boolean(dragState)
+      const shouldSavePanelSize = dragState?.mode === 'resize-panel'
       dragState = null
       document.documentElement.classList.remove('linswift-dragging')
+      if (shouldSavePanelSize) {
+        schedulePersistPanelSize()
+      }
       if (hadDragState) {
         void persistCurrentFloatingPosition()
       }
     })
+    document.addEventListener('mousedown', (event) => {
+      const target = event.target instanceof Element ? event.target : null
+      if (target?.closest(`.${SELECTION_HIGHLIGHT_CLASS}`)) return
+      if (target?.closest('.linswift-inline-annotation')) return
+      if (target?.closest(`#${PANEL_ROOT_ID}`)) return
+      if (target && refs?.sentencePopup && refs.sentencePopup.contains(target)) return
+      if (target && refs?.tooltip && refs.tooltip.contains(target)) return
+      hideInlineTooltip(true)
+      hideSentencePopup(true)
+    })
     document.addEventListener('click', (event) => {
-      if (!refs?.tooltip || refs.tooltip.classList.contains('linswift-hidden')) return
       if (Date.now() - lastSelectionTooltipOpenedAt < 180) return
-      if (refs.tooltip.contains(event.target)) return
       if (event.target.closest('.linswift-inline-annotation')) return
       if (event.target.closest(`.${SELECTION_HIGHLIGHT_CLASS}`)) return
-      hideInlineTooltip(true)
-    })
-    window.addEventListener('scroll', () => {
-      if (!activeInlineWord || !refs?.tooltip || refs.tooltip.classList.contains('linswift-hidden')) return
-      if (activeTooltipSource === 'selection') {
-        hideInlineTooltip(true)
+      if (
+        refs?.sentencePopup &&
+        !refs.sentencePopup.classList.contains('linswift-hidden') &&
+        refs.sentencePopup.contains(event.target)
+      ) {
         return
       }
-      const activeAnnotation = activeTooltipSource === 'selection'
-        ? selectionHighlightRecord?.anchor
-        : inlineAnnotationRecords.find(
+      if (
+        refs?.tooltip &&
+        !refs.tooltip.classList.contains('linswift-hidden') &&
+        refs.tooltip.contains(event.target)
+      ) {
+        return
+      }
+      hideInlineTooltip(true)
+      hideSentencePopup(true)
+    })
+    window.addEventListener('scroll', () => {
+      if (activeInlineWord && refs?.tooltip && !refs.tooltip.classList.contains('linswift-hidden')) {
+        if (activeTooltipSource === 'selection') {
+          hideInlineTooltip(true)
+        } else {
+          const activeAnnotation = inlineAnnotationRecords.find(
             (item) =>
               item?.wrapper?.isConnected &&
               String(item.word || item.wrapper.dataset.word || '').trim().toLowerCase() === activeInlineWord
           )?.wrapper
-      if (!activeAnnotation) {
-        hideInlineTooltip(true)
-        return
+          if (!activeAnnotation) {
+            hideInlineTooltip(true)
+          } else {
+            positionInlineTooltip(activeAnnotation)
+          }
+        }
       }
-      positionInlineTooltip(activeAnnotation)
+
+      if (sentencePopupVisible && refs?.sentencePopup && !refs.sentencePopup.classList.contains('linswift-hidden')) {
+        hideSentencePopup(true)
+      }
     }, true)
     window.addEventListener('scroll', positionYouTubeOverlay, true)
     window.addEventListener('resize', () => {
       positionYouTubeOverlay()
+      applyPanelSize()
       applyFloatingPosition(floatingPositionState)
+      if (sentencePopupVisible && refs?.sentencePopup) {
+        hideSentencePopup(true)
+      }
     })
     document.addEventListener('fullscreenchange', () => {
       syncFloatingHostElement()
@@ -4763,15 +6989,21 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     return root
   }
 
-  async function initializePanelState() {
-    if (panelState.initialized) return
+  async function initializePanelState(forceRefresh = false) {
+    if (panelState.initialized) {
+      if (forceRefresh) {
+        await refreshExtensionStateFromStorage({ render: Boolean(refs) })
+      }
+      return
+    }
 
     syncYouTubePageState()
     const response = await sendRuntimeMessage({ type: 'panel-load-state' })
     panelState.extensionState = response.state
     panelState.auth = response.auth
-    refs.levelSelect.value = panelState.extensionState.settings.level || 'intermediate'
+    restoreDefaultPageForLoggedOutState()
     applyUiScale()
+    applyPanelSize()
 
     renderAuthState()
     renderSummary()
@@ -4852,6 +7084,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
 
     try {
       await initializePanelState()
+      restoreDefaultPageForLoggedOutState()
       applyFloatingPosition(floatingPositionState)
       if (panelState.youtube.enabled) {
         setStatus('YouTube 模式已启动，正在连接视频并预抓整条字幕...')
@@ -4930,6 +7163,38 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
     }
 
     return false
+  })
+
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'sync') return
+
+    const nextStoredState = {}
+    let hasRelevantChange = false
+
+    if (Object.prototype.hasOwnProperty.call(changes, SETTINGS_STORAGE_KEY)) {
+      nextStoredState[SETTINGS_STORAGE_KEY] = changes[SETTINGS_STORAGE_KEY]?.newValue || {}
+      hasRelevantChange = true
+    }
+
+    if (Object.prototype.hasOwnProperty.call(changes, KNOWN_WORDS_STORAGE_KEY)) {
+      nextStoredState[KNOWN_WORDS_STORAGE_KEY] = Array.isArray(changes[KNOWN_WORDS_STORAGE_KEY]?.newValue)
+        ? changes[KNOWN_WORDS_STORAGE_KEY].newValue
+        : []
+      hasRelevantChange = true
+    }
+
+    if (Object.prototype.hasOwnProperty.call(changes, SAVED_WORDS_STORAGE_KEY)) {
+      nextStoredState[SAVED_WORDS_STORAGE_KEY] =
+        changes[SAVED_WORDS_STORAGE_KEY]?.newValue &&
+        typeof changes[SAVED_WORDS_STORAGE_KEY].newValue === 'object'
+          ? changes[SAVED_WORDS_STORAGE_KEY].newValue
+          : {}
+      hasRelevantChange = true
+    }
+
+    if (!hasRelevantChange) return
+
+    applyStoredExtensionState(nextStoredState, { render: Boolean(refs) })
   })
 
   document.addEventListener('mouseup', (event) => {

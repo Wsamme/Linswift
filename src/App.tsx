@@ -55,6 +55,7 @@ import PronunciationSettingsPage from './pages/PronunciationSettingsPage'
 import NotificationSettingsPage from './pages/NotificationSettingsPage'
 import ThemeSettingsPage from './pages/ThemeSettingsPage'
 import AboutPage from './pages/AboutPage'
+import AdminOverviewPage from './pages/AdminOverviewPage'
 import UserAgreementPage from './pages/UserAgreementPage'
 import PrivacyPolicyPage from './pages/PrivacyPolicyPage'
 import BrowserExtensionPage from './pages/BrowserExtensionPage'
@@ -89,6 +90,10 @@ export default function App() {
     <Routes>
       {/* ===== 公开路由（无需登录）===== */}
       <Route path="/" element={<LandingPage />} />
+      <Route path="/learn" element={<Navigate to="/app/learn" replace />} />
+      <Route path="/translate" element={<Navigate to="/app/translate" replace />} />
+      <Route path="/vocab" element={<Navigate to="/app/vocab" replace />} />
+      <Route path="/profile" element={<Navigate to="/app/profile" replace />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/browser-extension" element={<BrowserExtensionPage />} />
@@ -159,6 +164,7 @@ export default function App() {
         <Route path="/notification-settings" element={<NotificationSettingsPage />} />
         <Route path="/theme-settings" element={<ThemeSettingsPage />} />
         <Route path="/about" element={<AboutPage />} />
+        <Route path="/admin/overview" element={<AdminOverviewPage />} />
 
         {/* V2: 词汇游戏 */}
         <Route path="/word-match" element={<WordMatchGame />} />

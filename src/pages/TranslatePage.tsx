@@ -1,10 +1,11 @@
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import {
-  ArrowLeftRight, Star, Volume2, Copy, X, Sparkles, Loader2, Check, Plus,
+  ArrowLeftRight, Star, Volume2, Copy, X, Sparkles, Loader2, Check, Plus, Info,
 } from 'lucide-react'
 import {
   type TranslationMode,
-  translateText,
+  translateTextFast,
+  loadTranslationVocabulary,
   type TranslateResult,
   type UnfamiliarWord,
 } from '../services/translation'
@@ -12,7 +13,8 @@ import { getWordDetail, type WordDetail } from '../services/gemini'
 import { useVocabulary } from '../hooks/useVocabulary'
 import { useTranslations } from '../hooks/useTranslations'
 import { useStudyRecords } from '../hooks/useStudyRecords'
-import { speakEnglish, speakChinese, speakJapanese } from '../lib/tts'
+import { useMediaQuery } from '../hooks/useMediaQuery'
+import { findPreferredVoiceByLang, speakEnglish, speakChinese, speakJapanese } from '../lib/tts'
 import { normalizeLookupKey } from '../lib/text'
 import { hasLatinText, normalizeWhitespace, shouldShowPhonetic } from '../lib/text'
 import DesktopScreenshotTranslator from '../components/translate/DesktopScreenshotTranslator'
@@ -23,6 +25,9 @@ const LANGUAGE_OPTIONS = [
   { value: 'English', code: 'en', shortLabel: 'English' },
   { value: '日本語', code: 'ja', shortLabel: '日本語' },
   { value: '한국어', code: 'ko', shortLabel: '한국어' },
+  { value: 'Français', code: 'fr', shortLabel: 'Français' },
+  { value: 'Deutsch', code: 'de', shortLabel: 'Deutsch' },
+  { value: 'Español', code: 'es', shortLabel: 'Español' },
 ] as const
 
 const TRANSLATION_MODE_OPTIONS: Array<{
@@ -32,7 +37,7 @@ const TRANSLATION_MODE_OPTIONS: Array<{
 }> = [
   {
     value: 'hybrid',
-    label: '混合模式',
+    label: '混合',
     description: 'DeepL 出主译文，AI 负责陌生词分析',
   },
   {
@@ -57,7 +62,11 @@ const VOCABULARY_PROVIDER_LABELS = {
   moonshot: 'AI',
   fallback: '离线回退',
   none: '未启用',
+  loading: '分析中',
 } as const
+
+const AUTO_TRANSLATE_DEBOUNCE_SHORT_MS = 160
+const AUTO_TRANSLATE_DEBOUNCE_LONG_MS = 280
 
 type AppTranslateLanguage = (typeof LANGUAGE_OPTIONS)[number]['value']
 type AppTranslateLanguageCode = (typeof LANGUAGE_OPTIONS)[number]['code']
@@ -80,6 +89,38 @@ const LANG_FROM_CODE_MAP = Object.fromEntries(
   LANGUAGE_OPTIONS.map((option) => [option.code, option.value])
 ) as Record<AppTranslateLanguageCode, AppTranslateLanguage>
 
+const HANGUL_RE = /[\uac00-\ud7af]/g
+const KANA_RE = /[\u3040-\u30ff]/g
+const HAN_RE = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/g
+const LATIN_RE = /[A-Za-z]/g
+const TRADITIONAL_HINT_RE = /[體學讀說譯這個們龍網頁點擊設置愛裡麼還讓與聽寫畫書開關詞彙後會電腦]/g
+const SIMPLIFIED_HINT_RE = /[体学读说译这个们龙网页点击设置爱里么还让与听写画书开关词汇后会电脑]/g
+const FRENCH_MARK_RE = /[àâæçéèêëîïôœùûüÿ]/gi
+const GERMAN_MARK_RE = /[äöüß]/gi
+const SPANISH_MARK_RE = /[áéíóúñ¿¡]/gi
+
+const LATIN_LANGUAGE_HINTS: Array<{
+  language: AppTranslateLanguage
+  pattern: RegExp
+  weight: number
+}> = [
+  { language: 'Français', pattern: /\b(le|la|les|un|une|des|du|de|et|est|avec|pour|dans|bonjour|merci|être)\b/gi, weight: 2 },
+  { language: 'Deutsch', pattern: /\b(der|die|das|und|ist|nicht|mit|für|ein|eine|hallo|danke|ich|sie)\b/gi, weight: 2 },
+  { language: 'Español', pattern: /\b(el|la|los|las|un|una|de|que|con|por|para|hola|gracias|está|como|cómo)\b/gi, weight: 2 },
+  { language: 'English', pattern: /\b(the|and|is|are|with|for|this|that|hello|thanks|you)\b/gi, weight: 1 },
+]
+
+const AUTO_TARGET_FALLBACK_MAP: Record<AppTranslateLanguage, AppTranslateLanguage> = {
+  English: '简体中文',
+  简体中文: 'English',
+  繁體中文: 'English',
+  日本語: 'English',
+  한국어: 'English',
+  Français: 'English',
+  Deutsch: 'English',
+  Español: 'English',
+}
+
 function normalizeLanguageCode(languageCode: string) {
   const value = String(languageCode || '').trim().toLowerCase()
   if (!value) return 'en'
@@ -87,6 +128,9 @@ function normalizeLanguageCode(languageCode: string) {
   if (value === 'zh-tw' || value === 'zh-hk' || value === 'zh-hant') return 'zh-TW'
   if (value === 'ja' || value === 'ja-jp') return 'ja'
   if (value === 'ko' || value === 'ko-kr') return 'ko'
+  if (value === 'fr' || value === 'fr-fr') return 'fr'
+  if (value === 'de' || value === 'de-de') return 'de'
+  if (value === 'es' || value === 'es-es') return 'es'
   if (value === 'en' || value.startsWith('en-')) return 'en'
   return languageCode
 }
@@ -98,6 +142,73 @@ function resolveLanguageValueFromCode(code: string, fallback: AppTranslateLangua
 
 function normalizeCollectKey(value: string, languageCode: string) {
   return `${normalizeLanguageCode(languageCode)}::${normalizeLookupKey(value)}`
+}
+
+function countMatches(text: string, pattern: RegExp) {
+  return text.match(pattern)?.length || 0
+}
+
+function detectLatinLanguage(text: string): AppTranslateLanguage | null {
+  const normalized = normalizeWhitespace(text)
+  if (!normalized) return null
+
+  const scoreMap = new Map<AppTranslateLanguage, number>()
+
+  const addScore = (language: AppTranslateLanguage, score: number) => {
+    scoreMap.set(language, (scoreMap.get(language) || 0) + score)
+  }
+
+  const frenchMarkScore = countMatches(normalized, FRENCH_MARK_RE)
+  const germanMarkScore = countMatches(normalized, GERMAN_MARK_RE)
+  const spanishMarkScore = countMatches(normalized, SPANISH_MARK_RE)
+
+  if (frenchMarkScore > 0) addScore('Français', frenchMarkScore * 3)
+  if (germanMarkScore > 0) addScore('Deutsch', germanMarkScore * 3)
+  if (spanishMarkScore > 0) addScore('Español', spanishMarkScore * 3)
+
+  LATIN_LANGUAGE_HINTS.forEach(({ language, pattern, weight }) => {
+    const matched = countMatches(normalized, pattern)
+    if (matched > 0) addScore(language, matched * weight)
+  })
+
+  const ranked = Array.from(scoreMap.entries()).sort((left, right) => right[1] - left[1])
+  const [best, second] = ranked
+  if (!best) return 'English'
+  if (!second) return best[0]
+  if (best[1] - second[1] < 2) return 'English'
+  return best[0]
+}
+
+function detectInputLanguage(text: string): AppTranslateLanguage | null {
+  const normalized = normalizeWhitespace(text)
+  if (!normalized) return null
+
+  const hangulCount = countMatches(normalized, HANGUL_RE)
+  const kanaCount = countMatches(normalized, KANA_RE)
+  const hanCount = countMatches(normalized, HAN_RE)
+  const latinCount = countMatches(normalized, LATIN_RE)
+
+  if (hangulCount > 0 && hangulCount >= hanCount) return '한국어'
+  if (kanaCount > 0) return '日本語'
+
+  if (hanCount > 0 && hanCount >= latinCount) {
+    const traditionalHints = countMatches(normalized, TRADITIONAL_HINT_RE)
+    const simplifiedHints = countMatches(normalized, SIMPLIFIED_HINT_RE)
+    return traditionalHints > simplifiedHints ? '繁體中文' : '简体中文'
+  }
+
+  if (latinCount > 0) return detectLatinLanguage(normalized)
+  return null
+}
+
+function resolveNextTargetLanguage(
+  detectedSource: AppTranslateLanguage,
+  currentSource: AppTranslateLanguage,
+  currentTarget: AppTranslateLanguage
+) {
+  if (currentTarget !== detectedSource) return currentTarget
+  if (currentSource !== detectedSource) return currentSource
+  return AUTO_TARGET_FALLBACK_MAP[detectedSource]
 }
 
 function rankSuggestion(text: string, query: string, order: number, sourceWeight: number) {
@@ -129,10 +240,7 @@ function speakGeneric(text: string, languageCode: string) {
   const utterance = new SpeechSynthesisUtterance(safeText)
   utterance.lang = languageCode
 
-  const voices = window.speechSynthesis.getVoices()
-  const preferredVoice = voices.find((voice) =>
-    voice.lang.toLowerCase().startsWith(languageCode.toLowerCase())
-  )
+  const preferredVoice = findPreferredVoiceByLang(languageCode)
   if (preferredVoice) utterance.voice = preferredVoice
 
   window.speechSynthesis.cancel()
@@ -161,6 +269,16 @@ function buildFallbackPartBlocks(detail: WordDetail) {
   return [{ partOfSpeech: '释义', meanings }]
 }
 
+function areBooleanMapsEqual(
+  left: Record<string, boolean>,
+  right: Record<string, boolean>
+) {
+  const leftKeys = Object.keys(left)
+  const rightKeys = Object.keys(right)
+  if (leftKeys.length !== rightKeys.length) return false
+  return leftKeys.every((key) => left[key] === right[key])
+}
+
 export default function TranslatePage() {
   const { vocabulary, addWord, addWords } = useVocabulary()
   const {
@@ -170,6 +288,7 @@ export default function TranslatePage() {
     toggleStar,
   } = useTranslations()
   const { appendStudy } = useStudyRecords()
+  const isDesktop = useMediaQuery('(min-width: 768px)')
 
   const [inputText, setInputText] = useState('')
   const [sourceLang, setSourceLang] = useState<AppTranslateLanguage>('简体中文')
@@ -178,7 +297,7 @@ export default function TranslatePage() {
     const savedMode = localStorage.getItem('linswift.translate.mode')
     return savedMode === 'ai' || savedMode === 'deepl' || savedMode === 'hybrid'
       ? savedMode
-      : 'hybrid'
+      : 'ai'
   })
   const [isLoading, setIsLoading] = useState(false)
   const [result, setResult] = useState<TranslateResult | null>(null)
@@ -192,12 +311,75 @@ export default function TranslatePage() {
   const [dictionaryLoading, setDictionaryLoading] = useState(false)
   const [dictionaryError, setDictionaryError] = useState<string | null>(null)
   const [activeDictionaryTab, setActiveDictionaryTab] = useState<DictionaryTab>('summary')
+  const [isComposing, setIsComposing] = useState(false)
+  const [modeHintOpen, setModeHintOpen] = useState<TranslationMode | null>(null)
+  const modeHintPanelRef = useRef<HTMLDivElement | null>(null)
+  const modeHintCloseTimerRef = useRef<number | null>(null)
+  const translationRequestRef = useRef(0)
+  const activeTranslateKeyRef = useRef('')
+  const completedTranslateKeyRef = useRef('')
+  const activeTranslateAbortRef = useRef<AbortController | null>(null)
+
+  const clearModeHintCloseTimer = useCallback(() => {
+    if (modeHintCloseTimerRef.current !== null) {
+      window.clearTimeout(modeHintCloseTimerRef.current)
+      modeHintCloseTimerRef.current = null
+    }
+  }, [])
+
+  const scheduleModeHintClose = useCallback(() => {
+    clearModeHintCloseTimer()
+    modeHintCloseTimerRef.current = window.setTimeout(() => {
+      setModeHintOpen(null)
+      modeHintCloseTimerRef.current = null
+    }, 120)
+  }, [clearModeHintCloseTimer])
+
+  const syncLanguagePairWithInput = useCallback((text: string) => {
+    const detectedSource = detectInputLanguage(text)
+    if (!detectedSource) {
+      return {
+        sourceLang,
+        targetLang,
+      }
+    }
+
+    const nextSourceLang = detectedSource
+    const nextTargetLang = resolveNextTargetLanguage(detectedSource, sourceLang, targetLang)
+
+    if (nextSourceLang !== sourceLang) setSourceLang(nextSourceLang)
+    if (nextTargetLang !== targetLang) setTargetLang(nextTargetLang)
+
+    return {
+      sourceLang: nextSourceLang,
+      targetLang: nextTargetLang,
+    }
+  }, [sourceLang, targetLang])
 
   useEffect(() => { fetchHistory(20) }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     localStorage.setItem('linswift.translate.mode', translationMode)
   }, [translationMode])
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      if (isDesktop) return
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (modeHintPanelRef.current?.contains(target)) return
+      setModeHintOpen(null)
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown)
+    return () => window.removeEventListener('pointerdown', handlePointerDown)
+  }, [isDesktop])
+
+  useEffect(() => (
+    () => {
+      clearModeHintCloseTimer()
+    }
+  ), [clearModeHintCloseTimer])
 
   const currentHistoryItem = useMemo(
     () => history.find(item => item.id === currentTranslationId) || null,
@@ -256,13 +438,17 @@ export default function TranslatePage() {
 
   const dictionaryLookupQuery = useMemo(() => {
     const trimmedInput = normalizeWhitespace(inputText)
-    if (isDictionaryLikeQuery(trimmedInput)) return trimmedInput
+    if (isDictionaryLikeQuery(trimmedInput) && detectInputLanguage(trimmedInput) === 'English') {
+      return trimmedInput
+    }
+
+    if (!result) return ''
 
     const translated = normalizeWhitespace(result?.translatedText || '')
     if (targetLang === 'English' && isDictionaryLikeQuery(translated)) return translated
 
     return ''
-  }, [inputText, result?.translatedText, targetLang])
+  }, [inputText, result, result?.translatedText, targetLang])
 
   const dictionarySuggestionPool = useMemo(() => {
     const unique = new Map<string, { word: string; meaning: string }>()
@@ -289,6 +475,12 @@ export default function TranslatePage() {
       .slice(0, 6)
   }, [autocompleteSuggestions, dictionaryDetail?.relatedWords, dictionaryLookupQuery])
 
+  const isSingleWordDictionaryQuery = useMemo(() => {
+    const normalizedQuery = normalizeWhitespace(dictionaryLookupQuery || dictionaryQuery)
+    if (!normalizedQuery) return false
+    return normalizedQuery.split(/\s+/).length === 1
+  }, [dictionaryLookupQuery, dictionaryQuery])
+
   const isCurrentStarred = !!currentHistoryItem?.is_starred
 
   const isVocabularyCollected = useCallback((value: string, languageCode: string) => {
@@ -300,53 +492,58 @@ export default function TranslatePage() {
 
   useEffect(() => {
     if (!result) {
-      setCollectedWordSet({})
+      setCollectedWordSet((current) => (Object.keys(current).length === 0 ? current : {}))
       return
     }
 
-    setCollectedWordSet(
-      result.unfamiliarWords.reduce<Record<string, boolean>>((acc, word) => {
+    const nextCollectedWordSet = result.unfamiliarWords.reduce<Record<string, boolean>>((acc, word) => {
         const collectKey = normalizeCollectKey(word.word, 'en')
         if (isVocabularyCollected(word.word, 'en')) {
           acc[collectKey] = true
         }
         return acc
       }, {})
-    )
+
+    setCollectedWordSet((current) => (
+      areBooleanMapsEqual(current, nextCollectedWordSet) ? current : nextCollectedWordSet
+    ))
   }, [isVocabularyCollected, result])
 
   useEffect(() => {
     if (!dictionaryLookupQuery) {
-      setDictionaryDetail(null)
       setDictionaryQuery('')
+      setDictionaryDetail(null)
       setDictionaryError(null)
       setDictionaryLoading(false)
       return
     }
 
     let cancelled = false
-    setDictionaryLoading(true)
-    setDictionaryError(null)
-    setDictionaryQuery(dictionaryLookupQuery)
-    setActiveDictionaryTab('summary')
+    const timer = window.setTimeout(() => {
+      setDictionaryLoading(true)
+      setDictionaryError(null)
+      setDictionaryQuery(dictionaryLookupQuery)
+      setActiveDictionaryTab('summary')
 
-    getWordDetail(dictionaryLookupQuery)
-      .then((detail) => {
-        if (cancelled) return
-        setDictionaryDetail(detail)
-      })
-      .catch((err) => {
-        if (cancelled) return
-        setDictionaryDetail(null)
-        setDictionaryError(err instanceof Error ? err.message : '词条详情加载失败')
-      })
-      .finally(() => {
-        if (cancelled) return
-        setDictionaryLoading(false)
-      })
+      getWordDetail(dictionaryLookupQuery)
+        .then((detail) => {
+          if (cancelled) return
+          setDictionaryDetail(detail)
+        })
+        .catch((err) => {
+          if (cancelled) return
+          setDictionaryDetail(null)
+          setDictionaryError(err instanceof Error ? err.message : '词条详情加载失败')
+        })
+        .finally(() => {
+          if (cancelled) return
+          setDictionaryLoading(false)
+        })
+    }, 220)
 
     return () => {
       cancelled = true
+      window.clearTimeout(timer)
     }
   }, [dictionaryLookupQuery])
 
@@ -380,33 +577,157 @@ export default function TranslatePage() {
   }, [])
 
   const handleTranslate = useCallback(async () => {
-    if (!inputText.trim()) return
+    const safeInput = inputText.trim()
+    if (!safeInput) return
+
+    const {
+      sourceLang: effectiveSourceLang,
+      targetLang: effectiveTargetLang,
+    } = syncLanguagePairWithInput(safeInput)
+    const translateKey = [
+      translationMode,
+      effectiveSourceLang,
+      effectiveTargetLang,
+      safeInput,
+    ].join('::')
+
+    if (activeTranslateKeyRef.current === translateKey) return
+    if (completedTranslateKeyRef.current === translateKey) return
+
+    const requestId = translationRequestRef.current + 1
+    translationRequestRef.current = requestId
+    activeTranslateKeyRef.current = translateKey
+    activeTranslateAbortRef.current?.abort()
+    const abortController = new AbortController()
+    activeTranslateAbortRef.current = abortController
 
     setIsLoading(true)
     setError(null)
-    setResult(null)
+    setCurrentTranslationId(null)
 
     try {
-      const translateResult = await translateText(inputText, sourceLang, targetLang, translationMode)
-      setResult(translateResult)
+      const translateResult = await translateTextFast(
+        safeInput,
+        effectiveSourceLang,
+        effectiveTargetLang,
+        translationMode,
+        abortController.signal
+      )
+      if (translationRequestRef.current !== requestId) return
 
-      const { data } = await saveTranslation({
-        source_text: inputText,
+      setResult(translateResult)
+      setIsLoading(false)
+      activeTranslateKeyRef.current = ''
+      completedTranslateKeyRef.current = translateKey
+
+      void saveTranslation({
+        source_text: safeInput,
         translated_text: translateResult.translatedText,
-        source_lang: LANG_CODE_MAP[sourceLang],
-        target_lang: LANG_CODE_MAP[targetLang],
-        unfamiliar_words: translateResult.unfamiliarWords.map(w => w.word),
+        source_lang: LANG_CODE_MAP[effectiveSourceLang],
+        target_lang: LANG_CODE_MAP[effectiveTargetLang],
+        unfamiliar_words: [],
+      })
+        .then(({ data, error: saveError }) => {
+          if (saveError) {
+            console.warn('翻译历史保存失败:', saveError)
+            return
+          }
+          if (translationRequestRef.current === requestId) {
+            setCurrentTranslationId(data?.id ?? null)
+          }
+        })
+        .catch((saveError) => {
+          console.warn('翻译历史保存失败:', saveError)
+        })
+
+      void appendStudy({ study_duration: 1 }).catch((studyError) => {
+        console.warn('学习记录写入失败:', studyError)
       })
 
-      setCurrentTranslationId(data?.id ?? null)
+      if (translateResult.vocabularyProvider === 'loading') {
+        const vocabularyPromise = loadTranslationVocabulary(
+          safeInput,
+          translateResult.translatedText,
+          effectiveSourceLang,
+          effectiveTargetLang
+        )
 
-      await appendStudy({ study_duration: 1 })
+        void vocabularyPromise
+          .then((vocabularyResult) => {
+            if (translationRequestRef.current !== requestId) return
+
+            setResult((current) => {
+              if (!current) return current
+              return {
+                ...current,
+                unfamiliarWords: vocabularyResult.unfamiliarWords,
+                vocabularyProvider: vocabularyResult.vocabularyProvider,
+                notes: Array.from(new Set([...current.notes, ...vocabularyResult.notes])),
+              }
+            })
+          })
+          .catch((vocabularyError) => {
+            if (translationRequestRef.current !== requestId) return
+            const note = vocabularyError instanceof Error
+              ? `陌生词分析失败，已跳过：${vocabularyError.message}`
+              : '陌生词分析失败，已跳过'
+
+            setResult((current) => {
+              if (!current) return current
+              return {
+                ...current,
+                vocabularyProvider: 'fallback',
+                notes: Array.from(new Set([...current.notes, note])),
+              }
+            })
+          })
+      }
     } catch (err) {
+      if (translationRequestRef.current !== requestId) return
+      if (err instanceof Error && err.name === 'AbortError') return
+      activeTranslateKeyRef.current = ''
       setError(err instanceof Error ? err.message : '翻译失败')
-    } finally {
       setIsLoading(false)
+    } finally {
+      if (activeTranslateAbortRef.current === abortController) {
+        activeTranslateAbortRef.current = null
+      }
     }
-  }, [appendStudy, inputText, saveTranslation, sourceLang, targetLang, translationMode])
+  }, [appendStudy, inputText, saveTranslation, syncLanguagePairWithInput, translationMode])
+
+  useEffect(() => {
+    if (isComposing) return
+
+    const safeInput = inputText.trim()
+    if (!safeInput) {
+      translationRequestRef.current += 1
+      activeTranslateAbortRef.current?.abort()
+      activeTranslateAbortRef.current = null
+      activeTranslateKeyRef.current = ''
+      completedTranslateKeyRef.current = ''
+      setIsLoading(false)
+      setError(null)
+      setResult(null)
+      setCurrentTranslationId(null)
+      return
+    }
+
+    const debounceMs = safeInput.length <= 16
+      ? AUTO_TRANSLATE_DEBOUNCE_SHORT_MS
+      : AUTO_TRANSLATE_DEBOUNCE_LONG_MS
+
+    const timer = window.setTimeout(() => {
+      void handleTranslate()
+    }, debounceMs)
+
+    return () => window.clearTimeout(timer)
+  }, [handleTranslate, inputText, isComposing, sourceLang, targetLang, translationMode])
+
+  useEffect(() => (
+    () => {
+      activeTranslateAbortRef.current?.abort()
+    }
+  ), [])
 
   const handleCopy = async () => {
     if (!result) return
@@ -418,6 +739,8 @@ export default function TranslatePage() {
       console.warn('复制失败')
     }
   }
+
+  const translateButtonLabel = isLoading ? '翻译中…' : '翻译'
 
   const renderHighlightedText = (text: string, words: UnfamiliarWord[]) => {
     if (words.length === 0) return <span>{text}</span>
@@ -467,6 +790,11 @@ export default function TranslatePage() {
     .flatMap((block) => block.meanings)
     .slice(0, 3)
 
+  const isFallbackDictionary = useMemo(() => {
+    const summary = `${dictionaryDetail?.meaning || ''} ${dictionaryDetail?.mnemonic || ''}`
+    return summary.includes('AI 暂时不可用') || summary.includes('AI 离线')
+  }, [dictionaryDetail?.meaning, dictionaryDetail?.mnemonic])
+
   const dictionaryTabItems: Array<{
     key: DictionaryTab
     label: string
@@ -506,22 +834,150 @@ export default function TranslatePage() {
     }
   }, [addWord, appendStudy, dictionaryDetail, dictionaryPartBlocks])
 
+  const translationResultCard = result ? (
+    <div
+      className="mx-5 mb-3 rounded-[var(--radius-md)] bg-[var(--color-card)] p-4"
+      style={{ boxShadow: 'var(--shadow-card)' }}
+    >
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div>
+          <span className="block text-[12px] text-[var(--color-muted)]">
+            翻译结果
+          </span>
+          <span className="mt-0.5 block text-[11px] text-[var(--color-muted-light)]">
+            主翻译：{TRANSLATION_PROVIDER_LABELS[result.translationProvider]} · 生词分析：{VOCABULARY_PROVIDER_LABELS[result.vocabularyProvider]}
+          </span>
+        </div>
+        <button
+          className="rounded-full bg-[var(--color-background-secondary)] p-1.5"
+          onClick={() => speakByLanguage(result.translatedText, targetLang)}
+          title="播放翻译结果"
+        >
+          <Volume2 size={16} className="text-[var(--color-muted)]" />
+        </button>
+      </div>
+      <p className="leading-relaxed text-[15px] text-[var(--color-foreground)]">
+        {renderHighlightedText(result.translatedText, result.unfamiliarWords)}
+      </p>
+
+      {result.notes.length > 0 && (
+        <div className="mt-3 space-y-2 rounded-[16px] bg-[var(--color-background-secondary)] p-3">
+          {result.notes.map((note, index) => (
+            <p key={`${note}-${index}`} className="text-[12px] leading-relaxed text-[var(--color-muted)]">
+              {note}
+            </p>
+          ))}
+        </div>
+      )}
+
+      {result.unfamiliarWords.length > 0 && !isSingleWordDictionaryQuery && (
+        <div className="mt-3 border-t border-[var(--color-border)] pt-3">
+          <p className="mb-2 text-[12px] text-[var(--color-muted)]">
+            识别到 {result.unfamiliarWords.length} 个值得学习的词汇：
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {result.unfamiliarWords.map((w, i) => {
+              const collectKey = normalizeCollectKey(w.word, 'en')
+              const hasCollected = collectedWordSet[collectKey]
+
+              return (
+                <button
+                  key={`${w.word}-${i}`}
+                  className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[12px] transition-colors ${
+                    hasCollected
+                      ? 'border-[var(--color-success)]/20 bg-[var(--color-success)]/10'
+                      : 'border-transparent bg-[var(--color-primary-light)]'
+                  }`}
+                  title={w.phonetic}
+                  onClick={async () => {
+                    if (hasCollected) return
+                    const { error: saveError } = await addWord({
+                      word: w.word,
+                      language_code: 'en',
+                      language_label: 'English',
+                      phonetic: w.phonetic,
+                      meaning: w.meaning,
+                      source: 'translate',
+                    })
+                    if (!saveError) {
+                      setCollectedWordSet((prev) => ({ ...prev, [collectKey]: true }))
+                      await appendStudy({
+                        vocabulary_learned: 1,
+                        study_duration: 1,
+                      })
+                    }
+                  }}
+                >
+                  <span className="font-semibold text-[var(--color-primary)]">{w.word}</span>
+                  <span className="text-[var(--color-muted)]">{w.meaning}</span>
+                  {hasCollected ? (
+                    <Check size={14} className="text-[var(--color-success)]" />
+                  ) : (
+                    <Plus size={14} className="text-[var(--color-primary)]" />
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {result.unfamiliarWords.length > 0 && !isSingleWordDictionaryQuery && (
+        <button
+          className="mt-4 flex w-full items-center justify-center gap-2 rounded-[var(--radius-sm)] bg-[var(--color-primary-light)] px-4 py-2.5 transition-transform active:scale-[0.98]"
+          disabled={result.unfamiliarWords.every(word => collectedWordSet[normalizeCollectKey(word.word, 'en')])}
+          onClick={async () => {
+            const words = result.unfamiliarWords.map(w => ({
+              word: w.word,
+              language_code: 'en',
+              language_label: 'English',
+              phonetic: w.phonetic,
+              meaning: w.meaning,
+              source: 'translate' as const,
+            }))
+            const { error: saveError } = await addWords(words)
+            if (!saveError) {
+              setCollectedWordSet(
+                result.unfamiliarWords.reduce<Record<string, boolean>>((acc, word) => {
+                  acc[normalizeCollectKey(word.word, 'en')] = true
+                  return acc
+                }, {})
+              )
+              await appendStudy({
+                vocabulary_learned: words.length,
+                study_duration: 2,
+              })
+            }
+          }}
+        >
+          {result.unfamiliarWords.every(word => collectedWordSet[normalizeCollectKey(word.word, 'en')]) ? (
+            <>
+              <Check size={16} className="text-[var(--color-success)]" />
+              <span className="text-[13px] font-semibold text-[var(--color-success)]">
+                已收录到词库
+              </span>
+            </>
+          ) : (
+            <>
+              <Sparkles size={16} className="text-[var(--color-primary)]" />
+              <span className="text-[13px] font-semibold text-[var(--color-primary)]">
+                一键收录 {result.unfamiliarWords.length} 个陌生词汇
+              </span>
+            </>
+          )}
+        </button>
+      )}
+    </div>
+  ) : null
+
   return (
     <div className="flex min-h-full flex-col bg-[var(--color-background)] pb-4 md:min-h-[100dvh]">
-      <div className="px-5 py-4">
-        <h1 className="font-secondary text-[20px] font-bold text-[var(--color-foreground)]">
-          翻译
-        </h1>
-        <p className="mt-0.5 text-[12px] text-[var(--color-muted)]">
-          多语言翻译、词汇收藏与输入补全
-        </p>
-      </div>
-
       <DesktopScreenshotTranslator
         targetLang={targetLang}
         onTargetLangChange={(nextLang) => setTargetLang(nextLang as AppTranslateLanguage)}
         onUseExtractedText={(text) => {
           setInputText(text)
+          syncLanguagePairWithInput(text)
           setResult(null)
           setError(null)
         }}
@@ -554,44 +1010,94 @@ export default function TranslatePage() {
         </select>
       </div>
 
-      <div className="mb-3 px-5">
+      <div className="mb-3 px-5" ref={modeHintPanelRef}>
         <div
           className="rounded-[var(--radius-md)] bg-[var(--color-card)] p-3"
           style={{ boxShadow: 'var(--shadow-card)' }}
         >
           <div className="mb-2 flex items-center justify-between">
             <span className="text-[12px] font-medium text-[var(--color-muted)]">翻译模式</span>
-            <span className="text-[11px] text-[var(--color-muted-light)]">
-              可随时切换
-            </span>
           </div>
           <div className="grid grid-cols-3 gap-2">
             {TRANSLATION_MODE_OPTIONS.map((option) => {
               const active = translationMode === option.value
               return (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => setTranslationMode(option.value)}
-                  className={`rounded-[16px] border px-3 py-2 text-left transition-all active:scale-[0.98] ${
-                    active
-                      ? 'border-[var(--color-primary)] bg-[var(--color-primary-light)]'
-                      : 'border-[var(--color-border)] bg-[var(--color-background-secondary)]'
-                  }`}
-                >
-                  <span className={`block text-[13px] font-semibold ${
-                    active ? 'text-[var(--color-primary)]' : 'text-[var(--color-foreground)]'
-                  }`}
+                <div key={option.value}>
+                  <div
+                    className={`rounded-[16px] border px-3 py-2 transition-all ${
+                      active
+                        ? 'border-[var(--color-primary)] bg-[var(--color-primary-light)]'
+                        : 'border-[var(--color-border)] bg-[var(--color-background-secondary)]'
+                    }`}
                   >
-                    {option.label}
-                  </span>
-                  <span className="mt-1 block text-[11px] leading-relaxed text-[var(--color-muted)]">
-                    {option.description}
-                  </span>
-                </button>
+                    <div className="flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTranslationMode(option.value)
+                          setModeHintOpen(null)
+                        }}
+                        className="min-w-0 flex-1 text-left active:scale-[0.98]"
+                      >
+                        <span className={`block text-[13px] font-semibold ${
+                          active ? 'text-[var(--color-primary)]' : 'text-[var(--color-foreground)]'
+                        }`}
+                        >
+                          {option.label}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
+                          active
+                            ? 'border-[var(--color-primary)]/30 bg-white/85 text-[var(--color-primary)]'
+                            : 'border-[var(--color-border)] bg-white/80 text-[var(--color-muted)]'
+                        }`}
+                        onClick={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          clearModeHintCloseTimer()
+                          setModeHintOpen((current) => current === option.value ? null : option.value)
+                        }}
+                        onPointerEnter={(event) => {
+                          if (isDesktop && event.pointerType === 'mouse') {
+                            clearModeHintCloseTimer()
+                            setModeHintOpen(option.value)
+                          }
+                        }}
+                        onPointerLeave={(event) => {
+                          if (isDesktop && event.pointerType === 'mouse') {
+                            scheduleModeHintClose()
+                          }
+                        }}
+                        aria-label={`${option.label}说明`}
+                      >
+                        <Info size={12} />
+                      </button>
+                    </div>
+                  </div>
+
+                </div>
               )
             })}
           </div>
+          {modeHintOpen && (
+            <div
+              className="mt-2 rounded-[12px] bg-[var(--color-background-secondary)] px-3 py-2 text-[11px] leading-5 text-[var(--color-muted)]"
+              onPointerEnter={(event) => {
+                if (isDesktop && event.pointerType === 'mouse') {
+                  clearModeHintCloseTimer()
+                }
+              }}
+              onPointerLeave={(event) => {
+                if (isDesktop && event.pointerType === 'mouse') {
+                  scheduleModeHintClose()
+                }
+              }}
+            >
+              {TRANSLATION_MODE_OPTIONS.find((option) => option.value === modeHintOpen)?.description}
+            </div>
+          )}
         </div>
       </div>
 
@@ -609,10 +1115,16 @@ export default function TranslatePage() {
         </div>
         <textarea
           value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
+          onChange={(e) => {
+            const nextValue = e.target.value
+            setInputText(nextValue)
+            syncLanguagePairWithInput(nextValue)
+          }}
           onFocus={() => setIsInputFocused(true)}
           onBlur={() => window.setTimeout(() => setIsInputFocused(false), 120)}
           placeholder="输入要翻译的文本..."
+          onCompositionStart={() => setIsComposing(true)}
+          onCompositionEnd={() => setIsComposing(false)}
           className="h-[100px] w-full resize-none bg-transparent text-[15px] text-[var(--color-foreground)] outline-none placeholder:text-[var(--color-muted-light)]"
         />
 
@@ -634,6 +1146,7 @@ export default function TranslatePage() {
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => {
                     setInputText(suggestion.text)
+                    syncLanguagePairWithInput(suggestion.text)
                     setResult(null)
                     setError(null)
                     setIsInputFocused(false)
@@ -686,10 +1199,10 @@ export default function TranslatePage() {
             {isLoading ? (
               <>
                 <Loader2 size={14} className="shrink-0 animate-spin" />
-                <span>翻译中…</span>
+                <span>{translateButtonLabel}</span>
               </>
             ) : (
-              <span>翻译</span>
+              <span>{translateButtonLabel}</span>
             )}
           </button>
         </div>
@@ -700,6 +1213,8 @@ export default function TranslatePage() {
           {error}
         </div>
       )}
+
+      {translationResultCard}
 
       {(dictionaryLookupQuery || dictionaryLoading || dictionaryDetail || dictionaryError) && (
         <div
@@ -845,6 +1360,17 @@ export default function TranslatePage() {
                 </div>
               </div>
 
+              {isFallbackDictionary ? (
+                <div className="mt-4 rounded-[18px] border border-[var(--color-border)] bg-[var(--color-card)] p-4">
+                  <div className="flex items-center gap-2">
+                    <Sparkles size={15} className="text-[var(--color-primary)]" />
+                    <h3 className="text-[14px] font-semibold text-[var(--color-foreground)]">词典增强暂不可用</h3>
+                  </div>
+                  <p className="mt-2 text-[13px] leading-6 text-[var(--color-muted)]">
+                    当前先保留基础查词卡片；如果 AI 词典暂时失败，不再用大块占位内容打断翻译流程。你可以先看上方译文，稍后再重试词典增强。
+                  </p>
+                </div>
+              ) : (
               <div className="mt-4 lg:grid lg:grid-cols-[minmax(0,1fr)_280px] lg:gap-5">
                 <div className="min-w-0">
                   <div className="flex items-center gap-5 overflow-x-auto border-b border-[var(--color-border)] pb-px">
@@ -956,25 +1482,31 @@ export default function TranslatePage() {
 
                   {activeDictionaryTab === 'examples' && (
                     <div className="mt-5 space-y-3">
-                      {(dictionaryDetail.examples.length > 0 ? dictionaryDetail.examples : ['暂无例句']).map((example, index) => (
-                        <div key={`${example}-${index}`} className="rounded-[18px] border border-[var(--color-border)] bg-[var(--color-card)] px-4 py-4">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0 flex-1">
-                              <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--color-muted)]">
-                                Example {index + 1}
-                              </p>
-                              <p className="mt-2 text-[15px] leading-7 text-[var(--color-foreground)]">{example}</p>
+                      {dictionaryDetail.examples.length > 0 ? (
+                        dictionaryDetail.examples.map((example, index) => (
+                          <div key={`${example}-${index}`} className="rounded-[18px] border border-[var(--color-border)] bg-[var(--color-card)] px-4 py-4">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--color-muted)]">
+                                  Example {index + 1}
+                                </p>
+                                <p className="mt-2 text-[15px] leading-7 text-[var(--color-foreground)]">{example}</p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => speakByLanguage(example, 'English')}
+                                className="rounded-full bg-[var(--color-background-secondary)] p-2"
+                              >
+                                <Volume2 size={14} className="text-[var(--color-muted)]" />
+                              </button>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => speakByLanguage(example, 'English')}
-                              className="rounded-full bg-[var(--color-background-secondary)] p-2"
-                            >
-                              <Volume2 size={14} className="text-[var(--color-muted)]" />
-                            </button>
                           </div>
+                        ))
+                      ) : (
+                        <div className="rounded-[18px] border border-[var(--color-border)] bg-[var(--color-card)] p-4 text-[13px] text-[var(--color-muted)]">
+                          当前词条暂未提供可用例句。
                         </div>
-                      ))}
+                      )}
                     </div>
                   )}
 
@@ -1097,143 +1629,8 @@ export default function TranslatePage() {
                   </section>
                 </aside>
               </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {result && (
-        <div
-          className="mx-5 mb-3 rounded-[var(--radius-md)] bg-[var(--color-card)] p-4"
-          style={{ boxShadow: 'var(--shadow-card)' }}
-        >
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <div>
-              <span className="block text-[12px] text-[var(--color-muted)]">
-                翻译结果
-              </span>
-              <span className="mt-0.5 block text-[11px] text-[var(--color-muted-light)]">
-                主翻译：{TRANSLATION_PROVIDER_LABELS[result.translationProvider]} · 生词分析：{VOCABULARY_PROVIDER_LABELS[result.vocabularyProvider]}
-              </span>
-            </div>
-            <button
-              className="rounded-full bg-[var(--color-background-secondary)] p-1.5"
-              onClick={() => speakByLanguage(result.translatedText, targetLang)}
-              title="播放翻译结果"
-            >
-              <Volume2 size={16} className="text-[var(--color-muted)]" />
-            </button>
-          </div>
-          <p className="leading-relaxed text-[15px] text-[var(--color-foreground)]">
-            {renderHighlightedText(result.translatedText, result.unfamiliarWords)}
-          </p>
-
-          {result.notes.length > 0 && (
-            <div className="mt-3 space-y-2 rounded-[16px] bg-[var(--color-background-secondary)] p-3">
-              {result.notes.map((note, index) => (
-                <p key={`${note}-${index}`} className="text-[12px] leading-relaxed text-[var(--color-muted)]">
-                  {note}
-                </p>
-              ))}
-            </div>
-          )}
-
-          {result.unfamiliarWords.length > 0 && (
-            <div className="mt-3 border-t border-[var(--color-border)] pt-3">
-              <p className="mb-2 text-[12px] text-[var(--color-muted)]">
-                识别到 {result.unfamiliarWords.length} 个值得学习的词汇：
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {result.unfamiliarWords.map((w, i) => {
-                  const collectKey = normalizeCollectKey(w.word, 'en')
-                  const hasCollected = collectedWordSet[collectKey]
-
-                  return (
-                    <button
-                      key={`${w.word}-${i}`}
-                      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[12px] transition-colors ${
-                        hasCollected
-                          ? 'border-[var(--color-success)]/20 bg-[var(--color-success)]/10'
-                          : 'border-transparent bg-[var(--color-primary-light)]'
-                      }`}
-                      title={w.phonetic}
-                      onClick={async () => {
-                        if (hasCollected) return
-                        const { error: saveError } = await addWord({
-                          word: w.word,
-                          language_code: 'en',
-                          language_label: 'English',
-                          phonetic: w.phonetic,
-                          meaning: w.meaning,
-                          source: 'translate',
-                        })
-                        if (!saveError) {
-                          setCollectedWordSet((prev) => ({ ...prev, [collectKey]: true }))
-                          await appendStudy({
-                            vocabulary_learned: 1,
-                            study_duration: 1,
-                          })
-                        }
-                      }}
-                    >
-                      <span className="font-semibold text-[var(--color-primary)]">{w.word}</span>
-                      <span className="text-[var(--color-muted)]">{w.meaning}</span>
-                      {hasCollected ? (
-                        <Check size={14} className="text-[var(--color-success)]" />
-                      ) : (
-                        <Plus size={14} className="text-[var(--color-primary)]" />
-                      )}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          {result.unfamiliarWords.length > 0 && (
-            <button
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-[var(--radius-sm)] bg-[var(--color-primary-light)] px-4 py-2.5 transition-transform active:scale-[0.98]"
-              disabled={result.unfamiliarWords.every(word => collectedWordSet[normalizeCollectKey(word.word, 'en')])}
-              onClick={async () => {
-                const words = result.unfamiliarWords.map(w => ({
-                  word: w.word,
-                  language_code: 'en',
-                  language_label: 'English',
-                  phonetic: w.phonetic,
-                  meaning: w.meaning,
-                  source: 'translate' as const,
-                }))
-                const { error: saveError } = await addWords(words)
-                if (!saveError) {
-                  setCollectedWordSet(
-                    result.unfamiliarWords.reduce<Record<string, boolean>>((acc, word) => {
-                      acc[normalizeCollectKey(word.word, 'en')] = true
-                      return acc
-                    }, {})
-                  )
-                  await appendStudy({
-                    vocabulary_learned: words.length,
-                    study_duration: 2,
-                  })
-                }
-              }}
-            >
-              {result.unfamiliarWords.every(word => collectedWordSet[normalizeCollectKey(word.word, 'en')]) ? (
-                <>
-                  <Check size={16} className="text-[var(--color-success)]" />
-                  <span className="text-[13px] font-semibold text-[var(--color-success)]">
-                    已收录到词库
-                  </span>
-                </>
-              ) : (
-                <>
-                  <Sparkles size={16} className="text-[var(--color-primary)]" />
-                  <span className="text-[13px] font-semibold text-[var(--color-primary)]">
-                    一键收录 {result.unfamiliarWords.length} 个陌生词汇
-                  </span>
-                </>
               )}
-            </button>
+            </>
           )}
         </div>
       )}

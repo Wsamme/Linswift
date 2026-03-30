@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ChevronLeft, Mic, MessageCircle, RotateCcw, Clock, Flame, Award,
-  ChevronRight, Coffee, Plane, Stethoscope, Briefcase, Loader2,
+  ChevronRight, Coffee, Plane, Stethoscope, Briefcase, Loader2, Wrench,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
@@ -77,6 +77,31 @@ export default function SpeakingHubPage() {
         <h1 className="text-[18px] font-bold text-[var(--color-foreground)] font-secondary">口语练习</h1>
       </div>
 
+      <div className="px-5 pb-10">
+        <section
+          className="rounded-[24px] border border-[var(--color-border)] bg-[var(--color-card)] px-5 py-8 text-center"
+          style={{ boxShadow: 'var(--shadow-card)' }}
+        >
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
+            <Wrench size={24} />
+          </div>
+          <span className="inline-flex items-center rounded-full bg-[var(--color-primary-soft)] px-3 py-1 text-[11px] font-semibold tracking-[0.14em] text-[var(--color-primary)]">
+            UNDER DEVELOPMENT
+          </span>
+          <h2 className="mt-4 text-[22px] font-bold text-[var(--color-foreground)] font-secondary">
+            口语练习正在开发中
+          </h2>
+          <p className="mx-auto mt-3 max-w-[320px] text-[13px] leading-6 text-[var(--color-muted)]">
+            这一整页功能正在集中打磨，暂时不对外开放。完成后会统一上线 AI 场景对话、复述练习和每日口语任务。
+          </p>
+        </section>
+      </div>
+
+      {/*
+        保留原页面实现，方便后续继续开发；
+        当前阶段整体隐藏，只展示“开发中”状态。
+      */}
+      <div className="hidden">
       {loading ? (
         <div className="flex items-center justify-center py-20"><Loader2 size={24} className="animate-spin text-[var(--color-primary)]" /></div>
       ) : (
@@ -168,6 +193,7 @@ export default function SpeakingHubPage() {
           </div>
         </>
       )}
+      </div>
     </div>
   )
 }

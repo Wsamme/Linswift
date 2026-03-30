@@ -1,12 +1,18 @@
-import { analyzePageText, buildFrequencyData, getDefaultSettings } from './lib/analyzer.js'
+import {
+  analyzePageText,
+  buildFrequencyData,
+  getDefaultSettings,
+  inferLevelFromVocabulary,
+} from './lib/analyzer.js'
 import {
   fetchDictionaryExplanation,
+  filterDictionaryWhitelistedResults,
   fetchLinswiftExplanations,
-  fetchLinswiftWordDetail,
   translateBatchLines,
 } from './lib/ai.js'
 import {
   ensureProfile,
+  fetchVocabularyEstimate,
   fetchUserVocabulary,
   getCurrentUser,
   isSessionExpired,
@@ -30,6 +36,10 @@ import {
 
 let frequencyDataPromise = null
 
+function isInjectableTab(tab) {
+  return Boolean(tab?.id) && /^https?:/i.test(tab.url || '')
+}
+
 async function ensureContentScript(tabId) {
   try {
     await chrome.tabs.sendMessage(tabId, { type: 'linswift-ping' })
@@ -40,6 +50,28 @@ async function ensureContentScript(tabId) {
     target: { tabId },
     files: ['content-script.js'],
   })
+}
+
+async function bootstrapExistingTabs() {
+  let tabs = []
+  try {
+    tabs = await chrome.tabs.query({})
+  } catch (error) {
+    console.warn('查询现有标签页失败:', error)
+    return
+  }
+
+  await Promise.allSettled(
+    tabs
+      .filter(isInjectableTab)
+      .map(async (tab) => {
+        try {
+          await ensureContentScript(tab.id)
+        } catch (error) {
+          console.warn('恢复网页常驻插件失败:', tab.url, error)
+        }
+      })
+  )
 }
 
 async function loadFrequencyData() {
@@ -53,11 +85,22 @@ async function loadFrequencyData() {
 }
 
 function getMergedState(state) {
-  return {
+  const mergedState = {
     ...state,
     settings: {
       ...getDefaultSettings(),
       ...(state.settings || {}),
+    },
+  }
+
+  return {
+    ...mergedState,
+    settings: {
+      ...mergedState.settings,
+      level: inferLevelFromVocabulary(
+        mergedState.settings?.estimatedVocabulary,
+        mergedState.knownWords || []
+      ),
     },
   }
 }
@@ -67,6 +110,16 @@ function normalizeWord(rawWord) {
     .trim()
     .toLowerCase()
     .replace(/[’]/g, "'")
+}
+
+function resolveRequestedTranslationLanguage(requested, fallback = 'zh-CN') {
+  const value = String(requested || '').trim()
+  return value || fallback
+}
+
+function resolveRequestedTranslationMode(requested, fallback = 'ai') {
+  const value = String(requested || '').trim()
+  return value || fallback
 }
 
 function wordToCloudRow(userId, word, patch = {}) {
@@ -189,17 +242,35 @@ async function uploadLocalStateToCloud(session, state) {
 async function syncCloudState(session) {
   const localState = getMergedState(await loadExtensionState())
   const uploadSummary = await uploadLocalStateToCloud(session, localState)
-  const vocabularyRows = await fetchUserVocabulary(
-    session.access_token,
-    session.user.id,
-    1000
-  )
+  const [vocabularyRows, vocabularyEstimate] = await Promise.all([
+    fetchUserVocabulary(
+      session.access_token,
+      session.user.id,
+      1000
+    ),
+    fetchVocabularyEstimate(session.access_token, session.user.id),
+  ])
   const mergedState = mergeCloudState(localState, vocabularyRows)
+  const nextEstimatedVocabulary =
+    vocabularyEstimate?.estimatedVocabulary ??
+    mergedState.settings?.estimatedVocabulary ??
+    null
+
+  mergedState.settings = {
+    ...mergedState.settings,
+    estimatedVocabulary: nextEstimatedVocabulary,
+    estimatedVocabularySource:
+      vocabularyEstimate?.source ||
+      mergedState.settings?.estimatedVocabularySource ||
+      null,
+    level: inferLevelFromVocabulary(nextEstimatedVocabulary, mergedState.knownWords || []),
+  }
 
   await saveWordState({
     knownWords: mergedState.knownWords,
     savedWords: mergedState.savedWords,
   })
+  await saveSettings(mergedState.settings)
 
   return {
     state: mergedState,
@@ -207,31 +278,64 @@ async function syncCloudState(session) {
       cloudWords: Array.isArray(vocabularyRows) ? vocabularyRows.length : 0,
       uploadedKnown: uploadSummary.uploadedKnown,
       uploadedSaved: uploadSummary.uploadedSaved,
+      estimatedVocabulary: nextEstimatedVocabulary,
+      estimatedVocabularySource: mergedState.settings.estimatedVocabularySource,
     },
   }
 }
 
-async function enrichResults(results, apiKey, targetLanguage) {
-  const nextResults = results.map((item) => ({ ...item }))
-  const words = nextResults.slice(0, 10).map((item) => item.word)
-  const aiMap = await fetchLinswiftExplanations(words, apiKey, targetLanguage)
+async function enrichResults(results, apiKey, targetLanguage, translationMode = 'ai') {
+  const nextResults = (await filterDictionaryWhitelistedResults(results)).map((item) => ({ ...item }))
+  const aiMap = await fetchLinswiftExplanations(
+    nextResults.map((item) => ({
+      word: item.word,
+      snippet: item.snippet || item.note || '',
+    })),
+    apiKey,
+    targetLanguage
+  )
 
-  for (const item of nextResults) {
+  const concurrency = Math.min(4, nextResults.length || 1)
+  const enrichedResults = new Array(nextResults.length)
+  let nextIndex = 0
+
+  const enrichOne = async (item) => {
     const explanation = aiMap?.[item.word]
     if (explanation) {
-      item.meaning = explanation.meaning
-      item.note = explanation.note
-      item.phonetic = explanation.phonetic || ''
-      continue
+      return {
+        ...item,
+        meaning: explanation.meaning,
+        note: explanation.note,
+        phonetic: explanation.phonetic || '',
+      }
     }
 
-    const dictionary = await fetchDictionaryExplanation(item.word, targetLanguage, item.snippet || '')
-    item.meaning = dictionary.meaning
-    item.note = dictionary.note
-    item.phonetic = dictionary.phonetic || ''
+    const dictionary = await fetchDictionaryExplanation(
+      item.word,
+      targetLanguage,
+      item.snippet || '',
+      translationMode
+    )
+
+    return {
+      ...item,
+      meaning: dictionary.meaning,
+      note: dictionary.note,
+      phonetic: dictionary.phonetic || '',
+    }
   }
 
-  return nextResults
+  await Promise.all(
+    Array.from({ length: concurrency }, async () => {
+      while (nextIndex < nextResults.length) {
+        const currentIndex = nextIndex
+        nextIndex += 1
+        enrichedResults[currentIndex] = await enrichOne(nextResults[currentIndex])
+      }
+    })
+  )
+
+  return enrichedResults
 }
 
 async function pushKnownWordToCloud(session, word) {
@@ -277,6 +381,14 @@ chrome.action.onClicked.addListener(async (tab) => {
   await chrome.tabs.sendMessage(tab.id, { type: 'toggle-floating-panel' })
 })
 
+chrome.runtime.onStartup.addListener(() => {
+  void bootstrapExistingTabs()
+})
+
+chrome.runtime.onInstalled.addListener(() => {
+  void bootstrapExistingTabs()
+})
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   ;(async () => {
     if (message?.type === 'panel-load-state') {
@@ -312,14 +424,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
       await ensureProfile(hydratedSession.access_token, user)
       await saveAuthSession(hydratedSession)
-
-      const synced = await syncCloudState(hydratedSession)
+      const state = getMergedState(await loadExtensionState())
 
       sendResponse({
         ok: true,
-        state: synced.state,
+        state,
         auth: summarizeSession(hydratedSession),
-        syncSummary: synced.summary,
       })
       return
     }
@@ -356,12 +466,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === 'panel-analyze-page') {
       const state = getMergedState(await loadExtensionState())
       const frequencyData = await loadFrequencyData()
-      const analysis = analyzePageText(
+      const baseAnalysis = analyzePageText(
         message.pageData || {},
         frequencyData,
         state.settings,
         state.knownWords
       )
+      const validResults = await filterDictionaryWhitelistedResults(baseAnalysis.results)
+      const analysis = {
+        ...baseAnalysis,
+        meta: {
+          ...baseAnalysis.meta,
+          resultCount: validResults.length,
+        },
+        results: validResults,
+      }
 
       sendResponse({ ok: true, analysis, state })
       return
@@ -369,10 +488,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
     if (message?.type === 'panel-enrich-results') {
       const state = getMergedState(await loadExtensionState())
+      const targetLanguage = resolveRequestedTranslationLanguage(
+        message.targetLanguage,
+        state.settings.translationLanguage || 'zh-CN'
+      )
+      const translationMode = resolveRequestedTranslationMode(
+        message.translationMode,
+        state.settings.translationMode || 'ai'
+      )
       const results = await enrichResults(
         Array.isArray(message.results) ? message.results : [],
         state.settings.moonshotApiKey?.trim(),
-        state.settings.translationLanguage || 'zh-CN'
+        targetLanguage,
+        translationMode
       )
 
       sendResponse({ ok: true, results })
@@ -382,6 +510,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === 'panel-word-detail') {
       const state = getMergedState(await loadExtensionState())
       const word = normalizeWord(message.word)
+      const targetLanguage = resolveRequestedTranslationLanguage(
+        message.targetLanguage,
+        state.settings.translationLanguage || 'zh-CN'
+      )
+      const translationMode = resolveRequestedTranslationMode(
+        message.translationMode,
+        state.settings.translationMode || 'ai'
+      )
 
       if (!word) {
         throw new Error('缺少单词')
@@ -390,8 +526,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const detail = await fetchLinswiftWordDetail(
         word,
         state.settings.moonshotApiKey?.trim(),
-        state.settings.translationLanguage || 'zh-CN',
-        message.context || ''
+        targetLanguage,
+        message.context || '',
+        translationMode
       )
 
       sendResponse({ ok: true, detail })
@@ -400,11 +537,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
     if (message?.type === 'panel-translate-lines') {
       const state = getMergedState(await loadExtensionState())
+      const targetLanguage = resolveRequestedTranslationLanguage(
+        message.targetLanguage,
+        state.settings.translationLanguage || 'zh-CN'
+      )
+      const translationMode = resolveRequestedTranslationMode(
+        message.translationMode,
+        state.settings.translationMode || 'ai'
+      )
       const translation = await translateBatchLines(
         Array.isArray(message.lines) ? message.lines : [],
         state.settings.moonshotApiKey?.trim(),
-        state.settings.translationLanguage || 'zh-CN',
-        state.settings.translationMode || 'hybrid'
+        targetLanguage,
+        translationMode
       )
 
       sendResponse({ ok: true, ...translation })
@@ -451,9 +596,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
     if (message?.type === 'panel-save-settings') {
       const state = getMergedState(await loadExtensionState())
+      const nextEstimatedVocabulary =
+        message.settings?.estimatedVocabulary ?? state.settings.estimatedVocabulary ?? null
       const settings = {
         ...state.settings,
         ...(message.settings || {}),
+        level: inferLevelFromVocabulary(nextEstimatedVocabulary, state.knownWords || []),
       }
       await saveSettings(settings)
       sendResponse({ ok: true, settings })

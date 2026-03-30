@@ -1,8 +1,10 @@
-import { DEEPL_PROXY_URL, MOONSHOT_MODEL } from './config.js'
+import { DEEPL_PROXY_URL, MOONSHOT_MODEL, MOONSHOT_PROXY_URL } from './config.js'
 
 const DICTIONARY_API_BASE = 'https://api.dictionaryapi.dev/api/v2/entries/en'
-const MOONSHOT_API_BASE = 'https://api.moonshot.cn/v1/chat/completions'
+const MOONSHOT_API_BASE = 'https://api.moonshot.ai/v1/chat/completions'
+const MOONSHOT_TIMEOUT_MS = 8000
 const PUBLIC_TRANSLATE_API_BASE = 'https://translate.googleapis.com/translate_a/single'
+const dictionaryWhitelistCache = new Map()
 const CONTEXT_STOP_WORDS = new Set([
   'the', 'and', 'for', 'that', 'with', 'from', 'this', 'into', 'such', 'left',
   'than', 'then', 'were', 'been', 'have', 'has', 'had', 'will', 'would', 'could',
@@ -416,8 +418,48 @@ async function fetchDictionaryEntryWithVariants(word) {
   return null
 }
 
-async function callMoonshot(messages, apiKey, temperature = 0.2) {
-  if (!apiKey) return null
+export async function hasDictionaryWhitelistEntry(word) {
+  const normalized = normalizeLookupWord(word)
+  if (!normalized) return false
+
+  if (dictionaryWhitelistCache.has(normalized)) {
+    return dictionaryWhitelistCache.get(normalized)
+  }
+
+  const task = (async () => {
+    const matched = await fetchDictionaryEntryWithVariants(normalized)
+    return Boolean(matched?.entries?.length)
+  })()
+
+  dictionaryWhitelistCache.set(normalized, task)
+  return task
+}
+
+export async function filterDictionaryWhitelistedWords(words) {
+  const normalized = Array.isArray(words)
+    ? words.map((word) => normalizeLookupWord(word)).filter(Boolean)
+    : []
+
+  const uniqueWords = Array.from(new Set(normalized))
+  const flags = await Promise.all(uniqueWords.map((word) => hasDictionaryWhitelistEntry(word)))
+
+  return uniqueWords.filter((_, index) => flags[index])
+}
+
+export async function filterDictionaryWhitelistedResults(results) {
+  const safeResults = Array.isArray(results) ? results : []
+  const flags = await Promise.all(
+    safeResults.map((item) => hasDictionaryWhitelistEntry(item?.word || ''))
+  )
+
+  return safeResults.filter((_, index) => flags[index])
+}
+
+async function requestMoonshotDirect(messages, apiKey, temperature) {
+  const controller = typeof AbortController === 'function' ? new AbortController() : null
+  const timeoutId = controller
+    ? globalThis.setTimeout(() => controller.abort(), MOONSHOT_TIMEOUT_MS)
+    : null
 
   try {
     const response = await fetch(MOONSHOT_API_BASE, {
@@ -426,6 +468,7 @@ async function callMoonshot(messages, apiKey, temperature = 0.2) {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
       },
+      signal: controller?.signal,
       body: JSON.stringify({
         model: MOONSHOT_MODEL,
         temperature,
@@ -439,7 +482,60 @@ async function callMoonshot(messages, apiKey, temperature = 0.2) {
     return payload?.choices?.[0]?.message?.content || null
   } catch {
     return null
+  } finally {
+    if (timeoutId) {
+      globalThis.clearTimeout(timeoutId)
+    }
   }
+}
+
+async function requestMoonshotProxy(messages, temperature) {
+  const controller = typeof AbortController === 'function' ? new AbortController() : null
+  const timeoutId = controller
+    ? globalThis.setTimeout(() => controller.abort(), MOONSHOT_TIMEOUT_MS)
+    : null
+
+  try {
+    const response = await fetch(MOONSHOT_PROXY_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      signal: controller?.signal,
+      body: JSON.stringify({
+        model: MOONSHOT_MODEL,
+        temperature,
+        messages,
+      }),
+    })
+
+    if (!response.ok) return null
+
+    const payload = await response.json()
+    return payload?.content || payload?.choices?.[0]?.message?.content || null
+  } catch {
+    return null
+  } finally {
+    if (timeoutId) {
+      globalThis.clearTimeout(timeoutId)
+    }
+  }
+}
+
+async function callMoonshot(messages, apiKey, temperature = 0.2) {
+  const resolvedTemperature = MOONSHOT_MODEL === 'kimi-k2.5' ? 1 : temperature
+
+  if (apiKey) {
+    const directResult = await requestMoonshotDirect(messages, apiKey, resolvedTemperature)
+    if (directResult) return directResult
+  }
+
+  return requestMoonshotProxy(messages, resolvedTemperature)
+}
+
+function shouldUseContextualAi(apiKey, context = '', translationMode = 'hybrid') {
+  if (resolveTranslationMode(translationMode) === 'ai') return true
+  return normalizeComparableText(context).length >= 10
 }
 
 function fallbackWordDetail(word, explanation = null, targetLanguage = 'zh-CN') {
@@ -447,15 +543,98 @@ function fallbackWordDetail(word, explanation = null, targetLanguage = 'zh-CN') 
   return {
     word,
     phonetic: explanation?.phonetic || '',
+    phoneticUk: explanation?.phoneticUk || '',
+    phoneticUs: explanation?.phoneticUs || '',
+    audioUk: explanation?.audioUk || '',
+    audioUs: explanation?.audioUs || '',
     meaning: explanation?.meaning || copy.detailUnavailable,
     note: explanation?.note || copy.basicCard,
+    senses: Array.isArray(explanation?.senses) ? explanation.senses : [],
     examples: explanation?.note?.startsWith(copy.examplePrefix)
       ? [explanation.note.replace(copy.examplePrefix, '').trim()]
       : [],
   }
 }
 
-export async function fetchDictionaryExplanation(word, targetLanguage = 'en', context = '') {
+function normalizeAudioUrl(audio) {
+  const value = String(audio || '').trim()
+  if (!value) return ''
+  if (value.startsWith('//')) return `https:${value}`
+  return value
+}
+
+function extractPronunciation(entry) {
+  const phonetics = Array.isArray(entry?.phonetics) ? entry.phonetics : []
+  const normalized = phonetics
+    .map((item) => ({
+      text: String(item?.text || '').trim(),
+      audio: normalizeAudioUrl(item?.audio),
+    }))
+    .filter((item) => item.text || item.audio)
+
+  const pick = (predicate) => normalized.find(predicate) || null
+  const pickByText = (pattern) => pick((item) => pattern.test(item.text))
+  const pickByAudio = (pattern) => pick((item) => pattern.test(item.audio))
+
+  const uk =
+    pickByText(/\b(uk|英)\b/i) ||
+    pickByAudio(/\buk[\W_]?/i) ||
+    normalized[0] ||
+    null
+  const us =
+    pickByText(/\b(us|美)\b/i) ||
+    pickByAudio(/\bus[\W_]?/i) ||
+    normalized.find((item) => item !== uk) ||
+    normalized[0] ||
+    null
+
+  const fallbackPhonetic =
+    String(entry?.phonetic || '').trim() ||
+    normalized.find((item) => item.text)?.text ||
+    ''
+
+  return {
+    phonetic: fallbackPhonetic,
+    phoneticUk: uk?.text || fallbackPhonetic,
+    phoneticUs: us?.text || fallbackPhonetic,
+    audioUk: uk?.audio || '',
+    audioUs: us?.audio || '',
+  }
+}
+
+async function translateGlossaryText(text, targetLanguage = 'zh-CN', translationMode = 'hybrid') {
+  const normalizedText = normalizeComparableText(text)
+  if (!normalizedText || targetLanguage === 'en') return normalizedText
+
+  if (resolveTranslationMode(translationMode) === 'deepl') {
+    return translateSingleWithDeepL(normalizedText, targetLanguage)
+  }
+
+  return translateWithPublicApi(normalizedText, targetLanguage)
+}
+
+async function buildLocalizedSenses(entries, targetLanguage = 'zh-CN', translationMode = 'hybrid') {
+  const senses = flattenDictionarySenses(entries).slice(0, 4)
+  if (senses.length === 0) return []
+
+  return Promise.all(
+    senses.map(async (sense) => ({
+      partOfSpeech: sense.partOfSpeech || '',
+      definition:
+        targetLanguage === 'en'
+          ? sense.definition
+          : await translateGlossaryText(sense.definition, targetLanguage, translationMode),
+      example: sense.example || '',
+    }))
+  )
+}
+
+export async function fetchDictionaryExplanation(
+  word,
+  targetLanguage = 'en',
+  context = '',
+  translationMode = 'hybrid'
+) {
   const copy = getLocalizedFallback(targetLanguage)
   try {
     const dictionaryMatch = await fetchDictionaryEntryWithVariants(word)
@@ -463,7 +642,7 @@ export async function fetchDictionaryExplanation(word, targetLanguage = 'en', co
       const translatedFallback =
         targetLanguage === 'en'
           ? copy.dictionaryMissing
-          : await translateWithPublicApi(word, targetLanguage)
+          : await translateGlossaryText(word, targetLanguage, translationMode)
       return {
         word,
         meaning: translatedFallback || copy.dictionaryMissing,
@@ -477,14 +656,11 @@ export async function fetchDictionaryExplanation(word, targetLanguage = 'en', co
     const entry = selectedSense?.entry || dictionaryMatch.entries[0]
     const rawDefinition = selectedSense?.definition || copy.dictionaryMissing
     const example = selectedSense?.example || ''
-    const phonetic =
-      entry?.phonetic ||
-      entry?.phonetics?.find((item) => item.text)?.text ||
-      ''
+    const pronunciation = extractPronunciation(entry)
     const definition =
       targetLanguage === 'en'
         ? rawDefinition
-        : await translateWithPublicApi(rawDefinition, targetLanguage)
+        : await translateGlossaryText(rawDefinition, targetLanguage, translationMode)
     const usedBaseForm =
       dictionaryMatch.matchedWord && dictionaryMatch.matchedWord !== normalizeLookupWord(word)
         ? ` · ${copy.baseFormPrefix}${dictionaryMatch.matchedWord}`
@@ -493,7 +669,11 @@ export async function fetchDictionaryExplanation(word, targetLanguage = 'en', co
     return {
       word,
       meaning: definition,
-      phonetic,
+      phonetic: pronunciation.phonetic,
+      phoneticUk: pronunciation.phoneticUk,
+      phoneticUs: pronunciation.phoneticUs,
+      audioUk: pronunciation.audioUk,
+      audioUs: pronunciation.audioUs,
       note: example ? `${copy.examplePrefix}${example}` : `${copy.dictionarySource}${usedBaseForm}`,
     }
   } catch {
@@ -505,7 +685,12 @@ export async function fetchDictionaryExplanation(word, targetLanguage = 'en', co
   }
 }
 
-export async function fetchDictionaryWordDetail(word, targetLanguage = 'en', context = '') {
+export async function fetchDictionaryWordDetail(
+  word,
+  targetLanguage = 'en',
+  context = '',
+  translationMode = 'hybrid'
+) {
   const copy = getLocalizedFallback(targetLanguage)
   try {
     const dictionaryMatch = await fetchDictionaryEntryWithVariants(word)
@@ -513,22 +698,20 @@ export async function fetchDictionaryWordDetail(word, targetLanguage = 'en', con
       const translatedFallback =
         targetLanguage === 'en'
           ? copy.dictionaryMissing
-          : await translateWithPublicApi(word, targetLanguage)
+          : await translateGlossaryText(word, targetLanguage, translationMode)
       return {
         word,
         phonetic: '',
         meaning: translatedFallback || copy.dictionaryMissing,
         note: copy.translatedFallback,
+        senses: [],
         examples: [],
       }
     }
 
     const bestSense = selectBestDictionarySense(dictionaryMatch.entries, context)
     const entry = bestSense?.entry || dictionaryMatch.entries[0]
-    const phonetic =
-      entry?.phonetic ||
-      entry?.phonetics?.find((item) => item.text)?.text ||
-      ''
+    const pronunciation = extractPronunciation(entry)
     const selectedSense =
       bestSense ||
       flattenDictionarySenses(dictionaryMatch.entries)[0] ||
@@ -547,20 +730,31 @@ export async function fetchDictionaryWordDetail(word, targetLanguage = 'en', con
     const localizedMeaning =
       targetLanguage === 'en'
         ? meaningParts.join('；') || copy.dictionaryMissing
-        : await translateWithPublicApi(
+        : await translateGlossaryText(
             meaningParts.join('；') || copy.dictionaryMissing,
-            targetLanguage
+            targetLanguage,
+            translationMode
           )
     const usedBaseForm =
       dictionaryMatch.matchedWord && dictionaryMatch.matchedWord !== normalizeLookupWord(word)
         ? ` · ${copy.baseFormPrefix}${dictionaryMatch.matchedWord}`
         : ''
+    const senses = await buildLocalizedSenses(
+      dictionaryMatch.entries,
+      targetLanguage,
+      translationMode
+    )
 
     return {
       word,
-      phonetic,
+      phonetic: pronunciation.phonetic,
+      phoneticUk: pronunciation.phoneticUk,
+      phoneticUs: pronunciation.phoneticUs,
+      audioUk: pronunciation.audioUk,
+      audioUs: pronunciation.audioUs,
       meaning: localizedMeaning,
       note: `${copy.dictionarySource}${usedBaseForm}`,
+      senses,
       examples,
     }
   } catch {
@@ -568,17 +762,47 @@ export async function fetchDictionaryWordDetail(word, targetLanguage = 'en', con
   }
 }
 
-export async function fetchLinswiftExplanations(words, apiKey, targetLanguage = 'zh-CN') {
-  if (!apiKey || words.length === 0) return null
+async function translateSingleWithDeepL(text, targetLanguage = 'zh-CN') {
+  const result = await translateManyWithDeepL([text], targetLanguage)
+  return normalizeComparableText(result.lines?.[0]) || normalizeComparableText(text)
+}
+
+export async function fetchLinswiftExplanations(entries, apiKey, targetLanguage = 'zh-CN') {
+  const normalizedEntries = Array.isArray(entries)
+    ? entries
+        .map((entry) => {
+          if (typeof entry === 'string') {
+            return {
+              word: normalizeLookupWord(entry),
+              snippet: '',
+            }
+          }
+          return {
+            word: normalizeLookupWord(entry?.word),
+            snippet: normalizeComparableText(entry?.snippet || entry?.context || ''),
+          }
+        })
+        .filter((entry) => entry.word)
+    : []
+
+  if (normalizedEntries.length === 0) return null
+  const validWords = await filterDictionaryWhitelistedWords(normalizedEntries.map((entry) => entry.word))
+  if (validWords.length === 0) return null
   const language = resolveTranslationLanguage(targetLanguage)
+  const validEntries = normalizedEntries.filter((entry) => validWords.includes(entry.word))
 
   const prompt = [
     '你是 Linswift 英语学习 APP 的词汇助手。',
     '请按 Linswift 的学习风格，为下面这些单词输出学习卡片。',
+    '必须结合每个单词所在网页句子的上下文来判断词义，不要做僵硬的字典直译。',
+    '如果上下文已经明显限定义项，就只返回最贴合当前阅读语境的释义和记忆提示。',
+    '如果该词在当前句子里是机构、地名、人物、品牌或新闻借代，必须按真实语境翻译成专有名词，不要按普通名词硬译。',
+    '例如 Pentagon 在国际新闻里通常应译为“五角大楼”，而不是“五边形”。',
     `返回 JSON 数组，每项结构为 {"word":"", "phonetic":"", "meaning":"${language.label}释义（多个义项可用分号分隔）", "note":"${language.label}简短记忆提示或高频例句"}。`,
     '不要返回 markdown，不要返回数组外文本。',
     `meaning 与 note 都必须使用${language.instruction}；note 控制在 24 个字以内；phonetic 尽量提供。`,
-    `单词列表：${words.join(', ')}`,
+    '输入列表：',
+    ...validEntries.map((entry, index) => `${index + 1}. word=${entry.word}${entry.snippet ? ` | context=${entry.snippet}` : ''}`),
   ].join('\n')
 
   try {
@@ -613,10 +837,18 @@ export async function fetchLinswiftExplanations(words, apiKey, targetLanguage = 
   }
 }
 
-export async function fetchLinswiftWordDetail(word, apiKey, targetLanguage = 'zh-CN', context = '') {
+export async function fetchLinswiftWordDetail(
+  word,
+  apiKey,
+  targetLanguage = 'zh-CN',
+  context = '',
+  translationMode = 'hybrid'
+) {
   const language = resolveTranslationLanguage(targetLanguage)
-  if (!apiKey) {
-    return fetchDictionaryWordDetail(word, targetLanguage, context)
+  const mode = resolveTranslationMode(translationMode)
+
+  if (!shouldUseContextualAi(apiKey, context, mode)) {
+    return fetchDictionaryWordDetail(word, targetLanguage, context, mode)
   }
 
   const prompt = `你是 Linswift 英语学习 APP 的单词老师。请为这个英文单词生成学习卡片。
@@ -641,6 +873,8 @@ ${context ? `上下文：${context}` : ''}
 - 例句必须是自然英文短句
 - meaning 与 note 必须使用${language.instruction}
 - 如果提供了上下文，优先返回最符合该上下文的词义，不要选生僻医学义项
+- 如果上下文里这个词更像专有名词、机构、地名、人物、新闻借代或军事政治术语，优先按专有名词理解
+- 例如 Pentagon 在国际新闻语境应译为“五角大楼”，而不是“五边形”
 - 一定返回合法 JSON`
 
   try {
@@ -655,25 +889,34 @@ ${context ? `上下文：${context}` : ''}
       },
     ], apiKey)
     if (!content) {
-      return fetchDictionaryWordDetail(word, targetLanguage, context)
+      return fetchDictionaryWordDetail(word, targetLanguage, context, mode)
     }
 
     const parsed = safeJsonParse(cleanupJson(content))
     if (!parsed?.word || !parsed?.meaning) {
-      return fetchDictionaryWordDetail(word, targetLanguage, context)
+      return fetchDictionaryWordDetail(word, targetLanguage, context, mode)
     }
 
+    const dictionaryDetail = await fetchDictionaryWordDetail(word, targetLanguage, context, mode)
     return {
       word: parsed.word,
-      phonetic: parsed.phonetic || '',
+      phonetic: parsed.phonetic || dictionaryDetail.phonetic || '',
+      phoneticUk: dictionaryDetail.phoneticUk || parsed.phonetic || '',
+      phoneticUs: dictionaryDetail.phoneticUs || parsed.phonetic || '',
+      audioUk: dictionaryDetail.audioUk || '',
+      audioUs: dictionaryDetail.audioUs || '',
       meaning: parsed.meaning,
       note: parsed.note || '来自 Linswift AI 词卡',
+      senses:
+        Array.isArray(dictionaryDetail.senses) && dictionaryDetail.senses.length
+          ? dictionaryDetail.senses
+          : [{ partOfSpeech: '', definition: parsed.meaning, example: '' }],
       examples: Array.isArray(parsed.examples)
         ? parsed.examples.filter(Boolean).slice(0, 2)
         : [],
     }
   } catch {
-    return fetchDictionaryWordDetail(word, targetLanguage, context)
+    return fetchDictionaryWordDetail(word, targetLanguage, context, mode)
   }
 }
 
@@ -730,10 +973,11 @@ async function translateBatchLinesWithAI(lines, apiKey, targetLanguage = 'zh-CN'
     const batch = indexedLines.slice(start, start + batchSize)
     const numbered = batch.map((item) => `[${item.index}] ${item.text}`).join('\n')
     const prompt = [
-      `你是 Linswift 的 YouTube 字幕翻译助手，请把这些英文字幕翻译成${language.instruction}。`,
+      `你是 Linswift 的网页阅读翻译助手，请把这些英文内容翻译成${language.instruction}。`,
       '规则：',
       '- 严格保留原编号，每行格式必须是 [编号] 翻译内容',
-      '- 翻译自然、简洁，适合字幕辅助阅读',
+      '- 翻译必须自然、贴合上下文，像真实阅读助手，不要机械逐词直译',
+      '- 如果是网页正文，优先保证语义顺畅；如果是短句，也不要翻得生硬',
       '- 专有名词、频道名、品牌名可保留原文',
       '- 不要添加解释、括号说明、markdown 或任何额外文字',
       '',
@@ -817,6 +1061,18 @@ export async function translateBatchLines(
 
   try {
     const deeplResult = await translateManyWithDeepL(lines, targetLanguage)
+    if (deeplResult.unavailable) {
+      const fallback = await translateBatchLinesWithAI(lines, apiKey, targetLanguage)
+      return {
+        ...fallback,
+        mode,
+        fallbackUsed: true,
+        note:
+          mode === 'deepl'
+            ? `DeepL 未返回有效译文，已回退到 ${fallback.provider === 'moonshot' ? 'AI' : '公共翻译'}`
+            : `混合模式里的 DeepL 未返回有效译文，已回退到 ${fallback.provider === 'moonshot' ? 'AI' : '公共翻译'}`,
+      }
+    }
     return {
       ...deeplResult,
       mode,

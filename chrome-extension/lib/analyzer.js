@@ -14,14 +14,20 @@ const ABBREVIATION_BLACKLIST = new Set([
 ])
 const DEFAULT_SETTINGS = {
   level: 'intermediate',
+  estimatedVocabulary: null,
+  estimatedVocabularySource: null,
   maxResults: 18,
   inlineTranslateEnabled: false,
   autoTranslateOnLoad: true,
   translationLanguage: 'zh-CN',
-  translationMode: 'hybrid',
+  translationMode: 'ai',
+  pronunciationVariant: 'both',
   disabledAutoTranslateHosts: [],
   youtubeSubtitleMode: 'vocab',
+  sentenceSmartVocabEnabled: true,
   uiScale: 0.56,
+  panelWidth: 380,
+  panelHeight: 760,
 }
 
 function normalizeWord(rawWord) {
@@ -44,7 +50,34 @@ export function getDefaultSettings() {
   return { ...DEFAULT_SETTINGS }
 }
 
-export function getLevelProfile(level) {
+export function normalizeVocabularyEstimate(rawValue) {
+  const value = Math.round(Number(rawValue))
+  return Number.isFinite(value) && value > 0 ? value : null
+}
+
+export function inferLevelFromKnownWords(knownWords = []) {
+  const count = Array.isArray(knownWords)
+    ? new Set(knownWords.map((word) => normalizeWord(word)).filter(Boolean)).size
+    : Math.max(0, Number(knownWords) || 0)
+
+  if (count >= 3200) return 'advanced'
+  if (count >= 900) return 'intermediate'
+  return 'beginner'
+}
+
+export function inferLevelFromVocabulary(estimatedVocabulary, knownWords = []) {
+  const estimate = normalizeVocabularyEstimate(estimatedVocabulary)
+
+  if (estimate !== null) {
+    if (estimate >= 7000) return 'advanced'
+    if (estimate >= 2500) return 'intermediate'
+    return 'beginner'
+  }
+
+  return inferLevelFromKnownWords(knownWords)
+}
+
+function getBaseLevelProfile(level) {
   switch (level) {
     case 'beginner':
       return { label: '初级', knownRankThreshold: 1500 }
@@ -53,6 +86,45 @@ export function getLevelProfile(level) {
     case 'intermediate':
     default:
       return { label: '中级', knownRankThreshold: 3000 }
+  }
+}
+
+function buildKnownRankThreshold(estimatedVocabulary) {
+  const estimate = normalizeVocabularyEstimate(estimatedVocabulary)
+  if (estimate === null) return null
+
+  const buffer =
+    estimate < 800 ? 150 :
+    estimate < 1500 ? 220 :
+    estimate < 3000 ? 320 :
+    estimate < 5000 ? 450 :
+    estimate < 9000 ? 650 :
+    900
+
+  return Math.min(20000, Math.max(650, estimate + buffer))
+}
+
+export function getLevelProfile(level, estimatedVocabulary = null) {
+  const normalizedEstimate = normalizeVocabularyEstimate(estimatedVocabulary)
+  const resolvedLevel = normalizedEstimate !== null
+    ? inferLevelFromVocabulary(normalizedEstimate)
+    : level
+  const fallbackProfile = getBaseLevelProfile(resolvedLevel)
+  const knownRankThreshold =
+    normalizedEstimate !== null
+      ? buildKnownRankThreshold(normalizedEstimate)
+      : fallbackProfile.knownRankThreshold
+
+  return {
+    ...fallbackProfile,
+    level: resolvedLevel,
+    estimatedVocabulary: normalizedEstimate,
+    isEstimateBased: normalizedEstimate !== null,
+    knownRankThreshold,
+    withinThresholdRankFloor:
+      normalizedEstimate !== null
+        ? Math.max(900, knownRankThreshold - 600)
+        : null,
   }
 }
 
@@ -116,7 +188,7 @@ function scoreWord({ word, count, rank, threshold }) {
 
 export function analyzePageText(pageData, frequencyData, rawSettings = {}, knownWords = []) {
   const settings = { ...DEFAULT_SETTINGS, ...rawSettings }
-  const profile = getLevelProfile(settings.level)
+  const profile = getLevelProfile(settings.level, settings.estimatedVocabulary)
   const knownWordSet = new Set(
     knownWords
       .map((word) => normalizeWord(word))
@@ -165,8 +237,15 @@ export function analyzePageText(pageData, frequencyData, rawSettings = {}, known
       }
     })
     .filter((item) => {
-      if (!item.rank) return item.word.length >= 5
+      if (!item.rank) return item.word.length >= (profile.isEstimateBased ? 6 : 5)
       if (item.rank > profile.knownRankThreshold) return true
+      if (profile.isEstimateBased) {
+        return (
+          item.count >= 4 &&
+          item.word.length >= 9 &&
+          item.rank >= (profile.withinThresholdRankFloor || 0)
+        )
+      }
       return item.count >= 3 && item.word.length >= 8
     })
     .filter((item) => item.score >= 0.25)
@@ -188,6 +267,9 @@ export function analyzePageText(pageData, frequencyData, rawSettings = {}, known
       totalTokens,
       uniqueCandidates: counts.size,
       resultCount: results.length,
+      estimatedVocabulary: profile.estimatedVocabulary,
+      knownRankThreshold: profile.knownRankThreshold,
+      levelSource: profile.isEstimateBased ? 'estimated_vocabulary' : 'known_words',
     },
     results,
   }

@@ -18,16 +18,18 @@ export default function AppShell() {
 
   if (isDesktop) {
     return (
-      <div className="h-full flex bg-[var(--color-background-secondary)]">
-        {/* 桌面侧边导航 */}
-        <CardNav />
+      <div className="glass-page h-full overflow-x-auto bg-[var(--color-background)]">
+        <div className="flex h-full min-w-[1220px] bg-[var(--color-background)]">
+          {/* 桌面侧边导航 */}
+          <CardNav />
 
-        {/* 桌面内容区 —— 宽屏自适应 */}
-        <main className="flex-1 h-full overflow-y-auto">
-          <div className={`mx-auto w-full px-6 py-4 ${isWideWorkspace ? 'max-w-[1680px] 2xl:px-8' : 'max-w-[1200px]'}`}>
-            <Outlet />
-          </div>
-        </main>
+          {/* 桌面内容区 —— 宽屏自适应 */}
+          <main className="h-full min-w-0 flex-1 overflow-y-auto bg-[var(--color-background)]">
+            <div className={`mx-auto w-full px-6 py-4 ${isWideWorkspace ? 'max-w-[1680px] 2xl:px-8' : 'max-w-[1200px]'}`}>
+              <Outlet />
+            </div>
+          </main>
+        </div>
       </div>
     )
   }

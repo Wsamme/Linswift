@@ -11,7 +11,7 @@ import {
 import { Footer, Navbar } from './LandingPage'
 import { navigateSafely } from '../lib/navigation'
 
-const DOWNLOAD_URL = 'https://www.linswift.com/downloads/linswift-browser-extension.zip'
+const DOWNLOAD_URL = 'https://www.linswift.com/downloads/linswift-browser-extension-clean.zip'
 
 const installSteps = [
   '下载浏览器插件安装包，解压到一个后续不会随意删除的本地文件夹。',
@@ -22,25 +22,25 @@ const installSteps = [
 ]
 
 const setupSteps = [
+  '首次打开插件会直接进入登录页，登录后即可同步生词本、阅读进度与插件设置。',
   '打开任意英文网页，点击插件图标或页面里的常驻圆球。',
-  '在设置中选择页内翻译语言，并切换翻译引擎：混合模式、DeepL 或 AI。',
-  '如果希望页面刷新后自动翻译，开启“自动翻译网页”。',
-  '如果某个网站不想自动翻译，点击“当前网站不翻译”，插件会记住当前域名。',
-  '登录你的 Linswift 账号后，收藏词汇和掌握状态会同步到云端。',
+  '在设置中选择页内翻译语言，并切换翻译引擎：DeepL 或 AI。',
+  '划词可直接弹出词卡，支持英 / 美音标、发音、多义项和收藏。',
+  '如果希望页面刷新后自动翻译，开启“自动翻译网页”；某个网站不想翻译时可单独关闭。',
 ]
 
 const modeCards = [
   {
-    title: '混合模式',
-    desc: 'DeepL 负责主译文，AI 补充词义分析。适合大多数网页阅读和字幕场景。',
+    title: '划词词卡',
+    desc: '选中单词即可弹出词卡，展示英式 / 美式音标、发音按钮、多条释义与收藏状态。',
   },
   {
     title: 'DeepL',
-    desc: '只保留稳定机器翻译结果。适合追求速度和术语一致性的网页阅读。',
+    desc: '适合追求稳定译文和术语一致性的网页阅读、字幕翻译与词典释义翻译。',
   },
   {
     title: 'AI',
-    desc: '使用 AI 翻译链路，表达更灵活。适合需要更强语境重写的场景。',
+    desc: '更强调上下文理解，适合整句翻译、长网页段落和更自然的语义表达。',
   },
 ]
 
@@ -51,17 +51,22 @@ const faqItems = [
   },
   {
     q: '插件更新后需要重新安装吗？',
-    a: '如果你下载了新的 zip 版本，覆盖原来的扩展目录后，在扩展管理页点击一次 Reload 即可生效。',
+    a: '如果你下载了新的 zip 版本，替换原来的扩展目录后，在浏览器扩展管理页点击一次 Reload 即可生效。',
   },
   {
     q: '为什么网页已经部署了，但插件功能还是旧的？',
     a: '官网部署只会更新线上代理和教程页，不会自动更新你浏览器里已经安装的本地扩展代码。扩展本体仍需重新加载或重新安装。',
   },
+  {
+    q: '未登录也可以继续用插件吗？',
+    a: '当前插件版本要求先登录 Linswift 账号，登录后才会进入翻译、划词和同步流程。',
+  },
 ]
 
 const usageTips = [
-  '长文章阅读优先用“混合模式”，翻译稳定且保留 AI 生词分析。',
-  'YouTube 双语字幕如果想要更稳定的整段翻译，优先切到 DeepL。',
+  '长文章阅读优先用 AI，整句语义更自然；术语页、说明文档优先用 DeepL。',
+  '划词后可直接在词卡里听英式 / 美式发音，并把词加入生词本。',
+  '句子级翻译会以弹窗形式出现，更适合阅读流中的长句理解。',
   '只在少数站点需要自动翻译时，再打开“自动翻译网页”，并按域名单独排除不想翻译的网站。',
 ]
 
@@ -96,7 +101,7 @@ export default function BrowserExtensionPage() {
 
               <p className="mt-6 max-w-[760px] text-[16px] leading-8 text-[#666] md:text-[18px]">
                 官网现在提供浏览器插件安装包下载。安装后，你可以在任意英文网页和 YouTube 字幕上直接使用
-                Linswift：页内翻译、陌生词识别、云端词库同步，以及按网站记忆自动翻译规则。
+                Linswift：划词词卡、整句翻译、陌生词识别、生词本同步，以及按网站记忆自动翻译规则。
               </p>
 
               <div className="mt-10 flex flex-col gap-4 sm:flex-row">
@@ -124,7 +129,7 @@ export default function BrowserExtensionPage() {
                 </div>
                 <h2 className="mt-4 text-[20px] font-bold">官网直接下载</h2>
                 <p className="mt-3 text-[14px] leading-7 text-[#666]">
-                  当前提供 Chrome / Edge 手动安装包，下载后可立即加载到浏览器。
+                  当前提供 Chrome / Edge 手动安装包，下载、解压后即可加载到浏览器。
                 </p>
               </div>
 
@@ -132,9 +137,9 @@ export default function BrowserExtensionPage() {
                 <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#EEF3FF]">
                   <Sparkles size={18} className="text-[#8B5CF6]" />
                 </div>
-                <h2 className="mt-4 text-[20px] font-bold">和官网同一套翻译引擎</h2>
+                <h2 className="mt-4 text-[20px] font-bold">和官网同一套翻译链路</h2>
                 <p className="mt-3 text-[14px] leading-7 text-[#666]">
-                  插件与官网翻译页共享相同的混合模式、DeepL 和 AI 语义，不再割裂。
+                  插件与官网翻译页共享相同的 DeepL / AI 语义、整句翻译能力和词卡风格，不再割裂。
                 </p>
               </div>
 
@@ -144,7 +149,7 @@ export default function BrowserExtensionPage() {
                 </div>
                 <h2 className="mt-4 text-[20px] font-bold">首次安装提示</h2>
                 <p className="mt-3 text-[14px] leading-7 text-white/78">
-                  第一次安装需要浏览器开发者模式。后续升级扩展时，只需替换目录并在扩展管理页点一次 Reload。
+                  第一次安装需要浏览器开发者模式。后续升级扩展时，只需替换目录并在扩展管理页点一次 Reload；未登录时会直接进入登录页。
                 </p>
               </div>
             </div>
@@ -157,7 +162,7 @@ export default function BrowserExtensionPage() {
               <span className="text-[13px] font-semibold uppercase tracking-wider text-[#FF8400]">Install Guide</span>
               <h2 className="mt-3 text-[28px] font-extrabold md:text-[40px]">安装与配置</h2>
               <p className="mt-3 text-[16px] leading-7 text-[#888]">
-                页面结构保持和官网主站一致，只保留必要信息，不再额外做浮层式板块。
+                当前安装流程以官网分发 zip 为主，插件更新后也需要重新加载本地扩展目录。
               </p>
             </div>
 
@@ -217,7 +222,7 @@ export default function BrowserExtensionPage() {
                 <h2 className="mt-3 text-[28px] font-extrabold md:text-[40px]">网页 / 字幕翻译引擎怎么选</h2>
               </div>
               <p className="max-w-[460px] text-[15px] leading-7 text-[#666]">
-                官网翻译页和浏览器插件现在共用同一套引擎语义，配置理解保持一致。
+                浏览器插件里的词卡、整句翻译和网页翻译会按当前选中的 DeepL 或 AI 引擎工作。
               </p>
             </div>
 

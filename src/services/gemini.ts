@@ -18,11 +18,19 @@ import {
   type LongSentenceConnector,
   type LongSentenceSegment,
 } from '../lib/longSentence'
+import { filterDictionaryWhitelistedWords } from '../lib/dictionaryWhitelist'
+import { callMoonshot as callMoonshotClient } from './moonshotClient'
 
 // ===== Moonshot API 配置 =====
 const API_KEY = import.meta.env.VITE_MOONSHOT_API_KEY as string
-const API_BASE = 'https://api.moonshot.cn/v1'
-const MODEL = 'moonshot-v1-8k' // 可选: moonshot-v1-8k, moonshot-v1-32k, moonshot-v1-128k
+const API_BASE = 'https://api.moonshot.ai/v1'
+const MODEL = 'kimi-k2.5'
+const PUBLIC_EN_DICTIONARY_API = 'https://api.dictionaryapi.dev/api/v2/entries/en'
+const DEEPL_PROXY_FALLBACK_BASE = 'https://www.linswift.com'
+const wordDetailCache = new Map<string, WordDetail>()
+const wordDetailInflight = new Map<string, Promise<WordDetail>>()
+const flashcardMnemonicCache = new Map<string, string>()
+const flashcardMnemonicInflight = new Map<string, Promise<string>>()
 
 if (!API_KEY) {
   console.warn('⚠️ VITE_MOONSHOT_API_KEY 未配置，AI 功能将使用模拟数据')
@@ -66,6 +74,42 @@ export interface WordDetail {
     meaning: string
   }>
   mnemonic: string
+}
+
+function fallbackFlashcardMnemonic(word: string, meaning?: string): string {
+  const normalizedWord = normalizeComparableText(word) || word
+  const normalizedMeaning = normalizeComparableText(meaning || '')
+
+  return [
+    `画面联想：把 "${normalizedWord}" 想成一个正在舞台中央表演的小角色，动作越夸张越容易记住它。`,
+    normalizedMeaning
+      ? `意思挂钩：一看到这个画面，就立刻联想到“${normalizedMeaning}”。`
+      : '意思挂钩：把它和你最近真实遇到的一个场景绑在一起，记忆会更牢。',
+    `使用技巧：马上用 "${normalizedWord}" 造一个和自己有关的短句，记忆会从“看过”变成“会用”。`,
+  ].join('\n')
+}
+
+interface PublicDictionaryDefinition {
+  definition?: string
+  example?: string
+  synonyms?: string[]
+}
+
+interface PublicDictionaryMeaning {
+  partOfSpeech?: string
+  definitions?: PublicDictionaryDefinition[]
+  synonyms?: string[]
+}
+
+interface PublicDictionaryPhonetic {
+  text?: string
+}
+
+interface PublicDictionaryEntry {
+  word?: string
+  phonetic?: string
+  phonetics?: PublicDictionaryPhonetic[]
+  meanings?: PublicDictionaryMeaning[]
 }
 
 /** 每日学习推荐 */
@@ -121,39 +165,15 @@ async function callMoonshot(
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   systemPrompt?: string
 ): Promise<string | null> {
-  if (!API_KEY) return null
-
-  try {
-    const allMessages = systemPrompt
-      ? [{ role: 'system' as const, content: systemPrompt }, ...messages]
-      : messages
-
-    const response = await fetch(`${API_BASE}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: allMessages,
-        temperature: 0.7,
-      }),
-    })
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error('Moonshot API 错误:', response.status, errorText)
-      return null
-    }
-
-    const data = await response.json()
-    return data.choices?.[0]?.message?.content ?? null
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error)
-    console.error('Moonshot API 调用失败:', msg)
-    return null
-  }
+  return callMoonshotClient({
+    messages,
+    systemPrompt,
+    model: MODEL,
+    temperature: 0.7,
+    apiKey: API_KEY,
+    apiBase: API_BASE,
+    logLabel: 'Moonshot API',
+  })
 }
 
 /**
@@ -322,6 +342,177 @@ function fallbackWordDetail(word: string): WordDetail {
     relatedWords: [],
     mnemonic: '当前 AI 服务暂时不可用，请检查网络或 API 配额。',
   }
+}
+
+function normalizeWordDetailLookup(word: string) {
+  return normalizeComparableText(String(word || '')).toLowerCase()
+}
+
+function isFastEnglishWordLookup(word: string) {
+  return /^[a-z][a-z'-]*$/i.test(String(word || '').trim())
+}
+
+function buildWordLookupCandidates(word: string) {
+  const normalized = normalizeWordDetailLookup(word)
+  const candidates = new Set<string>()
+  const push = (value: string) => {
+    const next = normalizeWordDetailLookup(value)
+    if (next && next.length > 1) candidates.add(next)
+  }
+
+  push(normalized)
+
+  if (normalized.endsWith('ies') && normalized.length > 4) push(`${normalized.slice(0, -3)}y`)
+  if (normalized.endsWith('es') && normalized.length > 4) push(normalized.slice(0, -2))
+  if (normalized.endsWith('s') && normalized.length > 3 && !normalized.endsWith('ss')) push(normalized.slice(0, -1))
+  if (normalized.endsWith('ing') && normalized.length > 5) {
+    push(normalized.slice(0, -3))
+    push(`${normalized.slice(0, -3)}e`)
+  }
+  if (normalized.endsWith('ed') && normalized.length > 4) {
+    push(normalized.slice(0, -2))
+    push(normalized.slice(0, -1))
+    push(`${normalized.slice(0, -2)}e`)
+  }
+
+  return Array.from(candidates)
+}
+
+function dedupeStrings(values: Array<string | null | undefined>, limit: number) {
+  const unique = new Set<string>()
+  values.forEach((value) => {
+    const normalized = normalizeComparableText(String(value || ''))
+    if (!normalized || unique.size >= limit) return
+    unique.add(normalized)
+  })
+  return Array.from(unique)
+}
+
+function resolveDeepLProxyBaseUrl() {
+  const configuredBase = String(import.meta.env.VITE_DEEPL_PROXY_BASE_URL || '').trim()
+  if (configuredBase) return configuredBase.replace(/\/$/, '')
+
+  if (typeof window !== 'undefined') {
+    const { origin, protocol, hostname } = window.location
+    const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1'
+    if ((protocol === 'http:' || protocol === 'https:') && !isLocalhost) return origin
+  }
+
+  return DEEPL_PROXY_FALLBACK_BASE
+}
+
+async function translatePublicDictionaryMeanings(lines: string[]): Promise<string[]> {
+  const safeLines = lines.map((line) => normalizeComparableText(String(line || ''))).filter(Boolean)
+  if (safeLines.length === 0) return []
+
+  try {
+    const response = await fetch(`${resolveDeepLProxyBaseUrl()}/api/deepl/translate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        texts: safeLines,
+        sourceLang: 'English',
+        targetLang: '简体中文',
+        context: 'These are concise English dictionary definitions for learners. Translate them into concise learner-friendly Simplified Chinese only.',
+      }),
+    })
+
+    const payload = await response.json().catch(() => null)
+    if (!response.ok) return safeLines
+
+    const translatedLines = Array.isArray(payload?.lines)
+      ? payload.lines.map((line: unknown) => normalizeComparableText(String(line || '')))
+      : []
+
+    if (translatedLines.length !== safeLines.length) return safeLines
+    return translatedLines.map((line: string, index: number) => line || safeLines[index])
+  } catch {
+    return safeLines
+  }
+}
+
+async function buildWordDetailFromPublicDictionary(query: string, entries: PublicDictionaryEntry[]): Promise<WordDetail | null> {
+  const first = entries.find(Boolean)
+  if (!first) return null
+
+  const phoneticCandidates = [
+    first.phonetic,
+    ...(first.phonetics || []).map((item) => item?.text).filter(Boolean),
+  ]
+  const phonetic = dedupeStrings(phoneticCandidates, 2)[0] || ''
+
+  const partOfSpeechBlocks = (first.meanings || [])
+    .map((meaning) => ({
+      partOfSpeech: normalizeComparableText(meaning.partOfSpeech || '') || '释义',
+      meanings: dedupeStrings(
+        (meaning.definitions || []).map((definition) => definition.definition),
+        4
+      ),
+    }))
+    .filter((block) => block.meanings.length > 0)
+    .slice(0, 4)
+
+  const examples = dedupeStrings(
+    (first.meanings || []).flatMap((meaning) => (meaning.definitions || []).map((definition) => definition.example)),
+    4
+  )
+
+  const synonyms = dedupeStrings(
+    (first.meanings || []).flatMap((meaning) => [
+      ...(meaning.synonyms || []),
+      ...(meaning.definitions || []).flatMap((definition) => definition.synonyms || []),
+    ]),
+    8
+  )
+
+  const rawMeaningLines = partOfSpeechBlocks.flatMap((block) => block.meanings)
+  const localizedMeaningLines = await translatePublicDictionaryMeanings(rawMeaningLines)
+  let localizedCursor = 0
+  const localizedPartOfSpeechBlocks = partOfSpeechBlocks.map((block) => ({
+    ...block,
+    meanings: block.meanings.map((meaning) => localizedMeaningLines[localizedCursor++] || meaning),
+  }))
+
+  const summaryMeanings = localizedPartOfSpeechBlocks.flatMap((block) => block.meanings).slice(0, 4)
+  const normalizedWord = normalizeComparableText(first.word || query) || query
+
+  return {
+    word: normalizedWord,
+    phonetic,
+    phoneticBr: phonetic,
+    phoneticAm: phonetic,
+    meaning: summaryMeanings.join('；') || '暂无释义',
+    partOfSpeechBlocks: localizedPartOfSpeechBlocks,
+    examples,
+    synonyms,
+    phrasePatterns: [],
+    encyclopedia: [],
+    relatedWords: synonyms.slice(0, 5).map((word) => ({ word, meaning: '相关近义词' })),
+    mnemonic: '已优先使用公共英语词典结果加速展示。',
+  }
+}
+
+async function fetchPublicDictionaryWordDetail(word: string): Promise<WordDetail | null> {
+  const candidates = buildWordLookupCandidates(word)
+
+  for (const candidate of candidates) {
+    try {
+      const response = await fetch(`${PUBLIC_EN_DICTIONARY_API}/${encodeURIComponent(candidate)}`)
+      if (!response.ok) continue
+
+      const payload = await response.json().catch(() => null)
+      if (!Array.isArray(payload) || payload.length === 0) continue
+
+      const detail = await buildWordDetailFromPublicDictionary(candidate, payload as PublicDictionaryEntry[])
+      if (detail) return detail
+    } catch {
+      continue
+    }
+  }
+
+  return null
 }
 
 const STATIC_DAILY_QUOTES: Array<{ q: string; t: string }> = [
@@ -520,12 +711,19 @@ ${taskBlock}
 注意：
 - unfamiliarWords 最多返回 5 个最值得学习的词
 - 如果原文是英文翻译成中文，也要从原文中提取陌生词汇
+- 严禁返回专有名词、人名、地名、品牌名、机构名、缩写、网络用语、俚语、拼写错误、自造词或虚构词
+- 只返回适合进入英语学习词库的普通英文单词，统一使用词典原形/小写
 - 一定要返回合法的 JSON`
 
   const raw = await callMoonshot([{ role: 'user', content: prompt }])
   if (raw) {
     const parsed = parseJSON<TranslateResult>(raw)
-    if (parsed) return parsed
+    if (parsed) {
+      return {
+        ...parsed,
+        unfamiliarWords: await filterDictionaryWhitelistedWords(parsed.unfamiliarWords || [], 5),
+      }
+    }
   }
 
   return fallbackTranslate(text, targetLang)
@@ -535,13 +733,32 @@ ${taskBlock}
  * 获取单词详情
  */
 export async function getWordDetail(word: string): Promise<WordDetail> {
-  const prompt = `你是一个英语词汇学习助手。请为以下单词提供详细的学习信息：
+  const trimmedWord = normalizeComparableText(word)
+  if (!trimmedWord) return fallbackWordDetail(word)
 
-单词：${word}
+  const cacheKey = normalizeWordDetailLookup(trimmedWord)
+  const cached = wordDetailCache.get(cacheKey)
+  if (cached) return cached
+
+  const inflight = wordDetailInflight.get(cacheKey)
+  if (inflight) return inflight
+
+  const task = (async () => {
+    if (isFastEnglishWordLookup(trimmedWord)) {
+      const publicDetail = await fetchPublicDictionaryWordDetail(trimmedWord)
+      if (publicDetail) {
+        wordDetailCache.set(cacheKey, publicDetail)
+        return publicDetail
+      }
+    }
+
+    const prompt = `你是一个英语词汇学习助手。请为以下单词提供详细的学习信息：
+
+单词：${trimmedWord}
 
 请严格按以下 JSON 格式返回（不要包含 markdown 标记）：
 {
-  "word": "${word}",
+  "word": "${trimmedWord}",
   "phonetic": "音标",
   "phoneticBr": "英式音标（没有就复用 phonetic）",
   "phoneticAm": "美式音标（没有就复用 phonetic）",
@@ -581,13 +798,74 @@ export async function getWordDetail(word: string): Promise<WordDetail> {
 - 记忆技巧要有趣好记
 - 返回合法 JSON`
 
-  const raw = await callMoonshot([{ role: 'user', content: prompt }])
-  if (raw) {
-    const parsed = parseJSON<WordDetail>(raw)
-    if (parsed) return parsed
-  }
+    const raw = await callMoonshot([{ role: 'user', content: prompt }])
+    if (raw) {
+      const parsed = parseJSON<WordDetail>(raw)
+      if (parsed) {
+        wordDetailCache.set(cacheKey, parsed)
+        return parsed
+      }
+    }
 
-  return fallbackWordDetail(word)
+    return fallbackWordDetail(trimmedWord)
+  })()
+
+  wordDetailInflight.set(cacheKey, task)
+  try {
+    return await task
+  } finally {
+    wordDetailInflight.delete(cacheKey)
+  }
+}
+
+export async function getFlashcardMnemonic(word: string, meaning?: string): Promise<string> {
+  const trimmedWord = normalizeComparableText(word)
+  if (!trimmedWord) return fallbackFlashcardMnemonic(word, meaning)
+
+  const cacheKey = `${normalizeWordDetailLookup(trimmedWord)}::${normalizeComparableText(meaning || '')}`
+  const cached = flashcardMnemonicCache.get(cacheKey)
+  if (cached) return cached
+
+  const inflight = flashcardMnemonicInflight.get(cacheKey)
+  if (inflight) return inflight
+
+  const task = (async () => {
+    const detail = await getWordDetail(trimmedWord)
+    const existingMnemonic = normalizeComparableText(detail.mnemonic)
+    const looksLikePlaceholder = !existingMnemonic
+      || existingMnemonic.includes('AI 服务暂时不可用')
+      || existingMnemonic.includes('公共英语词典结果加速展示')
+
+    if (!looksLikePlaceholder) {
+      flashcardMnemonicCache.set(cacheKey, detail.mnemonic)
+      return detail.mnemonic
+    }
+
+    const prompt = `你是一个擅长“词汇卡片记忆法”的英语老师。请为这个英文单词生成一段适合卡片学习场景的中文助记提示。
+
+单词：${trimmedWord}
+参考释义：${normalizeComparableText(meaning || detail.meaning || '暂无释义')}
+
+要求：
+1. 一定要生动、有画面感，像在脑海里放一个小短片
+2. 尽量结合发音、拼写拆分、谐音、词根、动作场景中的一种或两种
+3. 不要写成词典解释，不要空泛鼓励，不要说“请自己造句”
+4. 长度控制在 80-140 字
+5. 直接输出中文正文，不要 markdown，不要标题`
+
+    const raw = await callMoonshot([{ role: 'user', content: prompt }])
+    const mnemonic = normalizeComparableText(raw || '')
+    const finalMnemonic = mnemonic || fallbackFlashcardMnemonic(trimmedWord, meaning || detail.meaning)
+    flashcardMnemonicCache.set(cacheKey, finalMnemonic)
+    return finalMnemonic
+  })()
+
+  flashcardMnemonicInflight.set(cacheKey, task)
+  try {
+    return await task
+  } finally {
+    flashcardMnemonicInflight.delete(cacheKey)
+  }
 }
 
 /**
@@ -642,13 +920,17 @@ export async function analyzeUnfamiliarWords(
 注意：
 - 最多返回 ${maxWords} 个最值得学习的词
 - 不要包含太简单的词（如 the, is, have 等）
+- 严禁包含专有名词、人名、地名、缩写、网络用语、品牌名、机构名、拼写错误、自造词或虚构词
+- 只保留适合普通英语学习者积累的常见/正规英文单词，统一用原形和小写
 - 每个词都要有音标和中文释义
 - 返回合法的 JSON 数组`
 
   const raw = await callMoonshot([{ role: 'user', content: prompt }])
   if (raw) {
     const parsed = parseJSON<UnfamiliarWord[]>(raw)
-    if (parsed && Array.isArray(parsed)) return parsed
+    if (parsed && Array.isArray(parsed)) {
+      return filterDictionaryWhitelistedWords(parsed, maxWords)
+    }
   }
 
   // Fallback：简单提取长单词作为"陌生词"
@@ -658,11 +940,11 @@ export async function analyzeUnfamiliarWords(
     .map(w => w.replace(/[^a-zA-Z]/g, ''))
     .filter(w => w.length > 0)
   const unique = [...new Set(words)].slice(0, maxWords)
-  return unique.map(w => ({
+  return filterDictionaryWhitelistedWords(unique.map(w => ({
     word: w,
     meaning: '（AI 离线，暂无释义）',
     phonetic: '',
-  }))
+  })), maxWords)
 }
 
 /**

@@ -17,9 +17,21 @@ interface HeatMapProps {
    * 不传时使用空白热力格
    */
   data?: number[]
+  cellSizeClassName?: string
+  gapClassName?: string
+  fitToWidth?: boolean
+  gapPx?: number
+  maxCellSizePx?: number
 }
 
-export default function HeatMap({ data }: HeatMapProps) {
+export default function HeatMap({
+  data,
+  cellSizeClassName = 'w-[22px] h-[22px]',
+  gapClassName = 'gap-[4px]',
+  fitToWidth = false,
+  gapPx = 4,
+  maxCellSizePx = 24,
+}: HeatMapProps) {
   const source = data && data.length > 0 ? data : Array.from({ length: 36 }, () => 0)
   const cols = Math.ceil(source.length / 3)
   const grid = [
@@ -29,14 +41,36 @@ export default function HeatMap({ data }: HeatMapProps) {
   ]
 
   return (
-    <div className="flex flex-col gap-[4px]">
+    <div
+      className={fitToWidth ? 'flex w-full flex-col' : `flex flex-col ${gapClassName}`}
+      style={fitToWidth ? { gap: `${gapPx}px` } : undefined}
+    >
       {grid.map((row, i) => (
-        <div key={i} className="flex gap-[4px]">
+        <div
+          key={i}
+          className={fitToWidth ? 'grid w-full' : `flex ${gapClassName}`}
+          style={
+            fitToWidth
+              ? {
+                  gap: `${gapPx}px`,
+                  gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+                }
+              : undefined
+          }
+        >
           {row.map((level, j) => (
             <div
               key={j}
-              className="w-[22px] h-[22px] rounded-[4px]"
-              style={{ backgroundColor: colors[Math.min(level, 4)] }}
+              className={fitToWidth ? 'aspect-square w-full rounded-[4px]' : `${cellSizeClassName} rounded-[4px]`}
+              style={
+                fitToWidth
+                  ? {
+                      backgroundColor: colors[Math.min(level, 4)],
+                      maxWidth: `${maxCellSizePx}px`,
+                      justifySelf: 'center',
+                    }
+                  : { backgroundColor: colors[Math.min(level, 4)] }
+              }
             />
           ))}
         </div>

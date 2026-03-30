@@ -15,7 +15,7 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { loadTTSSettings } from '../lib/tts'
+import { findPreferredVoiceByLang, loadTTSSettings } from '../lib/tts'
 
 // ========== 类型定义 ==========
 
@@ -217,9 +217,7 @@ export function useAudioPlayer(
     utterance.pitch = 1
 
     // 尝试匹配最佳语音
-    const voices = window.speechSynthesis.getVoices()
-    const bestVoice = voices.find(v => v.lang === utterance.lang)
-      || voices.find(v => v.lang.startsWith(utterance.lang.split('-')[0]))
+    const bestVoice = findPreferredVoiceByLang(utterance.lang)
     if (bestVoice) utterance.voice = bestVoice
 
     // 播放结束后自动播放下一句

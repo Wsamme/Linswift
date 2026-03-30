@@ -77,12 +77,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // 监听认证状态变化
   useEffect(() => {
     // 1. 获取当前会话（从 localStorage 恢复）
-    supabase.auth.getSession().then(({ data: { session: s } }) => {
-      setSession(s)
-      setUser(s?.user ?? null)
-      if (s?.user) ensureProfile(s.user) // 确保 profile 存在
-      setLoading(false)
-    })
+    supabase.auth.getSession()
+      .then(({ data: { session: s } }) => {
+        setSession(s)
+        setUser(s?.user ?? null)
+        if (s?.user) ensureProfile(s.user) // 确保 profile 存在
+      })
+      .catch((error) => {
+        console.warn('AuthContext.getSession 失败，按未登录兜底', error)
+        setSession(null)
+        setUser(null)
+      })
+      .finally(() => {
+        setLoading(false)
+      })
 
     // 2. 监听后续的认证事件（登录、登出、token 刷新等）
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -143,8 +151,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        // 登录成功后跳转回当前域名的 /learn 页面
-        redirectTo: `${window.location.origin}/learn`,
+        // 登录成功后跳转回主应用首页
+        redirectTo: `${window.location.origin}/app/learn`,
       },
     })
     if (error) return { error: error.message }
@@ -156,7 +164,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'apple',
       options: {
-        redirectTo: `${window.location.origin}/learn`,
+        redirectTo: `${window.location.origin}/app/learn`,
       },
     })
     if (error) return { error: error.message }

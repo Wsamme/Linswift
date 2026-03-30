@@ -22,6 +22,16 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase, type UserVocabulary } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { normalizeVocabWord } from '../lib/text'
+import { isValidLearnableWord } from '../lib/vocabularyFilter'
+import { getDailyNewWordGoal } from '../lib/learnSettings'
+import { buildTodayStudyQueue } from '../lib/vocabStudyQueue'
+import { buildAggregatedTodayStudyQueue, fetchUserVocabPlanningContext } from '../lib/vocabTodayPlanner'
+import {
+  markVocabularySchemaLegacy,
+  markVocabularySchemaModern,
+  rememberVocabularySchemaModeFromRows,
+  shouldUseLegacyVocabularySchema,
+} from '../lib/vocabularySchema'
 
 // 新词汇的输入参数类型
 export interface AddWordInput {
@@ -101,10 +111,15 @@ function isVocabularyLanguageSchemaMissing(message: string) {
     || normalized.includes('user_id,word,language_code')
 }
 
+function shouldFilterAutoCollectedWord(source?: AddWordInput['source']) {
+  return source === 'translate' || source === 'reading' || source === 'ai'
+}
+
 export function useVocabulary() {
   const { user } = useAuth()
   const queryClient = useQueryClient()
   const [filter, setFilter] = useState<VocabFilter>('new')
+  const dailyNewWordGoal = getDailyNewWordGoal()
 
   // ===== 读取词汇列表（React Query 自动缓存） =====
   const {
@@ -112,17 +127,9 @@ export function useVocabulary() {
     isLoading: loading,
     error: queryError,
   } = useQuery<UserVocabulary[]>({
-    queryKey: ['vocabulary', user?.id, filter],
+    queryKey: ['vocabulary', user?.id, filter, filter === 'today' ? dailyNewWordGoal : null],
     queryFn: async () => {
       if (!user) return []
-
-      const getTomorrowStartIso = () => {
-        const todayStart = new Date()
-        todayStart.setHours(0, 0, 0, 0)
-        const tomorrowStart = new Date(todayStart)
-        tomorrowStart.setDate(tomorrowStart.getDate() + 1)
-        return tomorrowStart.toISOString()
-      }
 
       let query = supabase
         .from('user_vocabulary')
@@ -163,21 +170,20 @@ export function useVocabulary() {
       if (error) throw new Error(error.message)
 
       const rows = data || []
+      rememberVocabularySchemaModeFromRows(rows as Array<Record<string, unknown>>)
       if (filter !== 'today') return rows
 
-      const tomorrowStart = new Date(getTomorrowStartIso())
-      return rows.filter((item) => {
-        const reviewCount = Number(item.review_count || 0)
-        if (reviewCount <= 0) {
-          return true
-        }
-
-        if (!item.next_review_at) {
-          return true
-        }
-
-        return new Date(item.next_review_at) < tomorrowStart
-      })
+      try {
+        const planningContext = await fetchUserVocabPlanningContext(user.id, dailyNewWordGoal)
+        return buildAggregatedTodayStudyQueue(rows, {
+          inboxDailyGoal: dailyNewWordGoal,
+          setPlans: planningContext.setPlans,
+          memberships: planningContext.memberships,
+          inboxLabel: '未分组词汇',
+        }).queue
+      } catch {
+        return buildTodayStudyQueue(rows, dailyNewWordGoal).queue
+      }
     },
     enabled: !!user,
     staleTime: 5 * 60 * 1000, // 5 分钟缓存
@@ -201,22 +207,31 @@ export function useVocabulary() {
   const addWord = useCallback(
     async (input: AddWordInput) => {
       if (!user) return { error: '未登录' }
+      if (shouldFilterAutoCollectedWord(input.source) && !isValidLearnableWord(input.word, input.meaning)) {
+        return { error: '该词不适合收录：已过滤专有名词、缩写、网络用语或异常词形' }
+      }
 
       const nextRow = buildVocabularyRow(user.id, input)
 
       let data = null
       let err = null as { message: string } | null
 
-      const nextResult = await supabase
-        .from('user_vocabulary')
-        .upsert(nextRow, { onConflict: 'user_id,word,language_code' })
-        .select()
-        .single()
+      if (!shouldUseLegacyVocabularySchema()) {
+        const nextResult = await supabase
+          .from('user_vocabulary')
+          .upsert(nextRow, { onConflict: 'user_id,word,language_code' })
+          .select()
+          .single()
 
-      data = nextResult.data
-      err = nextResult.error
+        data = nextResult.data
+        err = nextResult.error
+      }
 
-      if (err && isVocabularyLanguageSchemaMissing(err.message)) {
+      if (shouldUseLegacyVocabularySchema() || (err && isVocabularyLanguageSchemaMissing(err.message))) {
+        if (err && isVocabularyLanguageSchemaMissing(err.message)) {
+          markVocabularySchemaLegacy()
+        }
+
         const legacyResult = await supabase
           .from('user_vocabulary')
           .upsert(
@@ -235,6 +250,8 @@ export function useVocabulary() {
 
         data = legacyResult.data
         err = legacyResult.error
+      } else if (!err) {
+        markVocabularySchemaModern()
       }
 
       if (err) {
@@ -253,17 +270,32 @@ export function useVocabulary() {
     async (words: AddWordInput[]) => {
       if (!user || words.length === 0) return { error: '无词汇可添加' }
 
-      const rows = words.map((word) => buildVocabularyRow(user.id, {
+      const validWords = words.filter((word) => !shouldFilterAutoCollectedWord(word.source) || isValidLearnableWord(word.word, word.meaning))
+      if (validWords.length === 0) {
+        return { error: '无可收录词汇：候选词均被过滤' }
+      }
+
+      const rows = validWords.map((word) => buildVocabularyRow(user.id, {
         ...word,
         source: word.source || 'translate',
       }))
 
-      let { error: err } = await supabase
-        .from('user_vocabulary')
-        .upsert(rows, { onConflict: 'user_id,word,language_code' })
+      let err = null as { message: string } | null
 
-      if (err && isVocabularyLanguageSchemaMissing(err.message)) {
-        const legacyRows = words.map((word) => ({
+      if (!shouldUseLegacyVocabularySchema()) {
+        const nextResult = await supabase
+          .from('user_vocabulary')
+          .upsert(rows, { onConflict: 'user_id,word,language_code' })
+
+        err = nextResult.error
+      }
+
+      if (shouldUseLegacyVocabularySchema() || (err && isVocabularyLanguageSchemaMissing(err.message))) {
+        if (err && isVocabularyLanguageSchemaMissing(err.message)) {
+          markVocabularySchemaLegacy()
+        }
+
+        const legacyRows = validWords.map((word) => ({
           user_id: user.id,
           word: normalizeVocabWord(word.word),
           phonetic: word.phonetic || null,
@@ -277,6 +309,8 @@ export function useVocabulary() {
           .upsert(legacyRows, { onConflict: 'user_id,word' })
 
         err = legacyResult.error
+      } else if (!err) {
+        markVocabularySchemaModern()
       }
 
       if (err) {

@@ -31,7 +31,7 @@ gsap.registerPlugin(ScrollTrigger)
 
 const WEBSITE_BASE_URL = 'https://www.linswift.com'
 const BROWSER_EXTENSION_GUIDE_URL = '/browser-extension'
-const BROWSER_EXTENSION_DOWNLOAD_URL = `${WEBSITE_BASE_URL}/downloads/linswift-browser-extension.zip`
+const BROWSER_EXTENSION_DOWNLOAD_URL = `${WEBSITE_BASE_URL}/downloads/linswift-browser-extension-clean.zip`
 
 function isExternalHref(href: string) {
   return /^(https?:|mailto:|tel:)/i.test(href)
@@ -82,7 +82,13 @@ export default function LandingPage() {
     return () => window.clearTimeout(id)
   }, [location.hash])
 
-  if (authLoading) return null
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-white text-[#1A1A1A] flex items-center justify-center">
+        <div className="text-[14px] text-[#6B7280]">加载中...</div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-white text-[#1A1A1A] overflow-x-hidden">
@@ -344,10 +350,12 @@ function HeroSection({
             <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
           </button>
           <div className="flex flex-col gap-4 sm:flex-row">
-            <a href="#features"
+            <button
+              type="button"
+              onClick={() => document.querySelector('#features')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
               className="px-8 py-4 border-2 border-[#E5E5E5] hover:border-[#FF8400] text-[16px] font-semibold rounded-2xl transition-colors">
               了解更多
-            </a>
+            </button>
             <button
               type="button"
               onClick={onExtensionGuide}
@@ -385,7 +393,7 @@ function HeroSection({
             <div>
               <div className="text-[15px] font-bold text-[#1A1A1A]">浏览器插件已开放官网下载</div>
               <div className="mt-1 text-[13px] leading-6 text-[#666]">
-                Chrome / Edge 可直接下载 zip 安装包，官网已提供完整安装、翻译模式和常见问题教程。
+                Chrome / Edge 可直接下载 zip 安装包，支持划词词卡、整句翻译、网页翻译与生词本同步。
               </div>
             </div>
           </button>
@@ -446,9 +454,11 @@ function AIWorkflowSection() {
 
         return () => {
           pulse.kill()
-          mm.revert()
+          reveal.kill()
         }
       })
+
+      return () => mm.revert()
     }, sectionRef)
 
     return () => ctx.revert()
@@ -506,7 +516,7 @@ function AIWorkflowSection() {
             {steps.map((step) => (
               <article
                 key={step.badge}
-                className="ai-flow-step relative rounded-[28px] border border-[#F0F0F0] bg-white p-6 shadow-[0_12px_30px_rgba(15,23,42,0.04)]"
+                className="ai-flow-step relative flex flex-col rounded-[28px] border border-[#F0F0F0] bg-white p-6 shadow-[0_12px_30px_rgba(15,23,42,0.04)]"
               >
                 <div
                   className="ai-flow-step-badge flex h-10 w-10 items-center justify-center rounded-2xl text-[13px] font-bold text-white"
@@ -515,7 +525,7 @@ function AIWorkflowSection() {
                   {step.badge}
                 </div>
                 <h3 className="mt-5 text-[20px] font-bold leading-tight">{step.title}</h3>
-                <p className="mt-3 text-[14px] leading-7 text-[#666]">{step.desc}</p>
+                <p className="mt-3 flex-1 text-[14px] leading-7 text-[#666]">{step.desc}</p>
 
                 <div className="mt-5 flex flex-wrap gap-2">
                   {step.chips.map((chip) => (
@@ -616,11 +626,13 @@ function CoreFeatures() {
                   </span>
                   <h3 className="text-[24px] md:text-[32px] font-extrabold mt-4 leading-tight">{f.title}</h3>
                   <p className="text-[15px] md:text-[16px] text-[#666] mt-4 leading-relaxed">{f.desc}</p>
-                  <a href="#more-features"
+                  <button
+                    type="button"
+                    onClick={() => document.querySelector('#more-features')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
                     className="inline-flex items-center gap-1 mt-6 text-[14px] font-semibold hover:gap-2 transition-all"
                     style={{ color: f.color }}>
                     查看更多功能 <ChevronRight size={16} />
-                  </a>
+                  </button>
                 </div>
               </div>
             )
@@ -642,7 +654,7 @@ function FeatureGrid({ onExtensionGuide }: { onExtensionGuide: () => void }) {
     { icon: Brain, label: '艾宾浩斯复习', desc: '科学间隔重复，对抗遗忘曲线', color: '#FF8400' },
     { icon: BarChart3, label: '学习数据', desc: '热度图 + 连续天数 + 成就追踪', color: '#EF4444' },
     { icon: FileText, label: 'PDF 阅读器', desc: '导入 PDF，保留原版排版阅读', color: '#F59E0B' },
-    { icon: Puzzle, label: '浏览器插件', desc: '官网直下 zip，页内翻译 + 字幕翻译 + 云端词库同步', color: '#22C55E', action: onExtensionGuide },
+    { icon: Puzzle, label: '浏览器插件', desc: '官网直下 zip，划词词卡 + 整句翻译 + 生词本同步', color: '#22C55E', action: onExtensionGuide },
     { icon: Globe, label: '多语言翻译', desc: '支持中英日韩等多语种切换', color: '#06B6D4' },
     { icon: Shield, label: '数据安全', desc: 'Supabase 加密存储，隐私优先', color: '#8B5CF6' },
   ]
@@ -823,9 +835,9 @@ function PricingSection({ onGetStarted }: { onGetStarted: () => void }) {
                 <h3 className="text-[18px] font-bold mt-1">{p.nameZh}</h3>
               </div>
 
-              <div className="flex items-baseline gap-1 mb-2">
-                <span className="text-[32px] md:text-[40px] font-extrabold">{p.price}</span>
-                <span className="text-[14px] text-[#888]">{p.period}</span>
+              <div className="flex items-baseline gap-2 mb-2 flex-nowrap">
+                <span className="text-[28px] md:text-[36px] font-extrabold whitespace-nowrap">{p.price}</span>
+                <span className="text-[14px] text-[#888] whitespace-nowrap">{p.period}</span>
               </div>
               <p className="text-[14px] text-[#888] mb-6">{p.desc}</p>
 
@@ -874,7 +886,7 @@ function PricingSection({ onGetStarted }: { onGetStarted: () => void }) {
           <div className="mt-12 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
             {preStripeSteps.map((step, index) => (
               <div key={step.title} className="rounded-3xl border border-[#F0F0F0] bg-white p-6">
-                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#FFF1E6] text-[14px] font-bold text-[#FF8400]">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#FFF1E6] text-[14px] font-bold text-[#FF8400]" aria-label={`步骤 ${index + 1}`}>
                   0{index + 1}
                 </div>
                 <h4 className="mt-5 text-[18px] font-bold">{step.title}</h4>
@@ -883,48 +895,49 @@ function PricingSection({ onGetStarted }: { onGetStarted: () => void }) {
             ))}
           </div>
 
-          <div className="mt-12 grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-            <div className="overflow-hidden rounded-[28px] border border-[#F0F0F0] bg-white">
-              <div className="overflow-x-auto">
-                <div className="min-w-[920px]">
-                  <div className="grid grid-cols-[160px_repeat(4,minmax(0,1fr))] bg-[#FAFAFA] px-6 py-4 text-[13px] font-semibold text-[#888]">
-                    <div>层级</div>
-                    <div>适合人群</div>
-                    <div>开通方式</div>
-                    <div>当前计费方式</div>
-                    <div>权限边界</div>
+          <div className="mt-12 grid gap-5 md:grid-cols-3">
+            {accessRules.map((rule) => (
+              <div key={rule.label} className="rounded-[28px] border border-[#F0F0F0] bg-white p-6">
+                <div className="text-[18px] font-bold text-[#1A1A1A] mb-4">{rule.label}</div>
+                <dl className="flex flex-col gap-3 text-[14px]">
+                  <div>
+                    <dt className="text-[12px] font-semibold text-[#888] mb-1">适合人群</dt>
+                    <dd className="text-[#555] leading-6">{rule.audience}</dd>
                   </div>
-                  {accessRules.map((rule) => (
-                    <div key={rule.label} className="grid grid-cols-[160px_repeat(4,minmax(0,1fr))] gap-0 border-t border-[#F5F5F5] px-6 py-5 text-[14px] leading-7 text-[#555]">
-                      <div className="font-bold text-[#1A1A1A]">{rule.label}</div>
-                      <div>{rule.audience}</div>
-                      <div>{rule.activation}</div>
-                      <div>{rule.billing}</div>
-                      <div>{rule.access}</div>
-                    </div>
-                  ))}
-                </div>
+                  <div>
+                    <dt className="text-[12px] font-semibold text-[#888] mb-1">开通方式</dt>
+                    <dd className="text-[#555] leading-6">{rule.activation}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-[12px] font-semibold text-[#888] mb-1">当前计费方式</dt>
+                    <dd className="text-[#555] leading-6">{rule.billing}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-[12px] font-semibold text-[#888] mb-1">权限边界</dt>
+                    <dd className="text-[#555] leading-6">{rule.access}</dd>
+                  </div>
+                </dl>
               </div>
-            </div>
+            ))}
+          </div>
 
-            <div className="rounded-[28px] bg-[#1A1A1A] p-7 text-white">
-              <p className="text-[13px] font-semibold uppercase tracking-[0.16em] text-white/60">Migration Promise</p>
-              <h4 className="mt-3 text-[24px] font-extrabold leading-tight">正式接入 Stripe 后，我们会怎么迁移</h4>
-              <ul className="mt-6 space-y-4">
-                {migrationPromises.map((item) => (
-                  <li key={item} className="flex gap-3 text-[14px] leading-7 text-white/82">
-                    <Check size={16} className="mt-1 shrink-0 text-[#FFB066]" />
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-              <a
-                href="mailto:aw@linswift.com?subject=Pro内测申请&body=Linswift账号邮箱：%0A使用场景：%0A最关注的能力："
-                className="mt-7 inline-flex rounded-2xl bg-white px-5 py-3 text-[14px] font-bold text-[#1A1A1A] transition-colors hover:bg-[#F6F6F6]"
-              >
-                申请 Pro 内测
-              </a>
-            </div>
+          <div className="mt-8 rounded-[28px] bg-[#1A1A1A] p-7 md:p-10 text-white">
+            <p className="text-[13px] font-semibold uppercase tracking-[0.16em] text-white/60">Migration Promise</p>
+            <h4 className="mt-3 text-[24px] font-extrabold leading-tight">正式接入 Stripe 后，我们会怎么迁移</h4>
+            <ul className="mt-6 grid gap-4 md:grid-cols-2">
+              {migrationPromises.map((item) => (
+                <li key={item} className="flex gap-3 text-[14px] leading-7 text-white/82">
+                  <Check size={16} className="mt-1 shrink-0 text-[#FFB066]" />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+            <a
+              href="mailto:aw@linswift.com?subject=Pro内测申请&body=Linswift账号邮箱：%0A使用场景：%0A最关注的能力："
+              className="mt-7 inline-flex rounded-2xl bg-white px-5 py-3 text-[14px] font-bold text-[#1A1A1A] transition-colors hover:bg-[#F6F6F6]"
+            >
+              申请 Pro 内测
+            </a>
           </div>
         </div>
       </div>
@@ -1089,7 +1102,7 @@ export function Footer({ linkBase = '' }: { linkBase?: string }) {
             <h5 className="text-[14px] font-semibold mb-4">产品</h5>
             <ul className="flex flex-col gap-2.5">
               {productLinks.map(l => (
-                <li key={l.label}><a href={l.href} onClick={(event) => handleSiteLinkClick(event, l.href, navigate)} className="text-[13px] text-white/50 hover:text-white/80 transition-colors">{l.label}</a></li>
+                <li key={l.label}><a href={l.href} aria-label={`${l.label} - 页脚链接`} onClick={(event) => handleSiteLinkClick(event, l.href, navigate)} className="text-[13px] text-white/50 hover:text-white/80 transition-colors">{l.label}</a></li>
               ))}
             </ul>
           </div>
@@ -1099,7 +1112,7 @@ export function Footer({ linkBase = '' }: { linkBase?: string }) {
             <h5 className="text-[14px] font-semibold mb-4">资源</h5>
             <ul className="flex flex-col gap-2.5">
               {resourceLinks.map(l => (
-                <li key={l.label}><a href={l.href} onClick={(event) => handleSiteLinkClick(event, l.href, navigate)} className="text-[13px] text-white/50 hover:text-white/80 transition-colors">{l.label}</a></li>
+                <li key={l.label}><a href={l.href} aria-label={`${l.label} - 页脚链接`} onClick={(event) => handleSiteLinkClick(event, l.href, navigate)} className="text-[13px] text-white/50 hover:text-white/80 transition-colors">{l.label}</a></li>
               ))}
             </ul>
           </div>
@@ -1109,7 +1122,7 @@ export function Footer({ linkBase = '' }: { linkBase?: string }) {
             <h5 className="text-[14px] font-semibold mb-4">法律</h5>
             <ul className="flex flex-col gap-2.5">
               {legalLinks.map(l => (
-                <li key={l.label}><a href={l.href} onClick={(event) => handleSiteLinkClick(event, l.href, navigate)} className="text-[13px] text-white/50 hover:text-white/80 transition-colors">{l.label}</a></li>
+                <li key={l.label}><a href={l.href} aria-label={`${l.label} - 页脚链接`} onClick={(event) => handleSiteLinkClick(event, l.href, navigate)} className="text-[13px] text-white/50 hover:text-white/80 transition-colors">{l.label}</a></li>
               ))}
             </ul>
           </div>

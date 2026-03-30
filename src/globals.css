@@ -20,6 +20,13 @@ html {
   --glass-backdrop: blur(24px) saturate(1.45);
   --glass-overlay: rgba(15, 23, 42, 0.24);
   --glass-page-bg: radial-gradient(circle at top right, rgba(255, 132, 0, 0.18), transparent 24%), radial-gradient(circle at left 30%, rgba(255, 211, 170, 0.32), transparent 22%), linear-gradient(135deg, #fff8f0 0%, #fffdf9 52%, #fff3e5 100%);
+  --glass-elevated-border: rgba(255, 255, 255, 0.52);
+  --glass-elevated-shadow: 0 18px 42px rgba(15, 23, 42, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  --glass-list-border: rgba(255, 255, 255, 0.6);
+  --glass-list-shadow: 0 14px 30px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.76);
+  --glass-interactive-hover-shadow: 0 22px 56px rgba(15, 23, 42, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.78);
+  --glass-bottom-bar-shadow: 0 -16px 40px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  --glass-modal-sheet-shadow: 0 28px 72px rgba(15, 23, 42, 0.20), inset 0 1px 0 rgba(255, 255, 255, 0.62);
 
   /* 主色系 */
   --color-primary: #FF8400;
@@ -59,24 +66,31 @@ html {
 }
 
 :root[data-theme='dark'] {
-  --glass-panel-bg: rgba(27, 29, 33, 0.62);
-  --glass-panel-strong-bg: rgba(34, 37, 42, 0.78);
-  --glass-panel-soft-bg: rgba(27, 29, 33, 0.48);
-  --glass-panel-elevated-bg: rgba(34, 37, 42, 0.88);
-  --glass-input-bg: rgba(34, 37, 42, 0.72);
-  --glass-list-bg: linear-gradient(180deg, rgba(34, 37, 42, 0.86), rgba(27, 29, 33, 0.78));
+  --glass-panel-bg: rgba(18, 21, 26, 0.72);
+  --glass-panel-strong-bg: rgba(21, 24, 29, 0.86);
+  --glass-panel-soft-bg: rgba(16, 19, 24, 0.60);
+  --glass-panel-elevated-bg: rgba(24, 27, 33, 0.94);
+  --glass-input-bg: rgba(22, 25, 31, 0.82);
+  --glass-list-bg: linear-gradient(180deg, rgba(22, 25, 31, 0.92), rgba(16, 19, 24, 0.86));
   --glass-border: rgba(255, 255, 255, 0.08);
   --glass-shadow: 0 20px 52px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --glass-shadow-soft: 0 12px 32px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.04);
   --glass-overlay: rgba(3, 4, 6, 0.52);
-  --glass-page-bg: radial-gradient(circle at top right, rgba(255, 132, 0, 0.14), transparent 20%), radial-gradient(circle at left 30%, rgba(255, 176, 102, 0.10), transparent 18%), linear-gradient(145deg, #131518 0%, #16191d 50%, #1b1e24 100%);
+  --glass-page-bg: radial-gradient(circle at top right, rgba(255, 132, 0, 0.12), transparent 18%), radial-gradient(circle at left 28%, rgba(255, 176, 102, 0.08), transparent 16%), linear-gradient(145deg, #090b0e 0%, #0d1014 48%, #12161c 100%);
+  --glass-elevated-border: rgba(255, 255, 255, 0.08);
+  --glass-elevated-shadow: 0 18px 42px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --glass-list-border: rgba(255, 255, 255, 0.1);
+  --glass-list-shadow: 0 16px 36px rgba(0, 0, 0, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --glass-interactive-hover-shadow: 0 18px 40px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --glass-bottom-bar-shadow: 0 -16px 40px rgba(0, 0, 0, 0.40), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --glass-modal-sheet-shadow: 0 28px 72px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --color-foreground: #F5F5F5;
   --color-muted: #A3A3A3;
   --color-muted-light: #888888;
 
-  --color-background: #111214;
-  --color-background-secondary: #1B1D21;
-  --color-card: #1A1C20;
+  --color-background: #090b0e;
+  --color-background-secondary: #101317;
+  --color-card: #14181d;
 
   --color-border: #2A2D33;
   --color-border-dark: #383C44;
@@ -187,17 +201,17 @@ html {
 
   .glass-card-elevated {
     background: var(--glass-panel-elevated-bg);
-    border: 1px solid rgba(255, 255, 255, 0.52);
+    border: 1px solid var(--glass-elevated-border);
     border-radius: 24px;
-    box-shadow: 0 18px 42px rgba(15, 23, 42, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    box-shadow: var(--glass-elevated-shadow);
     -webkit-backdrop-filter: blur(24px) saturate(1.4);
     backdrop-filter: blur(24px) saturate(1.4);
   }
 
   .glass-list-item {
     background: var(--glass-list-bg);
-    border: 1px solid rgba(255, 255, 255, 0.6);
-    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.76);
+    border: 1px solid var(--glass-list-border);
+    box-shadow: var(--glass-list-shadow);
     -webkit-backdrop-filter: blur(22px) saturate(1.35);
     backdrop-filter: blur(22px) saturate(1.35);
   }
@@ -214,6 +228,33 @@ html {
 
   .glass-card-interactive:active {
     transform: scale(0.985);
+  }
+
+  .selection-card-active {
+    border: 1px solid rgba(255, 132, 0, 0.34);
+    background:
+      linear-gradient(180deg, rgba(255, 132, 0, 0.14), rgba(255, 255, 255, 0.82)),
+      rgba(255, 255, 255, 0.92);
+    box-shadow:
+      0 18px 34px rgba(255, 132, 0, 0.14),
+      inset 0 1px 0 rgba(255, 255, 255, 0.88);
+    color: var(--color-foreground);
+  }
+
+  .surface-hover {
+    transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease;
+  }
+
+  .surface-hover:hover {
+    background-color: rgba(255, 255, 255, 0.72);
+  }
+
+  .surface-hover-subtle {
+    transition: background-color 180ms ease, color 180ms ease;
+  }
+
+  .surface-hover-subtle:hover {
+    background-color: rgba(255, 255, 255, 0.5);
   }
 
   .glass-input-shell {
@@ -236,7 +277,7 @@ html {
     background: var(--glass-panel-strong-bg);
     border: 1px solid var(--glass-border);
     border-radius: 30px 30px 0 0;
-    box-shadow: 0 28px 72px rgba(15, 23, 42, 0.20), inset 0 1px 0 rgba(255, 255, 255, 0.62);
+    box-shadow: var(--glass-modal-sheet-shadow);
     -webkit-backdrop-filter: blur(28px) saturate(1.52);
     backdrop-filter: blur(28px) saturate(1.52);
   }
@@ -248,7 +289,7 @@ html {
   .glass-bottom-bar {
     background: var(--glass-panel-strong-bg);
     border-top: 1px solid var(--glass-border);
-    box-shadow: 0 -16px 40px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.55);
+    box-shadow: var(--glass-bottom-bar-shadow);
     -webkit-backdrop-filter: blur(24px) saturate(1.42);
     backdrop-filter: blur(24px) saturate(1.42);
   }
@@ -257,10 +298,29 @@ html {
     background: rgba(34, 37, 42, 0.74);
   }
 
+  :root[data-theme='dark'] .selection-card-active {
+    border-color: rgba(255, 132, 0, 0.58);
+    background:
+      linear-gradient(180deg, rgba(255, 132, 0, 0.18), rgba(255, 132, 0, 0.08)),
+      rgba(29, 31, 36, 0.96);
+    box-shadow:
+      0 18px 36px rgba(0, 0, 0, 0.34),
+      0 0 0 1px rgba(255, 132, 0, 0.12) inset;
+    color: var(--color-foreground);
+  }
+
+  :root[data-theme='dark'] .surface-hover:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+  }
+
+  :root[data-theme='dark'] .surface-hover-subtle:hover {
+    background-color: rgba(255, 255, 255, 0.06);
+  }
+
   @media (hover: hover) {
     .glass-card-interactive:hover {
       transform: translateY(-2px);
-      box-shadow: 0 22px 56px rgba(15, 23, 42, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.78);
+      box-shadow: var(--glass-interactive-hover-shadow);
     }
   }
 }

@@ -68,23 +68,49 @@ export default function LearnPage() {
 
     const ctx = gsap.context(() => {
       const mm = gsap.matchMedia()
+      const bannerElements = gsap.utils.toArray<HTMLElement>('.learn-banner')
+      const sectionTitleElements = gsap.utils.toArray<HTMLElement>('.learn-section-title')
+      const taskCardElements = gsap.utils.toArray<HTMLElement>('.learn-task-card')
+      const bookCardElements = gsap.utils.toArray<HTMLElement>('.learn-book-card')
+      const sideCardElements = gsap.utils.toArray<HTMLElement>('.learn-side-card')
+      const quoteElements = gsap.utils.toArray<HTMLElement>('.learn-banner-quote')
 
       mm.add('(prefers-reduced-motion: reduce)', () => {
-        gsap.set('.learn-banner, .learn-section-title, .learn-task-card, .learn-book-card, .learn-side-card', { clearProps: 'all' })
+        const resetTargets = [
+          ...bannerElements,
+          ...sectionTitleElements,
+          ...taskCardElements,
+          ...bookCardElements,
+          ...sideCardElements,
+          ...quoteElements,
+        ]
+        if (resetTargets.length > 0) {
+          gsap.set(resetTargets, { clearProps: 'all' })
+        }
       })
 
       mm.add('(prefers-reduced-motion: no-preference)', () => {
         const intro = gsap.timeline({ defaults: { ease: 'power3.out' } })
+        let quoteFloatTween: gsap.core.Tween | null = null
 
-        intro
-          .from('.learn-banner', { y: 26, autoAlpha: 0, duration: 0.6 })
-          .from('.learn-section-title', { y: 18, autoAlpha: 0, stagger: 0.08, duration: 0.4 }, '-=0.3')
-          .from('.learn-task-card', { y: 24, autoAlpha: 0, stagger: 0.08, duration: 0.5 }, '-=0.2')
-          .from('.learn-book-card', { y: 20, autoAlpha: 0, stagger: 0.08, duration: 0.45 }, '-=0.25')
-          .from('.learn-side-card', { x: 20, autoAlpha: 0, stagger: 0.12, duration: 0.45 }, '-=0.5')
+        if (bannerElements.length > 0) {
+          intro.from(bannerElements, { y: 26, autoAlpha: 0, duration: 0.6 })
+        }
+        if (sectionTitleElements.length > 0) {
+          intro.from(sectionTitleElements, { y: 18, autoAlpha: 0, stagger: 0.08, duration: 0.4 }, '-=0.3')
+        }
+        if (taskCardElements.length > 0) {
+          intro.from(taskCardElements, { y: 24, autoAlpha: 0, stagger: 0.08, duration: 0.5 }, '-=0.2')
+        }
+        if (bookCardElements.length > 0) {
+          intro.from(bookCardElements, { y: 20, autoAlpha: 0, stagger: 0.08, duration: 0.45 }, '-=0.25')
+        }
+        if (sideCardElements.length > 0) {
+          intro.from(sideCardElements, { x: 20, autoAlpha: 0, stagger: 0.12, duration: 0.45 }, '-=0.5')
+        }
 
-        if (isDesktop) {
-          gsap.to('.learn-banner-quote', {
+        if (isDesktop && quoteElements.length > 0) {
+          quoteFloatTween = gsap.to(quoteElements, {
             y: -6,
             duration: 2.8,
             ease: 'sine.inOut',
@@ -93,8 +119,13 @@ export default function LearnPage() {
           })
         }
 
-        return () => mm.revert()
+        return () => {
+          quoteFloatTween?.kill()
+          intro.kill()
+        }
       })
+
+      return () => mm.revert()
     }, pageRef)
 
     return () => ctx.revert()
@@ -224,10 +255,10 @@ export default function LearnPage() {
       {/* ===== 桌面端双栏 / 移动端单栏 ===== */}
       <div className={isDesktop ? 'grid grid-cols-[1fr_340px] gap-6' : ''}>
         {/* 左主区域 */}
-        <div>
+        <div className={`flex flex-col ${isDesktop ? 'gap-10' : 'gap-6'}`}>
           {/* AI 欢迎 Banner */}
           <div
-            className="learn-banner rounded-2xl p-5 mb-5 text-white relative overflow-hidden"
+            className="learn-banner rounded-2xl p-5 text-white relative overflow-hidden"
             style={{ background: 'linear-gradient(135deg, #FF8400, #FF9E33)' }}
           >
             {isLoadingRec ? (
@@ -242,11 +273,8 @@ export default function LearnPage() {
                 <p className="text-[13px] opacity-90 mb-1">
                   {recommendation.greeting}{displayName ? `, ${displayName}` : ''}
                 </p>
-                <h2 className={`${isDesktop ? 'text-[28px]' : 'text-[22px]'} font-bold leading-tight`}>
-                  {t(lang, 'learn_ready_title')}
-                </h2>
 
-                <div className="learn-banner-quote mt-3 p-3 bg-white/15 rounded-xl backdrop-blur-sm will-change-transform">
+                <div className="learn-banner-quote mt-2 p-3 bg-white/15 rounded-xl backdrop-blur-sm will-change-transform">
                   <div className="flex items-start gap-2">
                     <Quote size={14} className="text-white/70 mt-0.5 shrink-0" />
                     <div>
@@ -276,10 +304,7 @@ export default function LearnPage() {
                 <p className="text-[13px] opacity-90 mb-1">
                   {t(lang, 'learn_greeting_fallback')}! 👋{displayName ? ` ${displayName}` : ''}
                 </p>
-                <h2 className={`${isDesktop ? 'text-[28px]' : 'text-[22px]'} font-bold leading-tight`}>
-                  {t(lang, 'learn_ready_title')}
-                </h2>
-                <div className="flex items-center gap-3 mt-3 text-[12px] opacity-80">
+                <div className="flex items-center gap-3 mt-2 text-[12px] opacity-80">
                   <span>🔥 {tf(lang, 'learn_streak', { days: streakDays })}</span>
                 </div>
               </>
@@ -287,32 +312,32 @@ export default function LearnPage() {
           </div>
 
           {/* 今日任务 —— 桌面端 SpotlightCard */}
-          <div className={isDesktop ? 'mb-5' : 'mb-7'}>
-            <h3 className={`${isDesktop ? 'text-[18px]' : 'text-[16px]'} font-bold text-[var(--color-foreground)] ${isDesktop ? 'mb-3' : 'mb-3.5'} font-secondary`}>
+          <section className="flex flex-col gap-0.5 pb-3">
+            <h3 className={`${isDesktop ? 'text-[18px]' : 'text-[16px]'} font-bold leading-none text-[var(--color-foreground)] font-secondary`}>
               <span className="learn-section-title inline-block">{t(lang, 'learn_today_tasks')}</span>
             </h3>
-            <div className={`grid ${isDesktop ? 'grid-cols-4' : 'grid-cols-4'} gap-3`}>
+            <div className={`grid ${isDesktop ? 'grid-cols-4' : 'grid-cols-4 -mt-2'} gap-3`}>
               {isDesktop ? (
                 <>
                   <DesktopTaskCard icon={BookOpen} label={t(lang, 'nav_learn_word')} desc={t(lang, 'learn_desc_spaced_repetition')} color="#FF8400" onClick={() => navigateSafely(navigate, '/ebbinghaus')} />
-                  <DesktopTaskCard icon={Headphones} label={t(lang, 'nav_learn_listen')} desc={t(lang, 'learn_desc_dictation')} color="#8B5CF6" onClick={() => navigateSafely(navigate, '/listening')} />
-                  <DesktopTaskCard icon={Mic} label={t(lang, 'nav_learn_speak')} desc={t(lang, 'learn_desc_ai_conversation')} color="#3B82F6" onClick={() => navigateSafely(navigate, '/speaking')} />
-                  <DesktopTaskCard icon={BookOpenText} label={t(lang, 'nav_learn_grammar')} desc={t(lang, 'learn_desc_grammar_tree')} color="#22C55E" onClick={() => navigateSafely(navigate, '/grammar')} />
+                  <DesktopTaskCard icon={Headphones} label={t(lang, 'nav_learn_listen')} desc="正在开发中" color="#8B5CF6" onClick={() => navigateSafely(navigate, '/listening')} />
+                  <DesktopTaskCard icon={Mic} label={t(lang, 'nav_learn_speak')} desc="正在开发中" color="#3B82F6" onClick={() => navigateSafely(navigate, '/speaking')} />
+                  <DesktopTaskCard icon={BookOpenText} label={t(lang, 'nav_learn_grammar')} desc="长难句功能已开放，其余正在开发中" color="#22C55E" onClick={() => navigateSafely(navigate, '/grammar')} />
                 </>
               ) : (
                 <>
                   <TaskCard icon={BookOpen} label={t(lang, 'nav_learn_word')} desc={t(lang, 'learn_desc_start_now')} color="#FFF5EB" iconColor="#FF8400" onClick={() => navigateSafely(navigate, '/ebbinghaus')} />
-                  <TaskCard icon={Headphones} label={t(lang, 'nav_learn_listen')} desc={t(lang, 'learn_desc_practice')} color="#F0EBFF" iconColor="#8B5CF6" onClick={() => navigateSafely(navigate, '/listening')} />
-                  <TaskCard icon={Mic} label={t(lang, 'nav_learn_speak')} desc={t(lang, 'learn_desc_training')} color="#E8F0FF" iconColor="#3B82F6" onClick={() => navigateSafely(navigate, '/speaking')} />
-                  <TaskCard icon={BookOpenText} label={t(lang, 'nav_learn_grammar')} desc={t(lang, 'learn_desc_tree')} color="#E8FFE8" iconColor="#22C55E" onClick={() => navigateSafely(navigate, '/grammar')} />
+                  <TaskCard icon={Headphones} label={t(lang, 'nav_learn_listen')} desc="正在开发中" color="#F0EBFF" iconColor="#8B5CF6" onClick={() => navigateSafely(navigate, '/listening')} />
+                  <TaskCard icon={Mic} label={t(lang, 'nav_learn_speak')} desc="正在开发中" color="#E8F0FF" iconColor="#3B82F6" onClick={() => navigateSafely(navigate, '/speaking')} />
+                  <TaskCard icon={BookOpenText} label={t(lang, 'nav_learn_grammar')} desc="长难句功能已开放" color="#E8FFE8" iconColor="#22C55E" onClick={() => navigateSafely(navigate, '/grammar')} />
                 </>
               )}
             </div>
-          </div>
+          </section>
 
           {/* 图书馆 */}
-          <div className={isDesktop ? 'mb-5' : 'mt-1'}>
-            <div className={`flex items-center justify-between ${isDesktop ? 'mb-3' : 'mb-3.5'}`}>
+          <section className={`flex flex-col gap-2 ${isDesktop ? 'pb-1' : 'pt-1 pb-0'}`}>
+            <div className="flex items-center justify-between">
               <h3 className={`${isDesktop ? 'text-[18px]' : 'text-[16px]'} font-bold text-[var(--color-foreground)] font-secondary`}>
                 <span className="learn-section-title inline-block">{t(lang, 'learn_library')}</span>
               </h3>
@@ -320,21 +345,24 @@ export default function LearnPage() {
                 {t(lang, 'learn_all')}
               </button>
             </div>
-            <div className={isDesktop
-              ? 'grid grid-cols-2 gap-3 xl:grid-cols-4'
-              : 'flex gap-2 overflow-x-auto pt-1 pb-3 -mx-5 px-5'
-            }>
+            <div
+              className={isDesktop
+                ? 'grid grid-cols-2 gap-3 xl:grid-cols-4'
+                : 'flex items-start gap-2 overflow-x-auto overflow-y-hidden pt-1 pb-4 -mx-5 px-5 overscroll-x-contain [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
+              }
+            >
               {books.map((book) => {
                 const classicBook = getClassicBookBySlug(book.shared_book_slug)
 
                 return (
                   <div
                     key={book.id}
-                    className={`learn-book-card glass-card glass-card-interactive ${
+                    className={`learn-book-card ${isDesktop ? 'glass-card glass-card-interactive' : 'bg-[var(--color-card)] border border-[var(--color-border)]'} ${
                       isDesktop
                         ? 'w-full max-w-[220px] rounded-[24px] p-2.5'
                         : 'shrink-0 w-[92px] rounded-[16px] p-1.5'
                     }`}
+                    style={isDesktop ? undefined : { boxShadow: '0 4px 12px rgba(15, 23, 42, 0.05)' }}
                     onClick={() => openLibraryBook(book)}
                   >
                     <div className={`${isDesktop ? 'mb-3 rounded-[18px]' : 'mb-1.5 rounded-[12px]'} overflow-hidden`}>
@@ -348,7 +376,13 @@ export default function LearnPage() {
                         </div>
                       )}
                     </div>
-                    <span className={`line-clamp-2 block text-center font-medium text-[var(--color-foreground)] ${isDesktop ? 'text-[12px]' : 'text-[10px] leading-[1.25]'}`}>
+                    <span
+                      className={`block text-center font-medium text-[var(--color-foreground)] ${
+                        isDesktop
+                          ? 'line-clamp-2 text-[12px]'
+                          : 'line-clamp-3 min-h-[3.75rem] text-[10px] leading-[1.25]'
+                      }`}
+                    >
                       {book.title}
                     </span>
                   </div>
@@ -363,7 +397,31 @@ export default function LearnPage() {
                 </button>
               )}
             </div>
-          </div>
+          </section>
+
+          {!isDesktop && (
+            <section className="flex flex-col gap-2 -mt-4">
+              <div className="rounded-[var(--radius-lg)] bg-[var(--color-card)] px-4 py-4" style={{ boxShadow: 'var(--shadow-card)' }}>
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Flame size={18} className="text-[var(--color-primary)]" />
+                    <span className="learn-section-title inline-block text-[16px] font-bold text-[var(--color-foreground)] font-secondary">{t(lang, 'learn_heat')}</span>
+                  </div>
+                  <span className="shrink-0 text-[12px] text-[var(--color-primary)] font-semibold flex items-center gap-1">
+                    🔥 {tf(lang, 'learn_streak', { days: streakDays })}
+                  </span>
+                </div>
+                <div className="w-full px-1 py-1">
+                  <HeatMap
+                    data={heatmapLevels}
+                    fitToWidth
+                    gapPx={5}
+                    maxCellSizePx={24}
+                  />
+                </div>
+              </div>
+            </section>
+          )}
         </div>
 
         {/* 右侧栏（仅桌面端） */}
@@ -417,23 +475,6 @@ export default function LearnPage() {
         )}
       </div>
 
-      {/* 移动端热度图（不在右侧栏） */}
-      {!isDesktop && (
-        <div className="mb-5">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <Flame size={18} className="text-[var(--color-primary)]" />
-              <span className="learn-section-title inline-block text-[16px] font-bold text-[var(--color-foreground)] font-secondary">{t(lang, 'learn_heat')}</span>
-            </div>
-            <span className="text-[12px] text-[var(--color-primary)] font-semibold flex items-center gap-1">
-              🔥 {tf(lang, 'learn_streak', { days: streakDays })}
-            </span>
-          </div>
-          <div className="flex justify-center">
-            <HeatMap data={heatmapLevels} />
-          </div>
-        </div>
-      )}
     </div>
   )
 }
@@ -480,7 +521,7 @@ interface TaskCardProps {
 function TaskCard({ icon: Icon, label, desc, color, iconColor, onClick }: TaskCardProps) {
   return (
     <div
-      className="learn-task-card flex flex-col items-center gap-2 py-4 px-2 rounded-[var(--radius-lg)] bg-[var(--color-card)] cursor-pointer active:scale-[0.96] transition-transform"
+      className="learn-task-card min-w-0 flex flex-col items-center gap-2 py-4 px-2 rounded-[var(--radius-lg)] bg-[var(--color-card)] cursor-pointer active:scale-[0.96] transition-transform"
       style={{ boxShadow: 'var(--shadow-card)' }}
       onClick={onClick}
     >
@@ -490,8 +531,8 @@ function TaskCard({ icon: Icon, label, desc, color, iconColor, onClick }: TaskCa
       >
         <Icon size={20} style={{ color: iconColor }} />
       </div>
-      <span className="text-[13px] font-medium text-[var(--color-foreground)]">{label}</span>
-      <span className="text-[11px] text-[var(--color-muted)]">{desc}</span>
+      <span className="w-full text-center text-[13px] font-medium text-[var(--color-foreground)]">{label}</span>
+      <span className="w-full text-center text-[11px] leading-[1.35] text-[var(--color-muted)]">{desc}</span>
     </div>
   )
 }

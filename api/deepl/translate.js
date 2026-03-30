@@ -17,6 +17,15 @@ const SOURCE_LANGUAGE_MAP = {
   '한국어': 'KO',
   ko: 'KO',
   'ko-kr': 'KO',
+  français: 'FR',
+  fr: 'FR',
+  'fr-fr': 'FR',
+  deutsch: 'DE',
+  de: 'DE',
+  'de-de': 'DE',
+  español: 'ES',
+  es: 'ES',
+  'es-es': 'ES',
 }
 
 const TARGET_LANGUAGE_MAP = {
@@ -38,6 +47,15 @@ const TARGET_LANGUAGE_MAP = {
   '한국어': 'KO',
   ko: 'KO',
   'ko-kr': 'KO',
+  français: 'FR',
+  fr: 'FR',
+  'fr-fr': 'FR',
+  deutsch: 'DE',
+  de: 'DE',
+  'de-de': 'DE',
+  español: 'ES',
+  es: 'ES',
+  'es-es': 'ES',
 }
 
 const DEFAULT_HEADERS = {

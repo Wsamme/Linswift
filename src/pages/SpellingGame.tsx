@@ -17,6 +17,11 @@ import { useAuth } from '../contexts/AuthContext'
 import { useLogicalBack } from '../hooks/useLogicalBack'
 import { normalizeWhitespace } from '../lib/text'
 import { navigateSafely } from '../lib/navigation'
+import {
+  KEYBOARD_SFX_STORAGE_KEY,
+  playKeyboardSuccessSound,
+  playKeyboardTapSound,
+} from '../lib/keyboardSfx'
 
 /**
  * 拼写挑战游戏
@@ -30,13 +35,6 @@ import { navigateSafely } from '../lib/navigation'
  */
 
 const WORDS_PER_ROUND = 10 // 每局题数
-const SPELLING_SOUND_KEY = 'linswift_spelling_sound'
-
-function createAudioContext() {
-  const AudioCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-  return AudioCtor ? new AudioCtor() : null
-}
-
 function normalizeSpellingAttempt(value: string) {
   return normalizeWhitespace(value).toLocaleLowerCase()
 }
@@ -79,72 +77,32 @@ export default function SpellingGame() {
   const [showLength, setShowLength] = useState(false)
   const [hintUsed, setHintUsed] = useState(false) // 用了提示则该题减分
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
-    const raw = localStorage.getItem(SPELLING_SOUND_KEY)
+    const raw = localStorage.getItem(KEYBOARD_SFX_STORAGE_KEY)
     return raw === null ? true : raw === '1'
   })
 
   // 计时器
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const audioContextRef = useRef<AudioContext | null>(null)
   const spokenQuestionRef = useRef('')
   const checkingEnteredAtRef = useRef(0)
+  const typingSequenceRef = useRef(0)
 
   const currentWord = words[currentIndex]
 
-  const playTone = useCallback((
-    frequency: number,
-    duration: number,
-    type: OscillatorType,
-    gainValue: number,
-    endFrequency?: number,
-  ) => {
+  const playTypingSound = useCallback((key: string) => {
     if (!soundEnabled) return
-
-    const ctx = audioContextRef.current || createAudioContext()
-    if (!ctx) return
-    audioContextRef.current = ctx
-    if (ctx.state === 'suspended') {
-      ctx.resume().catch(() => {})
+    playKeyboardTapSound(key, typingSequenceRef.current)
+    if (key.toLowerCase() === 'backspace') {
+      typingSequenceRef.current = Math.max(0, typingSequenceRef.current - 1)
+    } else if (/^[a-z]$/i.test(key)) {
+      typingSequenceRef.current += 1
     }
-
-    const now = ctx.currentTime
-    const oscillator = ctx.createOscillator()
-    const gain = ctx.createGain()
-    oscillator.type = type
-    oscillator.frequency.setValueAtTime(frequency, now)
-    if (endFrequency) {
-      oscillator.frequency.exponentialRampToValueAtTime(endFrequency, now + duration)
-    }
-    gain.gain.setValueAtTime(0.0001, now)
-    gain.gain.exponentialRampToValueAtTime(gainValue, now + 0.01)
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration)
-    oscillator.connect(gain)
-    gain.connect(ctx.destination)
-    oscillator.start(now)
-    oscillator.stop(now + duration)
   }, [soundEnabled])
 
-  const playTypingSound = useCallback((key: string) => {
-    const lower = key.toLowerCase()
-    const code = lower.charCodeAt(0)
-
-    if (lower === 'backspace') {
-      playTone(170, 0.05, 'triangle', 0.018, 120)
-      return
-    }
-
-    if (!/^[a-z]$/.test(lower)) return
-
-    const index = code - 97
-    const waveform: OscillatorType[] = ['triangle', 'sine', 'square']
-    const baseFrequency = 230 + (index % 12) * 18 + Math.floor(index / 12) * 9
-    playTone(baseFrequency, 0.035, waveform[index % waveform.length], 0.014, baseFrequency + 22)
-  }, [playTone])
-
   const playSuccessSound = useCallback((isFinal: boolean) => {
-    playTone(520, 0.08, 'triangle', 0.03, 660)
-    window.setTimeout(() => playTone(isFinal ? 880 : 740, 0.12, 'sine', 0.025), 70)
-  }, [playTone])
+    if (!soundEnabled) return
+    playKeyboardSuccessSound(isFinal)
+  }, [soundEnabled])
 
   const speakCurrentWord = useCallback(() => {
     if (!currentWord || !soundEnabled) return
@@ -170,6 +128,7 @@ export default function SpellingGame() {
     setHasMistypedCurrentWord(false)
     setQueuedRetryForCurrentWord(false)
     setHintUsed(false)
+    typingSequenceRef.current = 0
     setStatus('playing')
     savedRef.current = false
 
@@ -202,7 +161,7 @@ export default function SpellingGame() {
 
   // ===== 初始化词库 =====
   useEffect(() => {
-    fetchVocabulary('all')
+    fetchVocabulary('today')
   }, [fetchVocabulary])
 
   // ===== 当词库准备好后生成题目 =====
@@ -250,7 +209,7 @@ export default function SpellingGame() {
   }, [])
 
   useEffect(() => {
-    localStorage.setItem(SPELLING_SOUND_KEY, soundEnabled ? '1' : '0')
+    localStorage.setItem(KEYBOARD_SFX_STORAGE_KEY, soundEnabled ? '1' : '0')
   }, [soundEnabled])
 
   // 每题开始时聚焦输入框
@@ -431,8 +390,8 @@ export default function SpellingGame() {
   if (status === 'empty') {
     return (
       <div className="min-h-screen bg-[var(--color-background)] flex flex-col items-center justify-center px-8 text-center">
-        <p className="text-[18px] font-bold text-[var(--color-foreground)] mb-2">词库不足，无法开始游戏</p>
-        <p className="text-[13px] text-[var(--color-muted)] mb-5">请先在翻译或阅读中收集至少 2 个词汇</p>
+        <p className="text-[18px] font-bold text-[var(--color-foreground)] mb-2">今日学习词不足，无法开始游戏</p>
+        <p className="text-[13px] text-[var(--color-muted)] mb-5">今天至少需要 2 个已释放词汇；去词库或学习集增加今日新词后再来。</p>
         <button
           onClick={() => navigateSafely(navigate, '/app/vocab')}
           className="px-6 py-3 bg-[var(--color-primary)] text-white rounded-[var(--radius-sm)] text-[14px] font-semibold"

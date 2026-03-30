@@ -111,6 +111,65 @@ export interface UserBook {
 }
 
 /**
+ * 公共词本
+ */
+export interface PublicWordbook {
+  id: number
+  slug: string
+  title: string
+  subtitle: string | null
+  description: string | null
+  category: string
+  exam_type: string | null
+  difficulty_label: string | null
+  language_code: string
+  word_count: number
+  tags: string[] | null
+  source_repo: string | null
+  source_license: string | null
+  created_at: string
+  updated_at: string
+}
+
+/**
+ * 用户已添加的公共词本
+ */
+export interface UserWordbook {
+  id: number
+  user_id: string
+  wordbook_id: number
+  vocab_set_id: number | null
+  imported_word_count: number
+  last_imported_at: string
+  created_at: string
+  updated_at: string
+}
+
+/**
+ * 用户学习集
+ */
+export interface UserVocabSet {
+  id: number
+  user_id: string
+  name: string
+  source_wordbook_id: number | null
+  daily_new_goal: number | null
+  created_at: string
+  updated_at: string
+}
+
+/**
+ * 学习集与词汇映射
+ */
+export interface UserVocabSetWord {
+  id: number
+  set_id: number
+  user_id: string
+  vocabulary_id: number
+  created_at: string
+}
+
+/**
  * 学习记录（热度图）
  */
 export interface StudyRecord {

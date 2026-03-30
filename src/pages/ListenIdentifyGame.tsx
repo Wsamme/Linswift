@@ -73,7 +73,7 @@ export default function ListenIdentifyGame() {
   const accuracy = useMemo(() => (answeredCount === 0 ? 0 : Math.round((correctCount / answeredCount) * 100)), [answeredCount, correctCount])
 
   useEffect(() => {
-    fetchVocabulary('all')
+    fetchVocabulary('today')
   }, [fetchVocabulary])
 
   useEffect(() => {
@@ -242,8 +242,8 @@ export default function ListenIdentifyGame() {
   if (status === 'empty') {
     return (
       <div className="min-h-screen bg-[var(--color-background)] flex flex-col items-center justify-center px-8 text-center">
-        <p className="text-[18px] font-bold text-[var(--color-foreground)] mb-2">词库不足，无法开始游戏</p>
-        <p className="text-[13px] text-[var(--color-muted)] mb-5">需要至少 4 个英文词汇（建议在词库补充后再来）</p>
+        <p className="text-[18px] font-bold text-[var(--color-foreground)] mb-2">今日学习词不足，无法开始游戏</p>
+        <p className="text-[13px] text-[var(--color-muted)] mb-5">今天至少需要 4 个英文词汇；去学习集提高今日新词，或先完成更多识词收录。</p>
         <button onClick={() => navigateSafely(navigate, '/app/vocab')} className="px-6 py-3 bg-[var(--color-primary)] text-white rounded-[var(--radius-sm)] text-[14px] font-semibold">前往词库</button>
       </div>
     )

@@ -42,72 +42,6 @@ function createQuestion(pool: WordPair[], masteryMap: Record<string, number>): Q
   return { target, options: shuffleArray([target, ...distractors]) }
 }
 
-async function fetchDbSupplementWords(userId: string, existingWords: Set<string>, needed: number): Promise<WordPair[]> {
-  if (needed <= 0) return []
-
-  const supplements: WordPair[] = []
-
-  // 1) 主库优先：用户书籍提取的陌生词（book_unfamiliar_words）
-  const { data: userBooks } = await supabase
-    .from('user_books')
-    .select('id')
-    .eq('user_id', userId)
-    .limit(200)
-
-  const bookIds = (userBooks || []).map((b: { id: number }) => b.id)
-  if (bookIds.length > 0) {
-    const { data: rawWords } = await supabase
-      .from('book_unfamiliar_words')
-      .select('word,context')
-      .in('book_id', bookIds)
-      .limit(1000)
-
-    const fromBooks = shuffleArray((rawWords || []) as Array<{ word: string; context: string | null }>)
-    for (const row of fromBooks) {
-      const word = (row.word || '').trim()
-      const key = normalizeWord(word)
-      if (!isLikelyEnglishWord(word)) continue
-      if (existingWords.has(key)) continue
-      existingWords.add(key)
-      supplements.push({
-        english: word,
-        chinese: (row.context || '').trim().slice(0, 36) || '数据库陌生词',
-        phonetic: '',
-      })
-      if (supplements.length >= needed) break
-    }
-  }
-
-  // 2) 仍不足：从 user_vocabulary 里随机补（仍来自主数据库）
-  if (supplements.length < needed) {
-    const remain = needed - supplements.length
-    const { data: dbVocab } = await supabase
-      .from('user_vocabulary')
-      .select('word,meaning,phonetic')
-      .eq('user_id', userId)
-      .lte('mastery_level', 1)
-      .limit(1000)
-
-    const fromVocab = shuffleArray((dbVocab || []) as Array<{ word: string; meaning: string | null; phonetic: string | null }>)
-    for (const row of fromVocab) {
-      const word = (row.word || '').trim()
-      const key = normalizeWord(word)
-      if (!isLikelyEnglishWord(word)) continue
-      if (existingWords.has(key)) continue
-      existingWords.add(key)
-      supplements.push({
-        english: word,
-        chinese: (row.meaning || '').trim() || '数据库陌生词',
-        phonetic: (row.phonetic || '').trim(),
-      })
-      if (supplements.length >= remain + (needed - remain)) break
-      if (supplements.length >= needed) break
-    }
-  }
-
-  return supplements.slice(0, needed)
-}
-
 export default function LightningGame() {
   const navigate = useNavigate()
   const goBack = useLogicalBack('/vocab-game')
@@ -138,7 +72,7 @@ export default function LightningGame() {
   const savedRef = useRef(false)
 
   useEffect(() => {
-    fetchVocabulary('all')
+    fetchVocabulary('today')
   }, [fetchVocabulary])
 
   useEffect(() => {
@@ -160,10 +94,8 @@ export default function LightningGame() {
         }))
         .filter(v => isLikelyEnglishWord(v.english))
 
-      // 优先抽陌生词（mastery<=1）
       const unfamiliar = dbWords.filter(w => (w.mastery_level ?? 0) <= 1)
-      const fallbackAll = dbWords
-      const initial = shuffleArray(unfamiliar.length >= MIN_WORD_POOL ? unfamiliar : fallbackAll)
+      const initial = shuffleArray(unfamiliar.length >= MIN_WORD_POOL ? unfamiliar : dbWords)
 
       const dedupMap = new Map<string, WordPair>()
       initial.forEach((w) => {
@@ -178,16 +110,7 @@ export default function LightningGame() {
         }
       })
 
-      let finalPool = Array.from(dedupMap.values())
-
-      if (finalPool.length < TARGET_WORD_POOL) {
-        const existing = new Set(finalPool.map(w => normalizeWord(w.english)))
-        const needed = TARGET_WORD_POOL - finalPool.length
-        const supplements = await fetchDbSupplementWords(user.id, existing, needed)
-        finalPool = [...finalPool, ...supplements]
-      }
-
-      finalPool = shuffleArray(finalPool).slice(0, Math.min(TARGET_WORD_POOL, finalPool.length))
+      const finalPool = shuffleArray(Array.from(dedupMap.values())).slice(0, Math.min(TARGET_WORD_POOL, dedupMap.size))
 
       if (finalPool.length < MIN_WORD_POOL) {
         setStatus('empty')
@@ -350,8 +273,8 @@ export default function LightningGame() {
   if (status === 'empty') {
     return (
       <div className="min-h-screen bg-[var(--color-background)] flex flex-col items-center justify-center px-8 text-center">
-        <p className="text-[18px] font-bold text-[var(--color-foreground)] mb-2">词库不足，无法开始游戏</p>
-        <p className="text-[13px] text-[var(--color-muted)] mb-5">至少需要 4 个可训练词汇（已从主数据库尝试随机补词）</p>
+        <p className="text-[18px] font-bold text-[var(--color-foreground)] mb-2">今日学习词不足，无法开始游戏</p>
+        <p className="text-[13px] text-[var(--color-muted)] mb-5">今天至少需要 4 个可训练词汇；闪电模式现在只使用今日计划词池，不再从全量词库补词。</p>
         <button onClick={() => navigateSafely(navigate, '/app/vocab')} className="px-6 py-3 bg-[var(--color-primary)] text-white rounded-[var(--radius-sm)] text-[14px] font-semibold">前往词库</button>
       </div>
     )

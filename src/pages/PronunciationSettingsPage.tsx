@@ -31,6 +31,7 @@ export default function PronunciationSettingsPage() {
   const isDesktop = useMediaQuery('(min-width: 768px)')
   const {
     settings,
+    preferredVoice,
     setAccent,
     setRate,
     setVolume,
@@ -116,11 +117,7 @@ export default function PronunciationSettingsPage() {
     <div className={`${isDesktop ? 'glass-card-strong rounded-[30px] overflow-hidden' : 'bg-[var(--color-card)] rounded-[var(--radius-lg)] overflow-hidden'}`} style={isDesktop ? undefined : { boxShadow: 'var(--shadow-card)' }}>
       <ToggleRow label="🔊 自动播放发音" desc="翻页时自动朗读单词" value={settings.autoPlay} onChange={() => toggleSetting('autoPlay')} desktop={isDesktop} />
       <div className="h-px bg-[var(--color-border)] mx-4" />
-      <ToggleRow label="📖 单词发音" desc="学习时朗读单词" value={settings.wordPronounce} onChange={() => toggleSetting('wordPronounce')} desktop={isDesktop} />
-      <div className="h-px bg-[var(--color-border)] mx-4" />
       <ToggleRow label="💬 例句发音" desc="学习时朗读例句" value={settings.sentencePronounce} onChange={() => toggleSetting('sentencePronounce')} desktop={isDesktop} />
-      <div className="h-px bg-[var(--color-border)] mx-4" />
-      <ToggleRow label="🔁 循环播放" desc="朗读完毕后自动重复" value={settings.loopPlay} onChange={() => toggleSetting('loopPlay')} desktop={isDesktop} />
     </div>
   )
 
@@ -167,6 +164,9 @@ export default function PronunciationSettingsPage() {
               <p className="text-[13px] font-semibold uppercase tracking-[0.16em] text-[var(--color-muted)]">Current Voice</p>
               <div className="mt-4 space-y-3">
                 <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">口音：{ACCENT_LABELS[settings.accent]}</div>
+                <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">
+                  音源：{preferredVoice ? `${preferredVoice.name} · ${preferredVoice.lang}` : '等待系统语音加载'}
+                </div>
                 <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">语速：{SPEED_OPTIONS.find((item) => item.value === settings.rate)?.label}</div>
                 <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">音量：{Math.round(settings.volume * 100)}%</div>
               </div>
@@ -294,24 +294,10 @@ export default function PronunciationSettingsPage() {
             />
             <div className="h-px bg-[var(--color-border)] mx-4" />
             <ToggleRow
-              label="📖 单词发音"
-              desc="学习时朗读单词"
-              value={settings.wordPronounce}
-              onChange={() => toggleSetting('wordPronounce')}
-            />
-            <div className="h-px bg-[var(--color-border)] mx-4" />
-            <ToggleRow
               label="💬 例句发音"
               desc="学习时朗读例句"
               value={settings.sentencePronounce}
               onChange={() => toggleSetting('sentencePronounce')}
-            />
-            <div className="h-px bg-[var(--color-border)] mx-4" />
-            <ToggleRow
-              label="🔁 循环播放"
-              desc="朗读完毕后自动重复"
-              value={settings.loopPlay}
-              onChange={() => toggleSetting('loopPlay')}
             />
           </div>
 

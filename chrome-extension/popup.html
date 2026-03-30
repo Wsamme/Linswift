@@ -3,64 +3,241 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Linswift 生词雷达</title>
+    <title>Linswift 翻译插件</title>
     <link rel="stylesheet" href="./popup.css" />
   </head>
   <body>
-    <div class="app">
-      <header class="hero">
-        <div class="hero__badge">Linswift</div>
-        <h1>网页生词雷达</h1>
-        <p id="pageMeta" class="muted">准备扫描当前网页</p>
+    <div class="popup-shell">
+      <header class="shell-header">
+        <div class="brand">
+          <div class="brand__logo">L</div>
+          <div class="brand__text">
+            <strong>Linswift</strong>
+            <span>翻译插件</span>
+          </div>
+        </div>
+        <div class="shell-actions">
+          <button id="headerBackButton" class="shell-icon-button shell-icon-button--muted" type="button" aria-label="返回">
+            −
+          </button>
+          <button id="headerCloseButton" class="shell-icon-button" type="button" aria-label="关闭">
+            ×
+          </button>
+        </div>
       </header>
 
-      <section class="card controls">
-        <div class="controls__row">
-          <label for="levelSelect">你的词汇阶段</label>
-          <select id="levelSelect">
-            <option value="beginner">初级</option>
-            <option value="intermediate" selected>中级</option>
-            <option value="advanced">高级</option>
-          </select>
-        </div>
-        <div class="controls__row controls__row--tight">
-          <button id="scanButton" class="primary">识别本页不会词</button>
-          <button id="showSavedButton" class="ghost">收藏夹</button>
-        </div>
-        <details class="settings">
-          <summary>AI 设置（可选）</summary>
-          <p class="muted">配置 Moonshot API Key 后，扫描结果会自动补中文释义。</p>
-          <label for="translationModeSelect" class="settings__label">网页 / 字幕翻译引擎</label>
-          <select id="translationModeSelect">
-            <option value="hybrid">混合模式（DeepL 主翻译）</option>
-            <option value="deepl">DeepL</option>
-            <option value="ai">AI</option>
-          </select>
-          <label for="apiKeyInput" class="settings__label">Moonshot API Key</label>
-          <input id="apiKeyInput" type="password" placeholder="sk-..." />
-          <button id="saveSettingsButton" class="ghost ghost--block">保存设置</button>
-        </details>
-      </section>
+      <main class="shell-body">
+        <section id="translateView" class="view">
+          <div class="view-tabs">
+            <button id="translateTabButton" class="view-tab view-tab--active" type="button">翻译</button>
+            <button id="settingsTabButton" class="view-tab" type="button">设置</button>
+          </div>
 
-      <section class="card stats">
-        <div class="stat">
-          <span class="stat__label">扫描词数</span>
-          <strong id="tokenCount">0</strong>
-        </div>
-        <div class="stat">
-          <span class="stat__label">候选生词</span>
-          <strong id="candidateCount">0</strong>
-        </div>
-        <div class="stat">
-          <span class="stat__label">已掌握</span>
-          <strong id="knownCount">0</strong>
-        </div>
-      </section>
+          <section class="glass-panel overview-panel">
+            <div class="overview-panel__meta">
+              <p id="pageMeta" class="eyebrow">当前网页</p>
+              <div class="sync-line">
+                <span id="authBadge" class="status-pill">请先登录</span>
+                <span id="syncSummary" class="muted-text">登录后同步生词夹、阅读进度与插件设置</span>
+              </div>
+            </div>
 
-      <p id="status" class="status">点击按钮开始扫描当前网页。</p>
+            <div class="overview-panel__stats">
+              <article class="metric-card metric-card--accent">
+                <span class="metric-card__value" id="candidateCount">0</span>
+                <span class="metric-card__label">陌生词汇</span>
+              </article>
+              <article class="metric-card">
+                <span class="metric-card__value" id="tokenCount">0</span>
+                <span class="metric-card__label">扫描词数</span>
+              </article>
+              <article class="metric-card">
+                <span class="metric-card__value" id="knownCount">0</span>
+                <span class="metric-card__label">已掌握</span>
+              </article>
+            </div>
 
-      <section id="resultsSection" class="list"></section>
-      <section id="savedSection" class="list list--hidden"></section>
+            <div class="overview-panel__actions">
+              <button id="scanButton" class="action-button action-button--primary" type="button">先学习</button>
+              <button id="rescanButton" class="action-button action-button--secondary" type="button">重新扫描</button>
+            </div>
+          </section>
+
+          <section class="result-panel">
+            <div class="result-panel__head">
+              <div>
+                <h2>识别结果</h2>
+                <p id="status" class="muted-text">准备扫描当前网页。</p>
+              </div>
+              <div class="result-panel__tools">
+                <button id="openSentenceButton" class="pill-button" type="button">整句模式</button>
+                <button id="toggleSavedButton" class="pill-button" type="button">收藏夹</button>
+                <button id="openLoginButton" class="pill-button" type="button">登录账号</button>
+              </div>
+            </div>
+
+            <section id="resultsSection" class="card-list"></section>
+            <section id="savedSection" class="card-list hidden"></section>
+          </section>
+        </section>
+
+        <section id="settingsView" class="view hidden">
+          <div class="view-tabs">
+            <button id="settingsTranslateTabButton" class="view-tab" type="button">翻译</button>
+            <button id="settingsSettingsTabButton" class="view-tab view-tab--active" type="button">设置</button>
+          </div>
+
+          <section class="glass-panel settings-group">
+            <div class="settings-group__head">
+              <span class="eyebrow">语言与识别</span>
+              <p class="muted-text">词汇筛选会自动同步你的词库阶段，只需要调整目标语言与翻译引擎。</p>
+            </div>
+            <div class="settings-grid">
+              <label class="setting-field">
+                <span>目标语言</span>
+                <select id="translationLanguageSelect">
+                  <option value="zh-CN">页内直译 · 简中</option>
+                  <option value="zh-TW">頁內直譯 · 繁中</option>
+                  <option value="ja">ページ内翻訳 · 日本語</option>
+                  <option value="ko">페이지 번역 · 한국어</option>
+                  <option value="en">Inline Translation · English</option>
+                </select>
+              </label>
+              <label class="setting-field">
+                <span>翻译引擎</span>
+                <select id="translationModeSelect">
+                  <option value="hybrid">混合模式</option>
+                  <option value="deepl">DeepL</option>
+                  <option value="ai">AI</option>
+                </select>
+              </label>
+              <label class="setting-field setting-field--soft">
+                <span>字幕 / 网页场景</span>
+                <div class="readonly-chip">网页 / 字幕</div>
+              </label>
+            </div>
+            <label class="setting-field setting-field--full">
+              <span>Moonshot API Key（可选）</span>
+              <input id="apiKeyInput" type="password" placeholder="sk-..." />
+            </label>
+          </section>
+
+          <section class="glass-panel settings-group">
+            <div class="settings-group__head">
+              <span class="eyebrow">界面与显示</span>
+              <p class="muted-text">配置页内直译、自动翻译和插件面板大小。</p>
+            </div>
+            <div class="settings-grid settings-grid--toggles">
+              <button id="inlineTranslateToggle" class="toggle-card" type="button" aria-pressed="false">
+                <span>页内直译</span>
+                <strong id="inlineTranslateValue">关</strong>
+              </button>
+              <button id="autoTranslateToggle" class="toggle-card" type="button" aria-pressed="false">
+                <span>自动翻译网页</span>
+                <strong id="autoTranslateValue">开</strong>
+              </button>
+              <label class="setting-field">
+                <span>界面缩放</span>
+                <select id="uiScaleSelect">
+                  <option value="0.56">界面 56%</option>
+                  <option value="0.72">界面 72%</option>
+                  <option value="0.88">界面 88%</option>
+                </select>
+              </label>
+              <label class="setting-field setting-field--soft">
+                <span>视觉风格</span>
+                <div class="readonly-chip readonly-chip--accent">Glass UI</div>
+              </label>
+            </div>
+            <div class="site-card">
+              <span>当前网站自动翻译</span>
+              <strong id="currentHost">当前网页</strong>
+            </div>
+          </section>
+
+          <section class="glass-panel settings-group settings-group--account">
+            <div class="settings-group__head">
+              <span class="eyebrow">账户与同步</span>
+              <p id="settingsAuthSummary" class="muted-text">未登录时无法继续使用翻译插件，请先登录。</p>
+            </div>
+            <div class="account-actions">
+              <button id="settingsSyncButton" class="action-button action-button--secondary" type="button">立即同步</button>
+              <button id="settingsAuthButton" class="action-button action-button--primary" type="button">登录账号</button>
+            </div>
+          </section>
+        </section>
+
+        <section id="loginView" class="view hidden">
+          <section class="glass-panel login-card">
+            <span class="eyebrow">账号同步</span>
+            <h2 class="login-card__title">登录后同步生词夹、阅读进度与插件设置</h2>
+            <p class="muted-text">继续使用同一账户，即可在网页划词、翻译结果和桌面端设置之间无缝接续。</p>
+
+            <label class="setting-field setting-field--full">
+              <span>邮箱</span>
+              <input id="emailInput" type="email" placeholder="name@example.com" autocomplete="email" />
+            </label>
+            <label class="setting-field setting-field--full">
+              <span>密码</span>
+              <input id="passwordInput" type="password" placeholder="••••••••••••" autocomplete="current-password" />
+            </label>
+
+            <button id="forgotPasswordButton" class="inline-link" type="button">忘记密码？</button>
+            <button id="loginSubmitButton" class="action-button action-button--primary action-button--block" type="button">登录并同步</button>
+          </section>
+
+          <section class="login-alt">
+            <div class="divider-row">
+              <span></span>
+              <em>其他方式登录</em>
+              <span></span>
+            </div>
+            <div class="oauth-row">
+              <button id="googleLoginButton" class="oauth-button oauth-button--google" type="button">Google</button>
+              <button id="appleLoginButton" class="oauth-button oauth-button--apple" type="button">Apple</button>
+            </div>
+            <p class="register-row">还没有账号？<button id="registerButton" class="inline-link inline-link--accent" type="button">注册</button></p>
+          </section>
+        </section>
+
+        <section id="sentenceView" class="view hidden">
+          <div class="sentence-stage">
+            <span id="sentenceModeChip" class="sentence-mode-chip">history article · 划句模式</span>
+            <p id="sentenceContextBefore" class="sentence-context"></p>
+            <div class="sentence-highlight">
+              <p id="sentenceHighlightText"></p>
+            </div>
+            <p id="sentenceContextAfter" class="sentence-context sentence-context--muted"></p>
+          </div>
+
+          <section class="glass-panel sentence-panel">
+            <div class="sentence-panel__top">
+              <div>
+                <h2 id="sentenceCardTitle"></h2>
+              </div>
+              <span class="status-pill status-pill--accent">划句</span>
+            </div>
+
+            <div class="translation-card">
+              <span>中文翻译</span>
+              <p id="sentenceTranslation"></p>
+            </div>
+
+            <div class="sentence-actions">
+              <button id="saveSentenceButton" class="action-button action-button--secondary" type="button">收藏句子</button>
+              <button id="speakSentenceButton" class="action-button action-button--primary" type="button">朗读整句</button>
+            </div>
+
+            <div class="sentence-vocab">
+              <p id="sentenceVocabTitle" class="muted-text"></p>
+              <div id="sentenceVocabList" class="chip-cloud"></div>
+              <button id="collectSentenceWordsButton" class="collect-button" type="button">一键收录句中生词</button>
+            </div>
+
+            <button id="sentenceResumeButton" class="resume-button" type="button">加入阅读例句，下次继续出现</button>
+          </section>
+        </section>
+      </main>
     </div>
 
     <script type="module" src="./popup.js"></script>

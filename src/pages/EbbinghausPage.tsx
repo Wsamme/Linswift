@@ -4,6 +4,9 @@ import {
   ChevronLeft, Brain, Gamepad2, Sparkles, BookOpen, RotateCcw, Plus,
 } from 'lucide-react'
 import { getEbbinghausForecastPlan, normalizeReviewCycleDays, type ReviewCycleDays } from '../lib/ebbinghaus'
+import { buildTodayStudyQueue } from '../lib/vocabStudyQueue'
+import { getDailyNewWordGoal } from '../lib/learnSettings'
+import { buildAggregatedTodayStudyQueue, fetchUserVocabPlanningContext } from '../lib/vocabTodayPlanner'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { useLogicalBack } from '../hooks/useLogicalBack'
@@ -31,6 +34,7 @@ export default function EbbinghausPage() {
   const [todayDoneCount, setTodayDoneCount] = useState(0)
   const [weeklyPlan, setWeeklyPlan] = useState<number[]>([0, 0, 0, 0, 0, 0, 0])
   const [reviewCycleDays, setReviewCycleDays] = useState<ReviewCycleDays>(7)
+  const dailyNewWordGoal = getDailyNewWordGoal()
 
   function getLocalDayRange() {
     const todayStart = new Date()
@@ -56,10 +60,9 @@ export default function EbbinghausPage() {
       const [
         totalRes,
         unmasteredRes,
-        newTodayRes,
-        reviewRes,
         masteredRes,
         planRes,
+        todayPlanRowsRes,
         todayReviewsRes,
         settingsRes,
       ] = await Promise.all([
@@ -69,26 +72,17 @@ export default function EbbinghausPage() {
           .select('id', { count: 'exact', head: true })
           .eq('user_id', user.id)
           .lt('mastery_level', 5),
-        supabase
-          .from('user_vocabulary')
-          .select('id', { count: 'exact', head: true })
-          .eq('user_id', user.id)
-          .eq('review_count', 0)
-          .lt('mastery_level', 5)
-          .lt('created_at', tomorrowStartIso),
-        supabase
-          .from('user_vocabulary')
-          .select('id', { count: 'exact', head: true })
-          .eq('user_id', user.id)
-          .gt('review_count', 0)
-          .lte('mastery_level', 4)
-          .lt('next_review_at', tomorrowStartIso),
         supabase.from('user_vocabulary').select('id', { count: 'exact', head: true }).eq('user_id', user.id).gte('mastery_level', 5),
         supabase
           .from('user_vocabulary')
           .select('next_review_at, mastery_level')
           .eq('user_id', user.id)
           .lte('mastery_level', 5),
+        supabase
+          .from('user_vocabulary')
+          .select('id,created_at,review_count,next_review_at')
+          .eq('user_id', user.id)
+          .lt('mastery_level', 5),
         supabase
           .from('vocabulary_reviews')
           .select('vocabulary_id')
@@ -103,11 +97,25 @@ export default function EbbinghausPage() {
       ])
 
       const cycleDays = normalizeReviewCycleDays(settingsRes.data?.review_cycle_days)
+      const todayRows = todayPlanRowsRes.data || []
+      let todayQueue = buildTodayStudyQueue(todayRows, dailyNewWordGoal)
+      try {
+        const planningContext = await fetchUserVocabPlanningContext(user.id, dailyNewWordGoal)
+        todayQueue = buildAggregatedTodayStudyQueue(todayRows, {
+          inboxDailyGoal: dailyNewWordGoal,
+          setPlans: planningContext.setPlans,
+          memberships: planningContext.memberships,
+          inboxLabel: '未分组词汇',
+        })
+      } catch {
+        todayQueue = buildTodayStudyQueue(todayRows, dailyNewWordGoal)
+      }
+
       setReviewCycleDays(cycleDays)
       setTotalWords(totalRes.count || 0)
       setUnmasteredCount(unmasteredRes.count || 0)
-      setNewTodayCount(newTodayRes.count || 0)
-      setReviewCount(reviewRes.count || 0)
+      setNewTodayCount(todayQueue.newRows.length)
+      setReviewCount(todayQueue.dueReviewRows.length)
       setMasteredCount(masteredRes.count || 0)
       const uniqueReviewedToday = new Set((todayReviewsRes.data || []).map((r: { vocabulary_id: number }) => r.vocabulary_id))
       setTodayDoneCount(uniqueReviewedToday.size)
@@ -118,7 +126,7 @@ export default function EbbinghausPage() {
     loadBoardStats().catch(() => {
       setLoading(false)
     })
-  }, [user])
+  }, [dailyNewWordGoal, user])
 
   const dayNames = Array.from({ length: reviewCycleDays }, (_, i) => {
     if (i === 0) return '今天'
@@ -176,7 +184,7 @@ export default function EbbinghausPage() {
           />
         </div>
         <p className="mt-2 text-[11px] text-[var(--color-muted)]">
-          今日计划 = 新学 {newTodayCount} + 到期复习 {reviewCount}；“不会” = 所有未完成完整艾宾浩斯周期的词
+          今日计划 = 到期复习 {reviewCount} + 新学 {newTodayCount}（由未分组词汇的全局默认节奏 + 各学习集独立计划共同组成）；“不会” = 所有未完成完整艾宾浩斯周期的词
         </p>
       </div>
 

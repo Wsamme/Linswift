@@ -13,11 +13,13 @@ export default function ReaderShell() {
 
   if (isDesktop) {
     return (
-      <div className="h-full flex bg-[var(--color-background-secondary)]">
-        <CardNav />
-        <main className="flex-1 h-full overflow-y-auto">
-          <Outlet />
-        </main>
+      <div className="glass-page h-full overflow-x-auto bg-[var(--color-background)]">
+        <div className="flex h-full min-w-[1220px] bg-[var(--color-background)]">
+          <CardNav />
+          <main className="h-full min-w-0 flex-1 overflow-y-auto bg-[var(--color-background)]">
+            <Outlet />
+          </main>
+        </div>
       </div>
     )
   }

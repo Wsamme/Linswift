@@ -69,7 +69,7 @@ export default function WordMatchGame() {
 
   // ===== 初始化：加载词库 & 生成卡片 =====
   useEffect(() => {
-    fetchVocabulary('all')
+    fetchVocabulary('today')
   }, [fetchVocabulary])
 
   // 当词库数据准备好后，初始化游戏
@@ -286,8 +286,8 @@ export default function WordMatchGame() {
   if (status === 'empty') {
     return (
       <div className="min-h-screen bg-[var(--color-background)] flex flex-col items-center justify-center px-8 text-center">
-        <p className="text-[18px] font-bold text-[var(--color-foreground)] mb-2">词库不足，无法开始游戏</p>
-        <p className="text-[13px] text-[var(--color-muted)] mb-5">请先在翻译或阅读中收集至少 2 个词汇</p>
+        <p className="text-[18px] font-bold text-[var(--color-foreground)] mb-2">今日学习词不足，无法开始游戏</p>
+        <p className="text-[13px] text-[var(--color-muted)] mb-5">今天至少需要 2 个已释放词汇；可以先去学习集调整每日新词节奏。</p>
         <button
           onClick={() => navigateSafely(navigate, '/app/vocab')}
           className="px-6 py-3 bg-[var(--color-primary)] text-white rounded-[var(--radius-sm)] text-[14px] font-semibold"

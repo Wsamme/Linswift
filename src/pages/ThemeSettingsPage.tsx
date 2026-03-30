@@ -2,7 +2,7 @@
  * 主题设置页
  *
  * 功能：
- * 1. 外观模式选择（浅色 / 深色 / 跟随系统）
+ * 1. 外观模式选择（浅色 / 深色 / 跟随浏览器）
  * 2. 字体大小调节（小 / 标准 / 大）
  * 3. 界面语言（简体中文 / English / 日本語）
  * 4. 主题色选择
@@ -33,7 +33,7 @@ const pageText = {
     preview: '这是预览文字 This is preview text',
     modeLight: '浅色',
     modeDark: '深色',
-    modeSystem: '跟随系统',
+    modeSystem: '跟随浏览器',
   },
   en: {
     title: 'Theme Settings',
@@ -49,7 +49,7 @@ const pageText = {
     preview: 'This is preview text 这是预览文字',
     modeLight: 'Light',
     modeDark: 'Dark',
-    modeSystem: 'System',
+    modeSystem: 'Follow Browser',
   },
   ja: {
     title: 'テーマ設定',
@@ -65,7 +65,7 @@ const pageText = {
     preview: 'これはプレビュー文字です This is preview text',
     modeLight: 'ライト',
     modeDark: 'ダーク',
-    modeSystem: 'システム',
+    modeSystem: 'ブラウザに従う',
   },
 } as const
 type PageTextKey = keyof (typeof pageText)['zh-CN']
