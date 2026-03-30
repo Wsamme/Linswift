@@ -163,17 +163,33 @@ interface RawLongSentenceAnalysis {
  */
 async function callMoonshot(
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
-  systemPrompt?: string
+  systemPrompt?: string,
+  options?: { timeoutMs?: number },
 ): Promise<string | null> {
-  return callMoonshotClient({
-    messages,
-    systemPrompt,
-    model: MODEL,
-    temperature: 0.7,
-    apiKey: API_KEY,
-    apiBase: API_BASE,
-    logLabel: 'Moonshot API',
-  })
+  const timeoutMs = options?.timeoutMs ?? 15_000
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    return await callMoonshotClient({
+      messages,
+      systemPrompt,
+      model: MODEL,
+      temperature: 0.7,
+      apiKey: API_KEY,
+      apiBase: API_BASE,
+      logLabel: 'Moonshot API',
+      signal: controller.signal,
+    })
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      console.warn('Moonshot API call timed out after', timeoutMs, 'ms')
+      return null
+    }
+    throw err
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /**
@@ -853,7 +869,7 @@ export async function getFlashcardMnemonic(word: string, meaning?: string): Prom
 4. 长度控制在 80-140 字
 5. 直接输出中文正文，不要 markdown，不要标题`
 
-    const raw = await callMoonshot([{ role: 'user', content: prompt }])
+    const raw = await callMoonshot([{ role: 'user', content: prompt }], undefined, { timeoutMs: 8000 })
     const mnemonic = normalizeComparableText(raw || '')
     const finalMnemonic = mnemonic || fallbackFlashcardMnemonic(trimmedWord, meaning || detail.meaning)
     flashcardMnemonicCache.set(cacheKey, finalMnemonic)

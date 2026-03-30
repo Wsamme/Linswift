@@ -213,37 +213,7 @@ export default function MobileFlashcardThreeDeck({
                   <p className="text-[15px] text-[var(--color-muted)] mb-6">{card.phonetic}</p>
                 )}
 
-                <button
-                  className="w-11 h-11 rounded-full flex items-center justify-center mb-8"
-                  style={{
-                    background: 'linear-gradient(135deg, rgba(255,132,0,0.15), rgba(255,132,0,0.08))',
-                    border: '1px solid rgba(255,132,0,0.2)',
-                  }}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    speakAuto(card.word)
-                  }}
-                >
-                  <Volume2 size={18} className="text-[var(--color-primary)]" />
-                </button>
-
-                {/* Hint area */}
-                <div
-                  className="w-full rounded-[16px] px-4 py-3 text-center"
-                  style={{
-                    background: 'rgba(255,255,255,0.06)',
-                    border: '1px solid rgba(255,255,255,0.08)',
-                  }}
-                >
-                  <p className="text-[12px] text-[var(--color-muted)] leading-relaxed">
-                    <span className="text-[var(--color-primary)] font-medium">点击翻转</span>
-                    {' '}查看释义{'　·　'}
-                    <span className="text-[var(--color-success)]">右滑</span>
-                    {' '}= 会{'　·　'}
-                    <span className="text-[var(--color-error)]">左滑</span>
-                    {' '}= 不会
-                  </p>
-                </div>
+                <p className="text-[12px] text-[var(--color-muted)] mt-6">点击翻转</p>
               </div>
             ) : (
               /* ===== BACK SIDE ===== */
@@ -301,11 +271,6 @@ export default function MobileFlashcardThreeDeck({
                   </div>
                 )}
 
-                <div className="mt-auto pt-2 text-center">
-                  <p className="text-[11px] text-[var(--color-muted)]">
-                    点击翻回 · 左右滑动作答
-                  </p>
-                </div>
               </div>
             )}
           </div>

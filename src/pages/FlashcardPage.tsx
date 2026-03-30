@@ -64,15 +64,15 @@ export default function FlashcardPage() {
   const pendingProgressRef = useRef<Array<{ id: number; nextReviewAt: string | null; reviewCount: number; masteryLevel: number }>>([])
   const flushedRef = useRef(false)
 
-  // 仅“无 bookId”时，才使用全局词库逻辑（兼容旧入口）
+  // 仅"无 bookId"时，才使用全局词库逻辑（兼容旧入口）
   useEffect(() => {
     if (!bookId && !setId) {
-      // 全局词库模式读取“今天整天的学习任务”，与艾宾浩斯看板口径一致
+      // 全局词库模式读取"今天整天的学习任务"，与艾宾浩斯看板口径一致
       fetchVocabulary('today')
     }
   }, [bookId, setId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // “阅读准备页 -> 词汇学习”专用：优先使用阅读准备页缓存的同一批词
+  // "阅读准备页 -> 词汇学习"专用：优先使用阅读准备页缓存的同一批词
   useEffect(() => {
     async function loadBookWords() {
       if (!bookId) return
@@ -211,7 +211,7 @@ export default function FlashcardPage() {
   }, [setId, bookId, user, dailyNewWordGoal])
 
   // 词卡来源优先级：
-  // 1) 有 bookId：使用书籍专属词卡（和“建议先学习词汇”一致）
+  // 1) 有 bookId：使用书籍专属词卡（和"建议先学习词汇"一致）
   // 2) 无 bookId：沿用原有全局词库/Mock 逻辑
   const fallbackCards = useMemo<StudyCard[]>(() => (
     vocabulary.length > 0
@@ -512,7 +512,7 @@ export default function FlashcardPage() {
                           </div>
                         ) : (
                           <p className="text-[13px] leading-relaxed text-[var(--color-foreground)]">
-                            {currentMnemonic || `把 ${currentCard.word} 想成一个夸张鲜明的小场景，再和“${currentCard.meaning || '它的意思'}”牢牢绑在一起。`}
+                            {currentMnemonic || `把 ${currentCard.word} 想成一个夸张鲜明的小场景，再和"${currentCard.meaning || '它的意思'}"牢牢绑在一起。`}
                           </p>
                         )}
                       </div>
@@ -544,15 +544,17 @@ export default function FlashcardPage() {
                 onSwipeKnow={() => void handleChoice('know')}
                 onSwipeUnknown={() => void handleChoice('unknown')}
               />
-              <div className="mt-3 flex flex-col items-center gap-2 text-center">
-                <div className="flex items-center justify-center gap-2 text-[11px] text-[var(--color-muted)]">
-                  <span className="rounded-full bg-[var(--color-success)]/12 px-3 py-1 text-[var(--color-success)]">推到右边缘 = 会</span>
-                  <span className="rounded-full bg-[var(--color-error)]/12 px-3 py-1 text-[var(--color-error)]">推到左边缘 = 不会</span>
+              {currentCard && (
+                <div className="mt-3 flex items-center justify-center">
+                  <button
+                    onClick={() => speakAuto(currentCard.word)}
+                    className="flex items-center gap-1.5 rounded-full px-4 py-2 text-[12px] font-medium text-[var(--color-primary)]"
+                    style={{ background: 'rgba(255,132,0,0.1)' }}
+                  >
+                    <Volume2 size={15} /> 播放发音
+                  </button>
                 </div>
-                <p className="text-[11px] leading-5 text-[var(--color-muted)]">
-                  轻点卡片翻面，拖拽时会有 3D 倾斜反馈；如果只想标记“模糊”，也可以直接点下面按钮。
-                </p>
-              </div>
+              )}
             </div>
           )
         )}
