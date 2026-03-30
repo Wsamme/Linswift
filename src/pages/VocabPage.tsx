@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, type WheelEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Search, Star, Sparkles, ChevronRight, Trophy, Volume2, BadgeCheck,
+  Search, Star, Sparkles, ChevronRight, Trophy, Volume2, BadgeCheck, Check,
   X, Loader2, BookOpen, Lightbulb, Trash2, Plus, FolderOpen, ArrowDownAZ, Clock3,
 } from 'lucide-react'
 import { getWordDetail, type WordDetail } from '../services/gemini'
@@ -153,6 +153,8 @@ export default function VocabPage() {
   const [batchWordsInput, setBatchWordsInput] = useState('')
   const [setWords, setSetWords] = useState<Array<{ id: number; word: string; phonetic: string | null }>>([])
   const [setActionLoading, setSetActionLoading] = useState(false)
+  const [showCreateSetInput, setShowCreateSetInput] = useState(false)
+  const [newSetName, setNewSetName] = useState('')
   const folderScrollRef = useRef<HTMLDivElement | null>(null)
   const touchStartXRef = useRef(0)
   const touchStartYRef = useRef(0)
@@ -540,8 +542,13 @@ export default function VocabPage() {
 
   const handleCreateSet = async () => {
     if (!user) return
-    const name = window.prompt('请输入学习集名称')
-    if (!name?.trim()) return
+    const name = newSetName.trim()
+    if (!name) {
+      setShowCreateSetInput(true)
+      return
+    }
+    setShowCreateSetInput(false)
+    setNewSetName('')
     setSetActionLoading(true)
     setCustomSetError(null)
     const { data, error } = await supabase
@@ -1816,19 +1823,49 @@ export default function VocabPage() {
                     </div>
                   )}
 
-                  <button
-                    className={`${glassSoft} mb-4 flex items-center justify-between rounded-[24px] border border-dashed border-[var(--color-primary)]/35 px-4 py-4 text-left transition-transform hover:-translate-y-0.5`}
-                    onClick={handleCreateSet}
-                    disabled={setActionLoading}
-                  >
-                    <div>
-                      <p className="text-[14px] font-semibold text-[var(--color-foreground)]">新增学习集</p>
-                      <p className="mt-1 text-[12px] text-[var(--color-muted)]">快速创建一个新的词汇文件夹</p>
+                  {showCreateSetInput ? (
+                    <div className={`${glassSoft} mb-4 rounded-[24px] border border-[var(--color-primary)]/35 px-4 py-4`}>
+                      <p className="mb-2 text-[14px] font-semibold text-[var(--color-foreground)]">新增学习集</p>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={newSetName}
+                          onChange={(e) => setNewSetName(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter' && newSetName.trim()) handleCreateSet() }}
+                          placeholder="输入学习集名称"
+                          autoFocus
+                          className="flex-1 rounded-xl bg-[var(--color-background-secondary)] px-3 py-2 text-[14px] text-[var(--color-foreground)] outline-none placeholder:text-[var(--color-muted)]"
+                        />
+                        <button
+                          onClick={handleCreateSet}
+                          disabled={!newSetName.trim() || setActionLoading}
+                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--color-primary)] text-white disabled:opacity-40"
+                        >
+                          <Check size={16} />
+                        </button>
+                        <button
+                          onClick={() => { setShowCreateSetInput(false); setNewSetName('') }}
+                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--color-background-secondary)] text-[var(--color-muted)]"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--color-primary)] text-white shadow-[0_12px_28px_rgba(255,132,0,0.22)]">
-                      <Plus size={18} />
-                    </div>
-                  </button>
+                  ) : (
+                    <button
+                      className={`${glassSoft} mb-4 flex w-full items-center justify-between rounded-[24px] border border-dashed border-[var(--color-primary)]/35 px-4 py-4 text-left transition-transform hover:-translate-y-0.5`}
+                      onClick={() => setShowCreateSetInput(true)}
+                      disabled={setActionLoading}
+                    >
+                      <div>
+                        <p className="text-[14px] font-semibold text-[var(--color-foreground)]">新增学习集</p>
+                        <p className="mt-1 text-[12px] text-[var(--color-muted)]">快速创建一个新的词汇文件夹</p>
+                      </div>
+                      <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--color-primary)] text-white shadow-[0_12px_28px_rgba(255,132,0,0.22)]">
+                        <Plus size={18} />
+                      </div>
+                    </button>
+                  )}
 
                   <div className="min-h-0 flex-1 overflow-y-auto pr-1">
                     {setPanelLoading && (
