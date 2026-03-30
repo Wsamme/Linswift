@@ -148,8 +148,17 @@ function scoreEnglishVoice(voice: SpeechSynthesisVoice, accent: AccentType): num
   const preferredNames = PREFERRED_ENGLISH_VOICE_NAMES[accent]
   let score = 0
 
-  if (voice.lang === accent) score += 500
-  else if (voice.lang.startsWith(accent.split('-')[0])) score += 180
+  if (voice.lang === accent) {
+    // Exact region match (e.g. en-GB voice for en-GB accent)
+    score += 500
+  } else if (voice.lang.startsWith('en-') && voice.lang !== accent) {
+    // Wrong English region (e.g. en-US voice when en-GB is wanted)
+    // Still usable but heavily penalized so correct region wins
+    score -= 200
+  } else if (voice.lang === 'en') {
+    // Generic 'en' without region — neutral, slight bonus
+    score += 100
+  }
 
   if (voice.localService) score += 60
   if (voice.default) score += 20
