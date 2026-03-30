@@ -471,7 +471,7 @@ export default function VocabPage() {
   }) => {
     const cycle = getReviewCycleDaysFromLocalStorage()
     if (item.mastery_level >= 5) {
-      window.alert(`“${item.word}” 已完成完整艾宾浩斯${cycle}天周期，当前属于已掌握词。`)
+      window.alert(`"${item.word}" 已完成完整艾宾浩斯${cycle}天周期，当前属于已掌握词。`)
       return
     }
 
@@ -488,7 +488,7 @@ export default function VocabPage() {
     const reviewCount = Number(item.review_count || 0)
 
     window.alert(
-      `“${item.word}” 还没有完成完整艾宾浩斯${cycle}天周期。\n\n当前阶段：${stageLabel}\n累计复习：${reviewCount} 次\n下次复习：${nextReviewLabel}\n\n要进入“已掌握”，必须按计划完成整个复习周期，不能在词库里手动跳过。`
+      `"${item.word}" 还没有完成完整艾宾浩斯${cycle}天周期。\n\n当前阶段：${stageLabel}\n累计复习：${reviewCount} 次\n下次复习：${nextReviewLabel}\n\n要进入"已掌握"，必须按计划完成整个复习周期，不能在词库里手动跳过。`
     )
   }
 
@@ -1534,7 +1534,7 @@ export default function VocabPage() {
                 </div>
               ) : (
                 <div className={`${glassElevated} rounded-[24px] px-5 py-4 text-[13px] leading-6 text-[var(--color-muted)]`}>
-                  词本加入后不会再一次性把所有单词挤进“不会”。现在“不会”只按各学习集的每日新词节奏释放，并叠加当天到期复习。
+                  词本加入后不会再一次性把所有单词挤进"不会"。现在"不会"只按各学习集的每日新词节奏释放，并叠加当天到期复习。
                 </div>
               )}
             </div>
@@ -1716,18 +1716,17 @@ export default function VocabPage() {
                     )}
 
                     {!selectedWord && !isLoadingDetail && !detailError && (
-                      <div className=”flex flex-1 flex-col justify-between”>
+                      <div className="flex flex-1 flex-col justify-between">
                         <div>
-                          <div className=”mb-4 flex h-14 w-14 items-center justify-center rounded-3xl bg-[var(--color-primary)]/14 text-[var(--color-primary)]”>
+                          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-3xl bg-[var(--color-primary)]/14 text-[var(--color-primary)]">
                             <Sparkles size={24} />
                           </div>
-                          <p className=”text-[18px] font-semibold text-[var(--color-foreground)]”>选一个单词开始</p>
-                          <p className=”mt-2 text-[13px] leading-6 text-[var(--color-muted)]”>
-                            这里固定展示音标、例句、助记和 AI 解释；左侧”不会”只显示按今日计划释放出来的词。
+                          <p className="text-[18px] font-semibold text-[var(--color-foreground)]">选一个单词开始</p>
+                          <p className="mt-2 text-[13px] leading-6 text-[var(--color-muted)]">
+                            这里固定展示音标、例句、助记和 AI 解释；左侧"不会"只显示按今日计划释放出来的词。
                           </p>
                         </div>
-
-                        <div className=”space-y-2 border-t border-[var(--color-border)] pt-4 text-[13px] text-[var(--color-muted)]”>
+                        <div className="space-y-2 border-t border-[var(--color-border)] pt-4 text-[13px] text-[var(--color-muted)]">
                           <p>当前模式：{activeFilterLabel}</p>
                           <p>今日可见：{filteredList.length} 词</p>
                         </div>
@@ -1907,9 +1906,9 @@ export default function VocabPage() {
                   <div className="flex h-full flex-col">
                     <div className="mb-4">
                       <p className="text-[12px] uppercase tracking-[0.18em] text-[var(--color-muted)]">Study Flow</p>
-                      <h3 className="mt-1 text-[22px] font-semibold text-[var(--color-foreground)]">学习集决定今天出现哪些“不会”</h3>
+                      <h3 className="mt-1 text-[22px] font-semibold text-[var(--color-foreground)]">学习集决定今天出现哪些"不会"</h3>
                       <p className="mt-2 text-[13px] leading-6 text-[var(--color-muted)]">
-                        词本加入后先归到学习集里，只有按每日新词节奏释放出来的词，才会出现在词库“不会”视图中；不会再一上来全部塞进去。
+                        词本加入后先归到学习集里，只有按每日新词节奏释放出来的词，才会出现在词库"不会"视图中；不会再一上来全部塞进去。
                       </p>
                     </div>
 
@@ -1975,7 +1974,7 @@ export default function VocabPage() {
                           )}
 
                           <p className="mt-4 text-[13px] leading-6 text-[var(--color-muted)]">
-                            这个学习集里的单词不会全部挤进词库默认视图；词库里的“不会”只显示按计划释放的新词与当天到期复习。
+                            这个学习集里的单词不会全部挤进词库默认视图；词库里的"不会"只显示按计划释放的新词与当天到期复习。
                           </p>
                         </>
                       ) : (
@@ -2423,7 +2422,7 @@ export default function VocabPage() {
             <div className="glass-card-strong rounded-[28px] p-4">
               <h3 className="text-[16px] font-semibold text-[var(--color-foreground)]">今日释放规则</h3>
               <p className="mt-2 text-[12px] leading-6 text-[var(--color-muted)]">
-                学习集里的单词不会一次性全部进入“不会”。词库页默认只显示：今天按计划释放的新词 + 今天到期复习的词。
+                学习集里的单词不会一次性全部进入"不会"。词库页默认只显示：今天按计划释放的新词 + 今天到期复习的词。
               </p>
 
               {selectedSet && (
