@@ -1716,20 +1716,20 @@ export default function VocabPage() {
                     )}
 
                     {!selectedWord && !isLoadingDetail && !detailError && (
-                      <div className={`${glassSoft} flex flex-1 flex-col justify-between rounded-[24px] p-5`}>
+                      <div className=”flex flex-1 flex-col justify-between”>
                         <div>
-                          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-3xl bg-[var(--color-primary)]/14 text-[var(--color-primary)]">
+                          <div className=”mb-4 flex h-14 w-14 items-center justify-center rounded-3xl bg-[var(--color-primary)]/14 text-[var(--color-primary)]”>
                             <Sparkles size={24} />
                           </div>
-                          <p className="text-[18px] font-semibold text-[var(--color-foreground)]">选一个单词开始</p>
-                          <p className="mt-2 text-[13px] leading-6 text-[var(--color-muted)]">
-                            这里固定展示音标、例句、助记和 AI 解释；左侧“不会”只显示按今日计划释放出来的词。
+                          <p className=”text-[18px] font-semibold text-[var(--color-foreground)]”>选一个单词开始</p>
+                          <p className=”mt-2 text-[13px] leading-6 text-[var(--color-muted)]”>
+                            这里固定展示音标、例句、助记和 AI 解释；左侧”不会”只显示按今日计划释放出来的词。
                           </p>
                         </div>
 
-                        <div className="space-y-3 text-[13px] text-[var(--color-foreground)]/78">
-                          <div className={`${glassElevated} rounded-[22px] px-4 py-3`}>当前模式：{activeFilterLabel}</div>
-                          <div className={`${glassElevated} rounded-[22px] px-4 py-3`}>今日可见：{filteredList.length} 词</div>
+                        <div className=”space-y-2 border-t border-[var(--color-border)] pt-4 text-[13px] text-[var(--color-muted)]”>
+                          <p>当前模式：{activeFilterLabel}</p>
+                          <p>今日可见：{filteredList.length} 词</p>
                         </div>
                       </div>
                     )}
