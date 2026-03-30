@@ -125,38 +125,65 @@ function playPiano(ctx: AudioContext, freq: number, vel: number) {
 }
 
 // ════════════════════════════════════════════════
-// 2. GUITAR — plucked string (Karplus-Strong-like)
+// 2. GUITAR — Karplus-Strong plucked string synthesis
+//    Fills a buffer with noise, then repeatedly averages
+//    adjacent samples to simulate a vibrating string.
 // ════════════════════════════════════════════════
 function playGuitar(ctx: AudioContext, freq: number, vel: number) {
-  const now = ctx.currentTime
-  const master = ctx.createGain()
-  master.connect(ctx.destination)
-  master.gain.setValueAtTime(0.04 * vel, now)
-  master.gain.setTargetAtTime(0.0001, now + 0.01, 0.35)
+  const sampleRate = ctx.sampleRate
+  // String period in samples
+  const period = Math.round(sampleRate / freq)
+  // Total duration ~1.2s
+  const totalSamples = Math.round(sampleRate * 1.2)
+  const buffer = ctx.createBuffer(1, totalSamples, sampleRate)
+  const data = buffer.getChannelData(0)
 
-  // Fundamental + slight 2nd harmonic
-  for (const [ratio, amp] of [[1, 1.0], [2, 0.3], [3, 0.08]] as [number, number][]) {
-    const o = ctx.createOscillator()
-    const g = ctx.createGain()
-    o.type = 'triangle'
-    o.frequency.setValueAtTime(freq * ratio, now)
-    o.detune.setValueAtTime((Math.random() - 0.5) * 6, now)
-    g.gain.setValueAtTime(amp, now)
-    g.gain.setTargetAtTime(0.0001, now + 0.005, 0.2 / ratio)
-    o.connect(g).connect(master)
-    o.start(now)
-    o.stop(now + 1.5)
+  // Initialize the "string" with noise burst (pluck energy)
+  // Use a mix of white noise + slight bias toward waveform for brightness
+  for (let i = 0; i < period; i++) {
+    data[i] = (Math.random() * 2 - 1) * 0.8
   }
-  // Pluck transient — short noise filtered to body resonance
-  const ns = ctx.createBufferSource()
-  ns.buffer = noiseBuffer(ctx, 256)
-  const ng = ctx.createGain()
-  const nf = ctx.createBiquadFilter()
-  nf.type = 'bandpass'; nf.frequency.value = freq * 1.5; nf.Q.value = 1.5
-  ng.gain.setValueAtTime(0.025 * vel, now)
-  ng.gain.exponentialRampToValueAtTime(0.0001, now + 0.015)
-  ns.connect(nf).connect(ng).connect(master)
-  ns.start(now); ns.stop(now + 0.02)
+
+  // Karplus-Strong: each new sample = average of two samples one period ago
+  // with a damping factor to simulate string losing energy
+  const damping = 0.996 // Controls how long the string rings
+  const brightness = 0.4 + Math.random() * 0.15 // Blend between pure average and previous sample
+  for (let i = period; i < totalSamples; i++) {
+    const prev = data[i - period]
+    const prevPrev = data[i - period + 1] || data[i - period]
+    // Weighted average: smoother = more damped highs (like a nylon string)
+    // Less smooth = brighter/metallic (like a steel string)
+    data[i] = damping * ((1 - brightness) * prev + brightness * (prev + prevPrev) * 0.5)
+  }
+
+  // Shape the overall envelope: fast attack, natural decay
+  const attackSamples = Math.round(sampleRate * 0.002)
+  for (let i = 0; i < attackSamples && i < totalSamples; i++) {
+    data[i] *= i / attackSamples
+  }
+
+  const src = ctx.createBufferSource()
+  src.buffer = buffer
+
+  // Body resonance filter (simulates guitar body)
+  const bodyFilter = ctx.createBiquadFilter()
+  bodyFilter.type = 'peaking'
+  bodyFilter.frequency.setValueAtTime(freq < 300 ? 250 : 400, ctx.currentTime)
+  bodyFilter.Q.setValueAtTime(1.5, ctx.currentTime)
+  bodyFilter.gain.setValueAtTime(3, ctx.currentTime)
+
+  // Brightness filter — slight high cut for warmth
+  const toneFilter = ctx.createBiquadFilter()
+  toneFilter.type = 'lowpass'
+  toneFilter.frequency.setValueAtTime(freq * 5, ctx.currentTime)
+  toneFilter.Q.setValueAtTime(0.5, ctx.currentTime)
+
+  const gain = ctx.createGain()
+  gain.gain.setValueAtTime(0.06 * vel, ctx.currentTime)
+
+  src.connect(bodyFilter).connect(toneFilter).connect(gain).connect(ctx.destination)
+  src.start(ctx.currentTime)
+  src.stop(ctx.currentTime + 1.2)
 }
 
 // ════════════════════════════════════════════════
