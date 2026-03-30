@@ -41,26 +41,38 @@ export function setSfxType(type: SfxType) {
   localStorage.setItem(KEYBOARD_SFX_TYPE_KEY, type)
 }
 
-// ── Note mapping: C major pentatonic across 2 octaves ──
-const PENTATONIC = [
-  261.63, 293.66, 329.63, 392.00, 440.00,
-  523.25, 587.33, 659.25, 783.99, 880.00,
-  1046.50, 1174.66, 1318.51,
-]
+// ── Note mapping: C major scale across 3 octaves ──
+// Follows the QWERTY keyboard layout like a real instrument:
+//   Bottom row (Z-M)  = Low octave:    Do Re Mi Fa Sol La Si
+//   Home row  (A-L)   = Middle octave: Do Re Mi Fa Sol La Si Do Re
+//   Top row   (Q-P)   = High octave:   Do Re Mi Fa Sol La Si Do Re Mi
+//
+// C major: C D E F G A B
+const NOTE_FREQS = {
+  // Octave 3 (low)
+  C3: 130.81, D3: 146.83, E3: 164.81, F3: 174.61, G3: 196.00, A3: 220.00, B3: 246.94,
+  // Octave 4 (middle)
+  C4: 261.63, D4: 293.66, E4: 329.63, F4: 349.23, G4: 392.00, A4: 440.00, B4: 493.88,
+  // Octave 5 (high)
+  C5: 523.25, D5: 587.33, E5: 659.25, F5: 698.46, G5: 783.99, A5: 880.00, B5: 987.77,
+  // Octave 6 (highest)
+  C6: 1046.50, D6: 1174.66, E6: 1318.51,
+}
 
-const KEY_FREQ: Record<string, number> = {}
-;(() => {
-  const rows = ['zxcvbnm', 'asdfghjkl', 'qwertyuiop']
-  const offsets = [0, 3, 5]
-  rows.forEach((row, ri) => {
-    row.split('').forEach((k, i) => {
-      KEY_FREQ[k] = PENTATONIC[(i + offsets[ri]) % PENTATONIC.length]
-    })
-  })
-})()
+const KEY_FREQ: Record<string, number> = {
+  // Bottom row: low octave (Do Re Mi Fa Sol La Si)
+  z: NOTE_FREQS.C3, x: NOTE_FREQS.D3, c: NOTE_FREQS.E3, v: NOTE_FREQS.F3,
+  b: NOTE_FREQS.G3, n: NOTE_FREQS.A3, m: NOTE_FREQS.B3,
+  // Home row: middle octave (Do Re Mi Fa Sol La Si Do Re)
+  a: NOTE_FREQS.C4, s: NOTE_FREQS.D4, d: NOTE_FREQS.E4, f: NOTE_FREQS.F4,
+  g: NOTE_FREQS.G4, h: NOTE_FREQS.A4, j: NOTE_FREQS.B4, k: NOTE_FREQS.C5, l: NOTE_FREQS.D5,
+  // Top row: high octave (Do Re Mi Fa Sol La Si Do Re Mi)
+  q: NOTE_FREQS.C5, w: NOTE_FREQS.D5, e: NOTE_FREQS.E5, r: NOTE_FREQS.F5,
+  t: NOTE_FREQS.G5, y: NOTE_FREQS.A5, u: NOTE_FREQS.B5, i: NOTE_FREQS.C6, o: NOTE_FREQS.D6, p: NOTE_FREQS.E6,
+}
 
 function getFreq(key: string) {
-  return KEY_FREQ[key.toLowerCase()] || 440
+  return KEY_FREQ[key.toLowerCase()] || NOTE_FREQS.A4
 }
 
 // ── Noise helper ──
