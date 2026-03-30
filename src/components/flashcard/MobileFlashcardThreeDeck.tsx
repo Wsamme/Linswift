@@ -276,40 +276,23 @@ export default function MobileFlashcardThreeDeck({
         </div>
       </div>
 
-      {/* Swipe intent badges */}
-      <div className="pointer-events-none absolute inset-y-0 left-1 flex items-center">
-        <div
-          className="rounded-full px-3 py-1.5 text-[11px] font-semibold tracking-[0.15em]"
-          style={{
-            background: swipeIntent === 'unknown'
-              ? `rgba(239,68,68,${0.1 + swipeProgress * 0.2})`
-              : 'rgba(239,68,68,0.06)',
-            border: `1px solid rgba(239,68,68,${swipeIntent === 'unknown' ? 0.3 + swipeProgress * 0.3 : 0.1})`,
-            color: `rgba(239,68,68,${swipeIntent === 'unknown' ? 0.5 + swipeProgress * 0.5 : 0.2})`,
-            transform: `scale(${swipeIntent === 'unknown' ? 0.95 + swipeProgress * 0.1 : 0.95})`,
-            transition: 'all 0.15s ease',
-          }}
-        >
-          REVIEW
-        </div>
-      </div>
-
-      <div className="pointer-events-none absolute inset-y-0 right-1 flex items-center">
-        <div
-          className="rounded-full px-3 py-1.5 text-[11px] font-semibold tracking-[0.15em]"
-          style={{
-            background: swipeIntent === 'know'
-              ? `rgba(34,197,94,${0.1 + swipeProgress * 0.2})`
-              : 'rgba(34,197,94,0.06)',
-            border: `1px solid rgba(34,197,94,${swipeIntent === 'know' ? 0.3 + swipeProgress * 0.3 : 0.1})`,
-            color: `rgba(34,197,94,${swipeIntent === 'know' ? 0.5 + swipeProgress * 0.5 : 0.2})`,
-            transform: `scale(${swipeIntent === 'know' ? 0.95 + swipeProgress * 0.1 : 0.95})`,
-            transition: 'all 0.15s ease',
-          }}
-        >
-          KNOW
-        </div>
-      </div>
+      {/* Edge gradient glow — red left, green right */}
+      <div
+        className="pointer-events-none absolute inset-y-0 left-0 w-3 rounded-l-[4px]"
+        style={{
+          background: `linear-gradient(to right, rgba(239,68,68,${swipeIntent === 'unknown' ? 0.3 + swipeProgress * 0.6 : 0}), transparent)`,
+          boxShadow: swipeIntent === 'unknown' ? `inset 2px 0 12px rgba(239,68,68,${swipeProgress * 0.5})` : 'none',
+          transition: 'all 0.15s ease',
+        }}
+      />
+      <div
+        className="pointer-events-none absolute inset-y-0 right-0 w-3 rounded-r-[4px]"
+        style={{
+          background: `linear-gradient(to left, rgba(34,197,94,${swipeIntent === 'know' ? 0.3 + swipeProgress * 0.6 : 0}), transparent)`,
+          boxShadow: swipeIntent === 'know' ? `inset -2px 0 12px rgba(34,197,94,${swipeProgress * 0.5})` : 'none',
+          transition: 'all 0.15s ease',
+        }}
+      />
     </div>
   )
 }
