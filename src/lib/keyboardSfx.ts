@@ -187,62 +187,192 @@ function playGuitar(ctx: AudioContext, freq: number, vel: number) {
 }
 
 // ════════════════════════════════════════════════
-// 3. DRUM — kick/snare/hat based on keyboard row
+// 3. DRUM — Full kit: each key = different drum piece
+//    Bottom row: kick, floor tom, low tom
+//    Home row:  snare, rim, clap, mid tom, hi tom
+//    Top row:   hi-hat, crash, ride, splash cymbals
 // ════════════════════════════════════════════════
+
+// Map each key to a specific drum piece
+const DRUM_MAP: Record<string, string> = {
+  // Bottom row: deep/low drums
+  z: 'kick', x: 'kick-hard', c: 'floor-tom', v: 'floor-tom-high',
+  b: 'low-tom', n: 'low-tom-high', m: 'mid-tom',
+  // Home row: snares, toms, claps
+  a: 'snare', s: 'snare-rim', d: 'clap', f: 'mid-tom-high',
+  g: 'hi-tom', h: 'hi-tom-high', j: 'snare-ghost', k: 'cross-stick', l: 'cowbell',
+  // Top row: cymbals
+  q: 'hi-hat-closed', w: 'hi-hat-open', e: 'hi-hat-pedal', r: 'crash',
+  t: 'crash-choke', y: 'ride', u: 'ride-bell', i: 'splash', o: 'china', p: 'bell',
+}
+
+function drumKick(ctx: AudioContext, now: number, vel: number, startFreq: number, endFreq: number, dur: number) {
+  const o = ctx.createOscillator()
+  const g = ctx.createGain()
+  o.type = 'sine'
+  o.frequency.setValueAtTime(startFreq, now)
+  o.frequency.exponentialRampToValueAtTime(endFreq, now + dur * 0.7)
+  g.gain.setValueAtTime(0.08 * vel, now)
+  g.gain.exponentialRampToValueAtTime(0.0001, now + dur)
+  o.connect(g).connect(ctx.destination)
+  o.start(now); o.stop(now + dur + 0.01)
+  // Click transient
+  const ns = ctx.createBufferSource()
+  ns.buffer = noiseBuffer(ctx, 256)
+  const nf = ctx.createBiquadFilter()
+  nf.type = 'lowpass'; nf.frequency.value = 400
+  const ng = ctx.createGain()
+  ng.gain.setValueAtTime(0.04 * vel, now)
+  ng.gain.exponentialRampToValueAtTime(0.0001, now + 0.02)
+  ns.connect(nf).connect(ng).connect(ctx.destination)
+  ns.start(now); ns.stop(now + 0.03)
+}
+
+function drumTom(ctx: AudioContext, now: number, vel: number, pitch: number, decay: number) {
+  const o = ctx.createOscillator()
+  const g = ctx.createGain()
+  o.type = 'sine'
+  o.frequency.setValueAtTime(pitch, now)
+  o.frequency.exponentialRampToValueAtTime(pitch * 0.65, now + decay)
+  g.gain.setValueAtTime(0.055 * vel, now)
+  g.gain.exponentialRampToValueAtTime(0.0001, now + decay)
+  o.connect(g).connect(ctx.destination)
+  o.start(now); o.stop(now + decay + 0.01)
+  // Skin attack
+  const ns = ctx.createBufferSource()
+  ns.buffer = noiseBuffer(ctx, 512)
+  const nf = ctx.createBiquadFilter()
+  nf.type = 'bandpass'; nf.frequency.value = pitch * 2; nf.Q.value = 1
+  const ng = ctx.createGain()
+  ng.gain.setValueAtTime(0.025 * vel, now)
+  ng.gain.exponentialRampToValueAtTime(0.0001, now + 0.03)
+  ns.connect(nf).connect(ng).connect(ctx.destination)
+  ns.start(now); ns.stop(now + 0.04)
+}
+
+function drumSnare(ctx: AudioContext, now: number, vel: number, toneFreq: number, noiseAmount: number, decay: number) {
+  // Tone body
+  const o = ctx.createOscillator()
+  const g = ctx.createGain()
+  o.type = 'triangle'
+  o.frequency.setValueAtTime(toneFreq, now)
+  g.gain.setValueAtTime(0.04 * vel, now)
+  g.gain.exponentialRampToValueAtTime(0.0001, now + decay * 0.6)
+  o.connect(g).connect(ctx.destination)
+  o.start(now); o.stop(now + decay)
+  // Wire rattle
+  const ns = ctx.createBufferSource()
+  ns.buffer = noiseBuffer(ctx, Math.round(ctx.sampleRate * decay))
+  const nf = ctx.createBiquadFilter()
+  nf.type = 'bandpass'; nf.frequency.value = 4500; nf.Q.value = 1.2
+  const ng = ctx.createGain()
+  ng.gain.setValueAtTime(noiseAmount * vel, now)
+  ng.gain.exponentialRampToValueAtTime(0.0001, now + decay)
+  ns.connect(nf).connect(ng).connect(ctx.destination)
+  ns.start(now); ns.stop(now + decay + 0.01)
+}
+
+function drumCymbal(ctx: AudioContext, now: number, vel: number, brightness: number, decay: number) {
+  // Cymbals = layered filtered noise at different bands
+  const bands = [brightness, brightness * 1.5, brightness * 2.2, brightness * 3]
+  for (const freq of bands) {
+    const ns = ctx.createBufferSource()
+    ns.buffer = noiseBuffer(ctx, Math.round(ctx.sampleRate * decay))
+    const nf = ctx.createBiquadFilter()
+    nf.type = 'bandpass'; nf.frequency.value = freq; nf.Q.value = 2 + Math.random()
+    const ng = ctx.createGain()
+    const amp = 0.015 * vel * (1 - (freq - brightness) / (brightness * 3))
+    ng.gain.setValueAtTime(amp, now)
+    ng.gain.setTargetAtTime(0.0001, now + 0.005, decay * 0.3)
+    ns.connect(nf).connect(ng).connect(ctx.destination)
+    ns.start(now); ns.stop(now + decay + 0.1)
+  }
+  // Metallic ping
+  const o = ctx.createOscillator()
+  const g = ctx.createGain()
+  o.type = 'square'
+  o.frequency.setValueAtTime(brightness * 0.8, now)
+  g.gain.setValueAtTime(0.008 * vel, now)
+  g.gain.exponentialRampToValueAtTime(0.0001, now + 0.05)
+  o.connect(g).connect(ctx.destination)
+  o.start(now); o.stop(now + 0.06)
+}
+
 function playDrum(ctx: AudioContext, freq: number, vel: number) {
   const now = ctx.currentTime
-  // Use frequency range to pick drum type
-  // Low freq → kick, mid → snare, high → hi-hat
-  if (freq < 350) {
-    // Kick drum
-    const o = ctx.createOscillator()
-    const g = ctx.createGain()
-    o.type = 'sine'
-    o.frequency.setValueAtTime(150, now)
-    o.frequency.exponentialRampToValueAtTime(40, now + 0.12)
-    g.gain.setValueAtTime(0.06 * vel, now)
-    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.2)
-    o.connect(g).connect(ctx.destination)
-    o.start(now); o.stop(now + 0.25)
-    // Punch noise
-    const ns = ctx.createBufferSource()
-    ns.buffer = noiseBuffer(ctx, 128)
-    const ng = ctx.createGain()
-    ng.gain.setValueAtTime(0.02 * vel, now)
-    ng.gain.exponentialRampToValueAtTime(0.0001, now + 0.03)
-    ns.connect(ng).connect(ctx.destination)
-    ns.start(now); ns.stop(now + 0.04)
-  } else if (freq < 700) {
-    // Snare
-    const o = ctx.createOscillator()
-    const g = ctx.createGain()
-    o.type = 'triangle'
-    o.frequency.setValueAtTime(200 + Math.random() * 40, now)
-    g.gain.setValueAtTime(0.03 * vel, now)
-    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.1)
-    o.connect(g).connect(ctx.destination)
-    o.start(now); o.stop(now + 0.12)
-    // Snare rattle (noise)
-    const ns = ctx.createBufferSource()
-    ns.buffer = noiseBuffer(ctx, 2048)
-    const nf = ctx.createBiquadFilter()
-    nf.type = 'highpass'; nf.frequency.value = 2000
-    const ng = ctx.createGain()
-    ng.gain.setValueAtTime(0.035 * vel, now)
-    ng.gain.exponentialRampToValueAtTime(0.0001, now + 0.08)
-    ns.connect(nf).connect(ng).connect(ctx.destination)
-    ns.start(now); ns.stop(now + 0.1)
-  } else {
-    // Hi-hat
-    const ns = ctx.createBufferSource()
-    ns.buffer = noiseBuffer(ctx, 1024)
-    const nf = ctx.createBiquadFilter()
-    nf.type = 'highpass'; nf.frequency.value = 6000
-    const ng = ctx.createGain()
-    ng.gain.setValueAtTime(0.025 * vel, now)
-    ng.gain.exponentialRampToValueAtTime(0.0001, now + 0.04)
-    ns.connect(nf).connect(ng).connect(ctx.destination)
-    ns.start(now); ns.stop(now + 0.05)
+  // Find which key was pressed based on frequency → drum piece
+  let piece = 'snare'
+  for (const [key, drumName] of Object.entries(DRUM_MAP)) {
+    if (Math.abs(KEY_FREQ[key] - freq) < 0.5) { piece = drumName; break }
+  }
+
+  switch (piece) {
+    case 'kick':           drumKick(ctx, now, vel, 160, 35, 0.25); break
+    case 'kick-hard':      drumKick(ctx, now, vel, 200, 30, 0.35); break
+    case 'floor-tom':      drumTom(ctx, now, vel, 90, 0.4); break
+    case 'floor-tom-high': drumTom(ctx, now, vel, 110, 0.35); break
+    case 'low-tom':        drumTom(ctx, now, vel, 140, 0.3); break
+    case 'low-tom-high':   drumTom(ctx, now, vel, 170, 0.28); break
+    case 'mid-tom':        drumTom(ctx, now, vel, 210, 0.25); break
+    case 'mid-tom-high':   drumTom(ctx, now, vel, 260, 0.22); break
+    case 'hi-tom':         drumTom(ctx, now, vel, 320, 0.2); break
+    case 'hi-tom-high':    drumTom(ctx, now, vel, 400, 0.18); break
+    case 'snare':          drumSnare(ctx, now, vel, 200, 0.045, 0.15); break
+    case 'snare-rim':      drumSnare(ctx, now, vel, 300, 0.02, 0.08); break
+    case 'snare-ghost':    drumSnare(ctx, now, vel * 0.4, 180, 0.03, 0.1); break
+    case 'cross-stick': {
+      const o = ctx.createOscillator(); const g = ctx.createGain()
+      o.type = 'sine'; o.frequency.setValueAtTime(800, now)
+      g.gain.setValueAtTime(0.04 * vel, now)
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.04)
+      o.connect(g).connect(ctx.destination); o.start(now); o.stop(now + 0.05)
+      break
+    }
+    case 'clap': {
+      // Layered noise bursts with slight delays
+      for (let i = 0; i < 3; i++) {
+        const ns = ctx.createBufferSource()
+        ns.buffer = noiseBuffer(ctx, 512)
+        const nf = ctx.createBiquadFilter()
+        nf.type = 'bandpass'; nf.frequency.value = 1200 + i * 400; nf.Q.value = 1
+        const ng = ctx.createGain()
+        const t = now + i * 0.008
+        ng.gain.setValueAtTime(0.04 * vel, t)
+        ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.06)
+        ns.connect(nf).connect(ng).connect(ctx.destination)
+        ns.start(t); ns.stop(t + 0.07)
+      }
+      break
+    }
+    case 'cowbell': {
+      const o1 = ctx.createOscillator(); const o2 = ctx.createOscillator()
+      const g = ctx.createGain()
+      o1.type = 'square'; o1.frequency.value = 560
+      o2.type = 'square'; o2.frequency.value = 845
+      g.gain.setValueAtTime(0.025 * vel, now)
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.15)
+      o1.connect(g); o2.connect(g); g.connect(ctx.destination)
+      o1.start(now); o2.start(now); o1.stop(now + 0.16); o2.stop(now + 0.16)
+      break
+    }
+    case 'hi-hat-closed':  drumCymbal(ctx, now, vel, 6000, 0.05); break
+    case 'hi-hat-open':    drumCymbal(ctx, now, vel, 5000, 0.4); break
+    case 'hi-hat-pedal':   drumCymbal(ctx, now, vel, 6500, 0.03); break
+    case 'crash':          drumCymbal(ctx, now, vel, 3000, 0.8); break
+    case 'crash-choke':    drumCymbal(ctx, now, vel, 3500, 0.12); break
+    case 'ride':           drumCymbal(ctx, now, vel, 4500, 0.6); break
+    case 'ride-bell':      drumCymbal(ctx, now, vel, 5500, 0.3); break
+    case 'splash':         drumCymbal(ctx, now, vel, 7000, 0.25); break
+    case 'china':          drumCymbal(ctx, now, vel, 2500, 0.5); break
+    case 'bell': {
+      const o = ctx.createOscillator(); const g = ctx.createGain()
+      o.type = 'sine'; o.frequency.value = 1200
+      g.gain.setValueAtTime(0.03 * vel, now)
+      g.gain.setTargetAtTime(0.0001, now + 0.01, 0.15)
+      o.connect(g).connect(ctx.destination); o.start(now); o.stop(now + 0.8)
+      break
+    }
+    default: drumSnare(ctx, now, vel, 200, 0.04, 0.12)
   }
 }
 
@@ -338,31 +468,70 @@ function playSynth(ctx: AudioContext, freq: number, vel: number) {
 // ════════════════════════════════════════════════
 // 6. TYPEWRITER — mechanical click + bell
 // ════════════════════════════════════════════════
-function playTypewriter(ctx: AudioContext, _freq: number, vel: number) {
+function playTypewriter(ctx: AudioContext, freq: number, vel: number) {
   const now = ctx.currentTime
-  // Mechanical click — short filtered noise
+
+  // Each key has a slightly different mechanical character
+  // Use freq to seed random variations so same key = consistent sound
+  const seed = Math.round(freq) % 7
+  const clickPitch = 2200 + seed * 350 + (Math.random() - 0.5) * 200
+  const thudPitch = 280 + seed * 40 + (Math.random() - 0.5) * 60
+  const clickQ = 3 + seed * 0.5
+  const clickDur = 0.012 + seed * 0.002 + Math.random() * 0.004
+  const thudDur = 0.02 + seed * 0.003
+  const clickVol = (0.035 + Math.random() * 0.015) * vel
+  const thudVol = (0.012 + Math.random() * 0.008) * vel
+
+  // Key down click — sharp filtered noise (the switch contact)
   const ns = ctx.createBufferSource()
-  ns.buffer = noiseBuffer(ctx, 256)
+  ns.buffer = noiseBuffer(ctx, 384)
   const nf = ctx.createBiquadFilter()
   nf.type = 'bandpass'
-  nf.frequency.setValueAtTime(3000 + Math.random() * 1000, now)
-  nf.Q.setValueAtTime(4, now)
+  nf.frequency.setValueAtTime(clickPitch, now)
+  nf.Q.setValueAtTime(clickQ, now)
   const ng = ctx.createGain()
-  ng.gain.setValueAtTime(0.04 * vel, now)
-  ng.gain.exponentialRampToValueAtTime(0.0001, now + 0.02)
+  ng.gain.setValueAtTime(clickVol, now)
+  ng.gain.exponentialRampToValueAtTime(0.0001, now + clickDur)
   ns.connect(nf).connect(ng).connect(ctx.destination)
-  ns.start(now); ns.stop(now + 0.025)
+  ns.start(now); ns.stop(now + clickDur + 0.005)
 
-  // Mechanical lever thud
+  // Stem/lever impact — low thud (keycap hitting the plate)
   const o = ctx.createOscillator()
   o.type = 'sine'
-  o.frequency.setValueAtTime(400 + Math.random() * 100, now)
-  o.frequency.exponentialRampToValueAtTime(120, now + 0.03)
+  o.frequency.setValueAtTime(thudPitch, now)
+  o.frequency.exponentialRampToValueAtTime(thudPitch * 0.35, now + thudDur)
   const g = ctx.createGain()
-  g.gain.setValueAtTime(0.015 * vel, now)
-  g.gain.exponentialRampToValueAtTime(0.0001, now + 0.035)
+  g.gain.setValueAtTime(thudVol, now)
+  g.gain.exponentialRampToValueAtTime(0.0001, now + thudDur)
   o.connect(g).connect(ctx.destination)
-  o.start(now); o.stop(now + 0.04)
+  o.start(now); o.stop(now + thudDur + 0.005)
+
+  // Spring/return noise — delayed subtle tick (the key bouncing back)
+  const returnDelay = 0.025 + Math.random() * 0.015
+  const ns2 = ctx.createBufferSource()
+  ns2.buffer = noiseBuffer(ctx, 128)
+  const nf2 = ctx.createBiquadFilter()
+  nf2.type = 'bandpass'
+  nf2.frequency.setValueAtTime(clickPitch * 1.3, now + returnDelay)
+  nf2.Q.setValueAtTime(clickQ * 0.7, now + returnDelay)
+  const ng2 = ctx.createGain()
+  ng2.gain.setValueAtTime(clickVol * 0.3, now + returnDelay)
+  ng2.gain.exponentialRampToValueAtTime(0.0001, now + returnDelay + 0.008)
+  ns2.connect(nf2).connect(ng2).connect(ctx.destination)
+  ns2.start(now + returnDelay); ns2.stop(now + returnDelay + 0.012)
+
+  // Spacebar has extra rattle (wider keys have more resonance)
+  if (seed <= 1) {
+    const rattle = ctx.createBufferSource()
+    rattle.buffer = noiseBuffer(ctx, 256)
+    const rf = ctx.createBiquadFilter()
+    rf.type = 'lowpass'; rf.frequency.value = 1200
+    const rg = ctx.createGain()
+    rg.gain.setValueAtTime(thudVol * 0.5, now + 0.005)
+    rg.gain.exponentialRampToValueAtTime(0.0001, now + 0.04)
+    rattle.connect(rf).connect(rg).connect(ctx.destination)
+    rattle.start(now + 0.005); rattle.stop(now + 0.045)
+  }
 }
 
 // ── Dispatcher ──
