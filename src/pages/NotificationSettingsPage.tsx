@@ -10,6 +10,7 @@
 
 import { useState, useEffect } from 'react'
 import { ChevronLeft } from 'lucide-react'
+import { t, tf, useAppLanguage } from '../lib/i18n'
 import { useLogicalBack } from '../hooks/useLogicalBack'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import SettingsDesktopShell from '../components/settings/SettingsDesktopShell'
@@ -53,17 +54,20 @@ function saveNotifSettings(s: NotifSettings) {
 }
 
 // 通知选项列表
-const toggleItems: { key: keyof Omit<NotifSettings, 'reminderTime'>; icon: string; label: string }[] = [
-  { key: 'dailyReminder', icon: '🔔', label: '每日学习提醒' },
-  { key: 'checkinReminder', icon: '✅', label: '打卡提醒' },
-  { key: 'newFeature', icon: '🆕', label: '新功能通知' },
-  { key: 'achievement', icon: '🏆', label: '成就通知' },
-  { key: 'activity', icon: '📢', label: '活动推送' },
-  { key: 'tips', icon: '💡', label: '学习小贴士' },
+type I18nKey = Parameters<typeof t>[1]
+
+const toggleItems: { key: keyof Omit<NotifSettings, 'reminderTime'>; icon: string; labelKey: I18nKey }[] = [
+  { key: 'dailyReminder', icon: '🔔', labelKey: 'notif_daily_study' },
+  { key: 'checkinReminder', icon: '✅', labelKey: 'notif_checkin' },
+  { key: 'newFeature', icon: '🆕', labelKey: 'notif_new_feature' },
+  { key: 'achievement', icon: '🏆', labelKey: 'notif_achievement' },
+  { key: 'activity', icon: '📢', labelKey: 'notif_activity' },
+  { key: 'tips', icon: '💡', labelKey: 'notif_tips' },
 ]
 
 export default function NotificationSettingsPage() {
   const goBack = useLogicalBack('/app/profile')
+  const lang = useAppLanguage()
   const isDesktop = useMediaQuery('(min-width: 768px)')
   const [notif, setNotif] = useState<NotifSettings>(loadNotifSettings)
 
@@ -80,13 +84,13 @@ export default function NotificationSettingsPage() {
 
   const reminderCard = (
     <div className={`${isDesktop ? 'glass-card-strong rounded-[30px] p-6' : 'bg-[var(--color-card)] rounded-[var(--radius-lg)] p-5'} space-y-3`} style={isDesktop ? undefined : { boxShadow: 'var(--shadow-card)' }}>
-      <h2 className={`${isDesktop ? 'text-[20px]' : 'text-[16px]'} font-semibold text-[var(--color-foreground)]`}>学习提醒</h2>
-      <p className="text-[12px] text-[var(--color-muted-light)]">设置每日学习提醒时间，养成好习惯</p>
+      <h2 className={`${isDesktop ? 'text-[20px]' : 'text-[16px]'} font-semibold text-[var(--color-foreground)]`}>{t(lang, 'notif_learn_reminder')}</h2>
+      <p className="text-[12px] text-[var(--color-muted-light)]">{t(lang, 'notif_learn_desc')}</p>
 
       <div className={`flex items-center justify-between rounded-[20px] ${isDesktop ? 'glass-card-elevated px-5 py-4' : 'px-4 py-3 bg-[var(--color-primary-light)] rounded-[var(--radius-sm)]'}`}>
         <div className="flex items-center gap-2">
           <span className="text-[18px]">⏰</span>
-          <span className={`${isDesktop ? 'text-[15px]' : 'text-[14px]'} font-medium text-[var(--color-foreground)]`}>每日提醒时间</span>
+          <span className={`${isDesktop ? 'text-[15px]' : 'text-[14px]'} font-medium text-[var(--color-foreground)]`}>{t(lang, 'notif_daily_time')}</span>
         </div>
         <input
           type="time"
@@ -105,7 +109,7 @@ export default function NotificationSettingsPage() {
           {i > 0 && <div className="h-px bg-[var(--color-border)] mx-4" />}
           <div className={`flex items-center justify-between ${isDesktop ? 'px-6 py-5' : 'px-5 py-3.5'}`}>
             <span className={`${isDesktop ? 'text-[16px]' : 'text-[15px]'} text-[var(--color-foreground)]`}>
-              {item.icon} {item.label}
+              {item.icon} {t(lang, item.labelKey)}
             </span>
             <button
               onClick={() => toggle(item.key)}
@@ -124,18 +128,18 @@ export default function NotificationSettingsPage() {
   if (isDesktop) {
     return (
       <SettingsDesktopShell
-        title="提醒通知"
-        description="桌面端把提醒时间和通知类型拆开，避免仍然沿用手机上的紧凑单列。"
+        title={t(lang, 'notif_title')}
+        description={t(lang, 'notif_desktop_desc')}
         onBack={goBack}
         sideTitle="Reminder Summary"
-        sideDescription="这里控制学习提醒和各类推送的打开状态，适合在桌面端一次性统一调整。"
+        sideDescription={t(lang, 'notif_side_desc')}
         sideContent={
           <div className="space-y-6">
             <div className="glass-card-elevated rounded-[28px] p-6">
               <p className="text-[13px] font-semibold uppercase tracking-[0.16em] text-[var(--color-muted)]">Today</p>
               <div className="mt-4 space-y-3">
-                <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">提醒时间：{notif.reminderTime}</div>
-                <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">已开启：{toggleItems.filter((item) => notif[item.key]).length} 项通知</div>
+                <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">{tf(lang, 'notif_reminder_time_label', { time: notif.reminderTime })}</div>
+                <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">{tf(lang, 'notif_enabled_count', { count: toggleItems.filter((item) => notif[item.key]).length })}</div>
               </div>
             </div>
           </div>
@@ -161,7 +165,7 @@ export default function NotificationSettingsPage() {
             <ChevronLeft size={20} className="text-[var(--color-foreground)]" />
           </button>
           <h1 className="text-[18px] font-bold text-[var(--color-foreground)] font-secondary">
-            提醒通知
+            {t(lang, 'notif_title')}
           </h1>
         </div>
 
@@ -170,13 +174,13 @@ export default function NotificationSettingsPage() {
 
           {/* ----- 学习提醒时间 ----- */}
           <div className="bg-[var(--color-card)] rounded-[var(--radius-lg)] p-5 space-y-3" style={{ boxShadow: 'var(--shadow-card)' }}>
-            <h2 className="text-[16px] font-semibold text-[var(--color-foreground)]">学习提醒</h2>
-            <p className="text-[12px] text-[var(--color-muted-light)]">设置每日学习提醒时间，养成好习惯</p>
+            <h2 className="text-[16px] font-semibold text-[var(--color-foreground)]">{t(lang, 'notif_learn_reminder')}</h2>
+            <p className="text-[12px] text-[var(--color-muted-light)]">{t(lang, 'notif_learn_desc')}</p>
 
             <div className="flex items-center justify-between px-4 py-3 bg-[var(--color-primary-light)] rounded-[var(--radius-sm)]">
               <div className="flex items-center gap-2">
                 <span className="text-[18px]">⏰</span>
-                <span className="text-[14px] font-medium text-[var(--color-foreground)]">每日提醒时间</span>
+                <span className="text-[14px] font-medium text-[var(--color-foreground)]">{t(lang, 'notif_daily_time')}</span>
               </div>
               {/* HTML5 原生时间选择器 */}
               <input
@@ -195,7 +199,7 @@ export default function NotificationSettingsPage() {
                 {i > 0 && <div className="h-px bg-[var(--color-border)] mx-4" />}
                 <div className="flex items-center justify-between px-5 py-3.5">
                   <span className="text-[15px] text-[var(--color-foreground)]">
-                    {item.icon} {item.label}
+                    {item.icon} {t(lang, item.labelKey)}
                   </span>
                   <button
                     onClick={() => toggle(item.key)}

@@ -27,9 +27,9 @@ import { VOCAB_LEVEL_TARGETS } from '../data/vocab-test/openSourceVocab'
 // 设置菜单项 —— 学习设置已集成到 PDF 阅读器中
 // 系统后台仅通过直接 URL /admin/overview 访问，不对普通用户展示
 const menuItems = [
-  { icon: '🔔', label: '提醒通知', desc: '推送通知管理', path: '/notification-settings' },
-  { icon: '🎨', label: '主题设置', desc: '外观、字体、语言', path: '/theme-settings' },
-  { icon: 'ℹ️', label: '关于我们', desc: 'Linswift v2.1.0', path: '/about' },
+  { icon: '🔔', path: '/notification-settings' },
+  { icon: '🎨', path: '/theme-settings' },
+  { icon: 'ℹ️', path: '/about' },
 ]
 
 export default function ProfilePage() {
@@ -44,10 +44,10 @@ export default function ProfilePage() {
   const [streakDays, setStreakDays] = useState(0)
 
   const themeDesc = settings.mode === 'system'
-    ? (lang === 'en' ? 'Follow Browser' : lang === 'ja' ? 'ブラウザに従う' : '跟随浏览器')
+    ? t(lang, 'theme_system')
     : settings.mode === 'dark'
-      ? (lang === 'en' ? 'Dark' : lang === 'ja' ? 'ダーク' : '深色模式')
-      : (lang === 'en' ? 'Light' : lang === 'ja' ? 'ライト' : '浅色模式')
+      ? t(lang, 'theme_dark')
+      : t(lang, 'theme_light')
 
   // ===== 页面挂载 + 每次聚焦时刷新数据（确保头像同步） =====
   useEffect(() => {

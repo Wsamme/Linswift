@@ -12,6 +12,7 @@ import { CLASSIC_BOOKS, getClassicBookBySlug, type ClassicBookCatalogItem } from
 import { resolveUserBookMetadata } from '../lib/books'
 import ClassicBookCover from '../components/books/ClassicBookCover'
 import { navigateSafely } from '../lib/navigation'
+import { t, useAppLanguage } from '../lib/i18n'
 
 /**
  * 书架页 —— 阅读器模块入口（V3：PDF 阅读器）
@@ -35,6 +36,7 @@ export default function BookshelfPage() {
   const navigate = useNavigate()
   const goBack = useLogicalBack('/app/learn')
   const { user } = useAuth()
+  const lang = useAppLanguage()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // ===== 状态 =====
@@ -118,20 +120,20 @@ export default function BookshelfPage() {
 
     // 验证文件类型
     if (!file.name.toLowerCase().endsWith('.pdf')) {
-      alert('请选择 PDF 文件')
+      alert(t(lang, 'bookshelf_select_pdf'))
       return
     }
 
     // 限制文件大小（50MB）
     if (file.size > 50 * 1024 * 1024) {
-      alert('文件大小不能超过 50MB')
+      alert(t(lang, 'bookshelf_size_limit'))
       return
     }
 
     setImporting(true)
     try {
       // 第 1 步：提取 PDF 元数据
-      setImportStatus('正在读取 PDF 信息...')
+      setImportStatus(t(lang, 'bookshelf_reading_info'))
       let meta
       try {
         meta = await getPDFMetadata(file)
@@ -139,7 +141,7 @@ export default function BookshelfPage() {
         // 元数据读取失败时，仍允许继续导入
         meta = {
           title: file.name.replace(/\.pdf$/i, ''),
-          author: '未知作者',
+          author: t(lang, 'bookshelf_unknown_author'),
           numPages: 0,
           fileSize: file.size,
         }
@@ -148,7 +150,7 @@ export default function BookshelfPage() {
       // 第 2 步：提取文本（快速模式，超时自动跳过，避免“长期加载”）
       let fullText = ''
       try {
-        setImportStatus(`正在提取文本（共 ${meta.numPages} 页）...`)
+        setImportStatus(t(lang, 'bookshelf_extracting_text'))
         const textTask = extractTextFromPDF(file)
         const timeoutTask = new Promise<string>((resolve) =>
           setTimeout(() => resolve(''), 12000)
@@ -162,7 +164,7 @@ export default function BookshelfPage() {
       // 第 3 步：生成封面缩略图（从 PDF 第一页截图）
       let coverData = ''
       try {
-        setImportStatus('正在生成封面...')
+        setImportStatus(t(lang, 'bookshelf_generating_cover'))
         const thumb = await generatePDFThumbnail(file)
         if (thumb) coverData = thumb
       } catch {
@@ -170,7 +172,7 @@ export default function BookshelfPage() {
       }
 
       // 第 4 步：上传 PDF 到 Supabase Storage
-      setImportStatus('正在上传文件...')
+      setImportStatus(t(lang, 'bookshelf_uploading'))
       // 文件名做安全清洗，避免特殊字符导致 storage 路径异常
       const safeName = file.name
         .replace(/\s+/g, '_')
@@ -203,10 +205,10 @@ export default function BookshelfPage() {
       // 到这里表示 PDF 本体已成功上传；文本提取是否成功不影响文件阅读
 
       // 第 5 步：保存到数据库（对所有用户输入做 sanitize，防止无效 Unicode 导致入库失败）
-      setImportStatus('正在保存书籍...')
+      setImportStatus(t(lang, 'bookshelf_saving'))
       const randomEmoji = COVER_EMOJIS[Math.floor(Math.random() * COVER_EMOJIS.length)]
       const safeTitle = sanitizeText(meta.title) || file.name.replace(/\.pdf$/i, '')
-      const safeAuthor = sanitizeText(meta.author) || '未知作者'
+      const safeAuthor = sanitizeText(meta.author) || t(lang, 'bookshelf_unknown_author')
       const safeText = sanitizeText(fullText).slice(0, 500000)
       const { error } = await supabase.from('user_books').insert({
         user_id: user.id,
@@ -226,7 +228,7 @@ export default function BookshelfPage() {
       }
 
       // 成功！刷新书架（非阻塞，避免卡在刷新阶段导致“一直加载”）
-      setImportStatus('导入成功！')
+      setImportStatus(t(lang, 'bookshelf_success'))
       fetchBooks().catch(() => {})
     } catch (err: any) {
       alert(`导入失败: ${err.message || '未知错误'}`)
@@ -240,7 +242,7 @@ export default function BookshelfPage() {
 
   // ===== 删除书籍 =====
   const handleDeleteBook = async (bookId: number) => {
-    if (!confirm('确认删除这本书？')) return
+    if (!confirm(t(lang, 'bookshelf_delete_confirm'))) return
     await supabase.from('user_books').delete().eq('id', bookId)
     setBooks(prev => prev.filter(b => b.id !== bookId))
   }
@@ -296,7 +298,7 @@ export default function BookshelfPage() {
           <button onClick={goBack} className="p-1">
             <ChevronLeft size={24} className="text-[var(--color-foreground)]" />
           </button>
-          <h1 className="text-[18px] font-bold text-[var(--color-foreground)] font-secondary">书架</h1>
+          <h1 className="text-[18px] font-bold text-[var(--color-foreground)] font-secondary">{t(lang, 'bookshelf_title')}</h1>
           <button className="p-1">
             <MoreVertical size={20} className="text-[var(--color-muted)]" />
           </button>
@@ -311,7 +313,7 @@ export default function BookshelfPage() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="搜索书籍..."
+            placeholder={t(lang, 'bookshelf_search')}
             className="flex-1 bg-transparent text-[14px] text-[var(--color-foreground)] placeholder:text-[var(--color-muted-light)] outline-none"
           />
         </div>
@@ -335,12 +337,12 @@ export default function BookshelfPage() {
           {importing ? (
             <>
               <Loader2 size={18} className="animate-spin" />
-              <span className="text-[14px] font-semibold">{importStatus || '正在导入...'}</span>
+              <span className="text-[14px] font-semibold">{importStatus || t(lang, 'bookshelf_importing')}</span>
             </>
           ) : (
             <>
               <Upload size={18} />
-              <span className="text-[14px] font-semibold">导入 PDF 书籍</span>
+              <span className="text-[14px] font-semibold">{t(lang, 'bookshelf_import')}</span>
             </>
           )}
         </button>
@@ -353,14 +355,14 @@ export default function BookshelfPage() {
           className="glass-card glass-card-interactive w-full flex items-center justify-center gap-2 rounded-[22px] py-3 text-[var(--color-foreground)]"
         >
           <BookOpen size={16} className="text-[var(--color-primary)]" />
-          <span className="text-[13px] font-medium">直接打开 PDF 阅读器</span>
+          <span className="text-[13px] font-medium">{t(lang, 'bookshelf_open_pdf_reader')}</span>
         </button>
       </div>
 
       {/* ===== 最近阅读 ===== */}
       {recentReads.length > 0 && (
         <div className="px-5 mt-5">
-          <h3 className="text-[16px] font-bold text-[var(--color-foreground)] mb-3 font-secondary">最近阅读</h3>
+          <h3 className="text-[16px] font-bold text-[var(--color-foreground)] mb-3 font-secondary">{t(lang, 'bookshelf_recent')}</h3>
           <div className="flex gap-3 overflow-x-auto pb-2 -mx-5 px-5">
             {recentReads.map((book) => {
               const classicCoverBook = getClassicCoverBook(book)
@@ -416,9 +418,9 @@ export default function BookshelfPage() {
       <div className="px-5 mt-5">
         <div className="mb-3 flex items-end justify-between gap-3">
           <div>
-            <h3 className="font-secondary text-[16px] font-bold text-[var(--color-foreground)]">公共经典书库</h3>
+            <h3 className="font-secondary text-[16px] font-bold text-[var(--color-foreground)]">{t(lang, 'bookshelf_classic_library')}</h3>
             <p className="mt-1 text-[12px] text-[var(--color-muted)]">
-              所有人共用同一份正文资源，你的书架只记录个人进度
+              {t(lang, 'bookshelf_classic_library_desc')}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -430,8 +432,8 @@ export default function BookshelfPage() {
                     ? 'bg-[var(--color-primary)] text-white'
                     : 'text-[var(--color-muted)]'
                 }`}
-                aria-label="封面视图"
-                title="封面视图"
+                aria-label={t(lang, 'bookshelf_view_cover')}
+                title={t(lang, 'bookshelf_view_cover')}
               >
                 <LayoutGrid size={15} />
               </button>
@@ -442,13 +444,13 @@ export default function BookshelfPage() {
                     ? 'bg-[var(--color-primary)] text-white'
                     : 'text-[var(--color-muted)]'
                 }`}
-                aria-label="列表视图"
-                title="列表视图"
+                aria-label={t(lang, 'bookshelf_view_list')}
+                title={t(lang, 'bookshelf_view_list')}
               >
                 <Rows3 size={15} />
               </button>
             </div>
-            <span className="text-[11px] font-medium text-[var(--color-primary)]">{CLASSIC_BOOKS.length} 本</span>
+            <span className="text-[11px] font-medium text-[var(--color-primary)]">{CLASSIC_BOOKS.length}</span>
           </div>
         </div>
 
@@ -479,17 +481,17 @@ export default function BookshelfPage() {
                     {isAdding ? (
                       <>
                         <Loader2 size={13} className="animate-spin" />
-                        <span>加入中...</span>
+                        <span>{t(lang, 'bookshelf_adding')}</span>
                       </>
                     ) : linkedBook ? (
                       <>
                         <BookOpen size={13} className="text-[var(--color-primary)]" />
-                        <span>{linkedBook.progress > 0 ? '继续阅读' : '打开书籍'}</span>
+                        <span>{linkedBook.progress > 0 ? t(lang, 'bookshelf_continue_reading') : t(lang, 'bookshelf_open_book')}</span>
                       </>
                     ) : (
                       <>
                         <Download size={13} className="text-[var(--color-primary)]" />
-                        <span>加入书架</span>
+                        <span>{t(lang, 'bookshelf_add_to_shelf')}</span>
                       </>
                     )}
                   </button>
@@ -533,17 +535,17 @@ export default function BookshelfPage() {
                     {isAdding ? (
                       <>
                         <Loader2 size={13} className="animate-spin" />
-                        <span>加入中</span>
+                        <span>{t(lang, 'bookshelf_adding')}</span>
                       </>
                     ) : linkedBook ? (
                       <>
                         <BookOpen size={13} className="text-[var(--color-primary)]" />
-                        <span>{linkedBook.progress > 0 ? '继续' : '打开'}</span>
+                        <span>{linkedBook.progress > 0 ? t(lang, 'bookshelf_continue') : t(lang, 'bookshelf_open')}</span>
                       </>
                     ) : (
                       <>
                         <Download size={13} className="text-[var(--color-primary)]" />
-                        <span>加入</span>
+                        <span>{t(lang, 'bookshelf_add')}</span>
                       </>
                     )}
                   </button>
@@ -557,7 +559,7 @@ export default function BookshelfPage() {
       {/* ===== 书架网格 ===== */}
       <div className="px-5 py-6">
         <h3 className="text-[16px] font-bold text-[var(--color-foreground)] mb-3 font-secondary">
-          全部书籍 {allBooks.length > 0 && `(${allBooks.length})`}
+          {t(lang, 'bookshelf_all_books')} {allBooks.length > 0 && `(${allBooks.length})`}
         </h3>
 
         {/* 加载中 */}
@@ -571,8 +573,8 @@ export default function BookshelfPage() {
         {!loading && allBooks.length === 0 && (
           <div className="glass-card-soft text-center rounded-[24px] py-12">
             <p className="text-[48px] mb-3">📚</p>
-            <p className="text-[14px] text-[var(--color-muted)]">书架还是空的</p>
-            <p className="text-[12px] text-[var(--color-muted-light)] mt-1">你可以先导入 PDF，或从上方公共经典书库直接开始阅读</p>
+            <p className="text-[14px] text-[var(--color-muted)]">{t(lang, 'bookshelf_empty')}</p>
+            <p className="text-[12px] text-[var(--color-muted-light)] mt-1">{t(lang, 'bookshelf_empty_hint')}</p>
           </div>
         )}
 
@@ -614,12 +616,12 @@ export default function BookshelfPage() {
                     )}
                     {book.progress === 100 && (
                       <div className="absolute top-2 right-2 rounded bg-[var(--color-success)] px-1.5 py-0.5 text-[9px] font-bold text-white">
-                        已读完
+                        {t(lang, 'bookshelf_finished')}
                       </div>
                     )}
                     {book.total_pages && (
                       <div className="absolute top-2 left-2 rounded bg-black/30 px-1.5 py-0.5 text-[9px] text-white">
-                        {book.total_pages}页
+                        {book.total_pages}{t(lang, 'bookshelf_pages_unit')}
                       </div>
                     )}
                   </div>
