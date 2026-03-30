@@ -5,7 +5,7 @@ import {
   BookOpen, Download, LayoutGrid, Rows3,
 } from 'lucide-react'
 import { supabase, uploadFile, type UserBook } from '../lib/supabase'
-import { extractTextFromPDF, getPDFMetadata, sanitizeText } from '../lib/pdf'
+import { extractTextFromPDF, generatePDFThumbnail, getPDFMetadata, sanitizeText } from '../lib/pdf'
 import { useAuth } from '../contexts/AuthContext'
 import { useLogicalBack } from '../hooks/useLogicalBack'
 import { CLASSIC_BOOKS, getClassicBookBySlug, type ClassicBookCatalogItem } from '../data/classicBooks'
@@ -159,6 +159,16 @@ export default function BookshelfPage() {
         fullText = ''
       }
 
+      // 第 3 步：生成封面缩略图（从 PDF 第一页截图）
+      let coverData = ''
+      try {
+        setImportStatus('正在生成封面...')
+        const thumb = await generatePDFThumbnail(file)
+        if (thumb) coverData = thumb
+      } catch {
+        // 封面生成失败不阻塞导入
+      }
+
       // 第 4 步：上传 PDF 到 Supabase Storage
       setImportStatus('正在上传文件...')
       // 文件名做安全清洗，避免特殊字符导致 storage 路径异常
@@ -202,7 +212,7 @@ export default function BookshelfPage() {
         user_id: user.id,
         title: safeTitle,
         author: safeAuthor,
-        cover_emoji: randomEmoji,
+        cover_emoji: coverData || randomEmoji,
         file_path: storedFilePath,
         content_text: safeText,
         total_pages: meta.numPages,
@@ -372,6 +382,10 @@ export default function BookshelfPage() {
                     {classicCoverBook ? (
                       <div className="aspect-[5/7]">
                         <ClassicBookCover book={classicCoverBook} compact />
+                      </div>
+                    ) : book.cover_emoji?.startsWith('data:') ? (
+                      <div className="aspect-[5/7] overflow-hidden rounded-[18px]">
+                        <img src={book.cover_emoji} alt={book.title} className="h-full w-full object-cover" />
                       </div>
                     ) : (
                       <div className="glass-card-soft flex aspect-[5/7] items-center justify-center rounded-[18px]">
@@ -578,6 +592,14 @@ export default function BookshelfPage() {
                     {classicCoverBook ? (
                       <div className="aspect-[5/7]">
                         <ClassicBookCover book={classicCoverBook} compact />
+                      </div>
+                    ) : book.cover_emoji?.startsWith('data:') ? (
+                      <div className="aspect-[3/4] w-full overflow-hidden rounded-[20px]">
+                        <img
+                          src={book.cover_emoji}
+                          alt={book.title}
+                          className="h-full w-full object-cover"
+                        />
                       </div>
                     ) : (
                       <div className="glass-card-soft relative flex aspect-[3/4] w-full items-center justify-center rounded-[20px]">
