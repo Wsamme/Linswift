@@ -275,6 +275,9 @@ const messages = {
     bookshelf_empty_hint: '你可以先导入 PDF，或从上方公共经典书库直接开始阅读',
     bookshelf_finished: '已读完',
     bookshelf_pages_unit: '页',
+    lang_zh_CN: '简体中文',
+    lang_en: 'English',
+    lang_ja: '日本语',
   },
   en: {
     nav_translate: 'Translate',
@@ -549,6 +552,9 @@ const messages = {
     bookshelf_empty_hint: 'Import a PDF or start reading from the classic library above',
     bookshelf_finished: 'Finished',
     bookshelf_pages_unit: 'p',
+    lang_zh_CN: 'Chinese (Simplified)',
+    lang_en: 'English',
+    lang_ja: 'Japanese',
   },
   ja: {
     nav_translate: '翻訳',
@@ -823,6 +829,9 @@ const messages = {
     bookshelf_empty_hint: 'PDF をインポートするか、上のクラシック書庫から読み始めましょう',
     bookshelf_finished: '読了',
     bookshelf_pages_unit: 'ページ',
+    lang_zh_CN: '中国語（簡体字）',
+    lang_en: '英語',
+    lang_ja: '日本語',
   },
 } as const
 

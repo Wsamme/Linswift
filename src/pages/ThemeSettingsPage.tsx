@@ -32,10 +32,10 @@ const fontSizeOptions: Array<{ labelKey: I18nKey; value: number; previewSize: nu
   { labelKey: 'theme_font_large', value: 2, previewSize: 18 },
 ]
 
-const languageOptions: Array<{ value: ThemeSettings['language']; label: string }> = [
-  { value: 'zh-CN', label: '简体中文' },
-  { value: 'en', label: 'English' },
-  { value: 'ja', label: '日本語' },
+const languageOptionKeys: Array<{ value: ThemeSettings['language']; labelKey: 'lang_zh_CN' | 'lang_en' | 'lang_ja' }> = [
+  { value: 'zh-CN', labelKey: 'lang_zh_CN' },
+  { value: 'en', labelKey: 'lang_en' },
+  { value: 'ja', labelKey: 'lang_ja' },
 ]
 
 const colorOptions: Array<{ color: string; labelKey: I18nKey }> = [
@@ -142,10 +142,10 @@ export default function ThemeSettingsPage() {
           <span className="text-[18px]">🌐</span>
           <span className={`${isDesktop ? 'text-[16px]' : 'text-[15px]'} text-[var(--color-foreground)]`}>{t(lang, 'theme_language')}</span>
         </div>
-        <span className="text-[13px] text-[var(--color-primary)]">{getLanguageLabel(settings.language)}</span>
+        <span className="text-[13px] text-[var(--color-primary)]">{t(lang, settings.language === 'zh-CN' ? 'lang_zh_CN' : settings.language === 'ja' ? 'lang_ja' : 'lang_en')}</span>
       </div>
       <div className="flex flex-wrap gap-2">
-        {languageOptions.map((langOption) => (
+        {languageOptionKeys.map((langOption) => (
           <button
             key={langOption.value}
             onClick={() => update({ language: langOption.value })}
@@ -155,7 +155,7 @@ export default function ThemeSettingsPage() {
                 : `${isDesktop ? 'glass-card-elevated' : 'bg-[var(--color-background-secondary)]'} text-[var(--color-muted)]`
             }`}
           >
-            {langOption.label}
+            {t(lang, langOption.labelKey)}
           </button>
         ))}
       </div>
@@ -198,7 +198,7 @@ export default function ThemeSettingsPage() {
               <p className="text-[13px] font-semibold uppercase tracking-[0.16em] text-[var(--color-muted)]">Current</p>
               <div className="mt-4 space-y-3">
                 <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">{t(lang, 'theme_appearance')}：{t(lang, modeOptions.find((m) => m.key === settings.mode)?.labelKey || 'theme_system')}</div>
-                <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">{t(lang, 'theme_language')}：{getLanguageLabel(settings.language)}</div>
+                <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">{t(lang, 'theme_language')}：{t(lang, settings.language === 'zh-CN' ? 'lang_zh_CN' : settings.language === 'ja' ? 'lang_ja' : 'lang_en')}</div>
                 <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">{t(lang, 'theme_color')}：{t(lang, colorOptions.find((item) => item.color === settings.primaryColor)?.labelKey || 'color_orange')}</div>
               </div>
             </div>
@@ -316,20 +316,20 @@ export default function ThemeSettingsPage() {
                 <span className="text-[18px]">🌐</span>
                 <span className="text-[15px] text-[var(--color-foreground)]">{t(lang, 'theme_language')}</span>
               </div>
-              <span className="text-[13px] text-[var(--color-primary)]">{getLanguageLabel(settings.language)}</span>
+              <span className="text-[13px] text-[var(--color-primary)]">{t(lang, settings.language === 'zh-CN' ? 'lang_zh_CN' : settings.language === 'ja' ? 'lang_ja' : 'lang_en')}</span>
             </div>
             <div className="flex gap-2 flex-wrap">
-              {languageOptions.map((lang) => (
+              {languageOptionKeys.map((langOpt) => (
                 <button
-                  key={lang.value}
-                  onClick={() => update({ language: lang.value })}
+                  key={langOpt.value}
+                  onClick={() => update({ language: langOpt.value })}
                   className={`px-3 py-1.5 rounded-full text-[12px] ${
-                    settings.language === lang.value
+                    settings.language === langOpt.value
                       ? 'bg-[var(--color-primary)] text-white'
                       : 'bg-[var(--color-background-secondary)] text-[var(--color-muted)]'
                   }`}
                 >
-                  {lang.label}
+                  {t(lang, langOpt.labelKey)}
                 </button>
               ))}
             </div>
