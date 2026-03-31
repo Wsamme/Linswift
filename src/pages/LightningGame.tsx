@@ -9,7 +9,7 @@ import { calculateNextReview, getReviewCycleDaysFromLocalStorage } from '../lib/
 import { speakEnglish } from '../lib/tts'
 import { useLogicalBack } from '../hooks/useLogicalBack'
 import { navigateSafely } from '../lib/navigation'
-import { playClickSound, playCorrectSound, playWrongSound, playCompleteSound, playComboSound, isGameSfxEnabled, setGameSfxEnabled } from '../lib/gameSfx'
+import { playClickSound, playWrongSound, playCompleteSound, playComboSound, isGameSfxEnabled, setGameSfxEnabled } from '../lib/gameSfx'
 
 const TOTAL_SECONDS = 30
 const REQUIRED_CORRECT_PER_WORD = 2
