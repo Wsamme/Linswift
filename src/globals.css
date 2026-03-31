@@ -16,7 +16,7 @@ html {
   --glass-list-bg: rgba(255, 255, 255, 0.72);
   --glass-border: rgba(255, 255, 255, 0.46);
   --glass-shadow: 0 18px 50px rgba(15, 23, 42, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.78);
-  --glass-shadow-soft: 0 10px 28px rgba(15, 23, 42, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  --glass-shadow-soft: 0 1px 3px rgba(15, 23, 42, 0.04), 0 4px 14px rgba(15, 23, 42, 0.03);
   --glass-backdrop: blur(24px) saturate(1.45);
   --glass-overlay: rgba(15, 23, 42, 0.24);
   --glass-page-bg: radial-gradient(circle at top right, rgba(255, 132, 0, 0.18), transparent 24%), radial-gradient(circle at left 30%, rgba(255, 211, 170, 0.32), transparent 22%), linear-gradient(135deg, #fff8f0 0%, #fffdf9 52%, #fff3e5 100%);
@@ -74,7 +74,7 @@ html {
   --glass-list-bg: rgba(20, 23, 28, 0.88);
   --glass-border: rgba(255, 255, 255, 0.08);
   --glass-shadow: 0 20px 52px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  --glass-shadow-soft: 0 12px 32px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --glass-shadow-soft: 0 1px 4px rgba(0, 0, 0, 0.12), 0 4px 14px rgba(0, 0, 0, 0.08);
   --glass-overlay: rgba(3, 4, 6, 0.52);
   --glass-page-bg: radial-gradient(circle at top right, rgba(255, 132, 0, 0.12), transparent 18%), radial-gradient(circle at left 28%, rgba(255, 176, 102, 0.08), transparent 16%), linear-gradient(145deg, #090b0e 0%, #0d1014 48%, #12161c 100%);
   --glass-elevated-border: rgba(255, 255, 255, 0.08);
@@ -231,13 +231,9 @@ html {
   }
 
   .selection-card-active {
-    border: 1px solid rgba(255, 132, 0, 0.34);
-    background:
-      linear-gradient(180deg, rgba(255, 132, 0, 0.14), rgba(255, 255, 255, 0.82)),
-      rgba(255, 255, 255, 0.92);
-    box-shadow:
-      0 18px 34px rgba(255, 132, 0, 0.14),
-      inset 0 1px 0 rgba(255, 255, 255, 0.88);
+    border: 1px solid rgba(255, 132, 0, 0.25);
+    background: rgba(255, 132, 0, 0.06);
+    box-shadow: 0 1px 3px rgba(255, 132, 0, 0.06), 0 3px 10px rgba(255, 132, 0, 0.04);
     color: var(--color-foreground);
   }
 
@@ -300,12 +296,8 @@ html {
 
   :root[data-theme='dark'] .selection-card-active {
     border-color: rgba(255, 132, 0, 0.58);
-    background:
-      linear-gradient(180deg, rgba(255, 132, 0, 0.18), rgba(255, 132, 0, 0.08)),
-      rgba(29, 31, 36, 0.96);
-    box-shadow:
-      0 18px 36px rgba(0, 0, 0, 0.34),
-      0 0 0 1px rgba(255, 132, 0, 0.12) inset;
+    background: rgba(255, 132, 0, 0.1);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12), 0 3px 10px rgba(0, 0, 0, 0.08);
     color: var(--color-foreground);
   }
 
