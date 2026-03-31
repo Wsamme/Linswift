@@ -365,7 +365,7 @@ function normalizeWordDetailLookup(word: string) {
 }
 
 function isFastEnglishWordLookup(word: string) {
-  return /^[a-z][a-z'-]*$/i.test(String(word || '').trim())
+  return /^[a-z][a-z' -]*$/i.test(String(word || '').trim())
 }
 
 function buildWordLookupCandidates(word: string) {
@@ -377,6 +377,14 @@ function buildWordLookupCandidates(word: string) {
   }
 
   push(normalized)
+
+  // For multi-word phrases, also try individual words (longest first)
+  if (normalized.includes(' ')) {
+    const parts = normalized.split(/\s+/).filter(Boolean)
+    for (let i = parts.length - 1; i >= 0; i--) {
+      push(parts[i])
+    }
+  }
 
   if (normalized.endsWith('ies') && normalized.length > 4) push(`${normalized.slice(0, -3)}y`)
   if (normalized.endsWith('es') && normalized.length > 4) push(normalized.slice(0, -2))
