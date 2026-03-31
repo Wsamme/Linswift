@@ -15,6 +15,7 @@ import { getVocabSetLearnSettings } from '../lib/vocabSetLearnSettings'
 import { buildTodayStudyQueue } from '../lib/vocabStudyQueue'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import MobileFlashcardThreeDeck from '../components/flashcard/MobileFlashcardThreeDeck'
+import { playFlipSound, playCorrectSound, playWrongSound, playVagueSound, playDragSound, playCompleteSound, isGameSfxEnabled, setGameSfxEnabled, GAME_SFX_KEY } from '../lib/gameSfx'
 
 /**
  * 卡片学习页 —— 阅读器模块
@@ -58,6 +59,7 @@ export default function FlashcardPage() {
   const [setCards, setSetCards] = useState<StudyCard[] | null>(null)
   const [setStudyRows, setSetStudyRows] = useState<UserVocabulary[]>([])
   const [loadingSetCards, setLoadingSetCards] = useState(false)
+  const [gameSfxOn, setGameSfxOn] = useState(isGameSfxEnabled)
   const [mnemonicMap, setMnemonicMap] = useState<Record<string, string>>({})
   const [mnemonicLoadingMap, setMnemonicLoadingMap] = useState<Record<string, boolean>>({})
   const pendingReviewsRef = useRef<Array<{ vocabularyId: number; result: 'known' | 'fuzzy' | 'unknown'; reviewType: string }>>([])
@@ -310,6 +312,7 @@ export default function FlashcardPage() {
 
   useEffect(() => {
     if (isFinished) {
+      playCompleteSound()
       flushPendingReviews().catch(() => {})
     }
   }, [isFinished, flushPendingReviews])
@@ -326,10 +329,16 @@ export default function FlashcardPage() {
   }, [flushPendingReviews, goBack])
 
   // ===== 翻转卡片 =====
-  const handleFlip = () => setIsFlipped(!isFlipped)
+  const handleFlip = () => {
+    playFlipSound()
+    setIsFlipped(!isFlipped)
+  }
 
   // ===== 处理用户选择（会/模糊/不会）=====
   const handleChoice = async (choice: 'know' | 'vague' | 'unknown') => {
+    if (choice === 'know') playCorrectSound()
+    else if (choice === 'vague') playVagueSound()
+    else playWrongSound()
     setResults(prev => [...prev, choice])
     setIsFlipped(false)
     // 异步写入数据库（不阻塞 UI）
@@ -397,6 +406,19 @@ export default function FlashcardPage() {
         </button>
         <h1 className="text-[18px] font-bold text-[var(--color-foreground)] font-secondary">词汇学习</h1>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              const next = !gameSfxOn
+              setGameSfxOn(next)
+              setGameSfxEnabled(next)
+            }}
+            className={`p-1.5 rounded-full ${gameSfxOn ? 'bg-[var(--color-primary-light)]' : 'bg-[var(--color-background-secondary)]'}`}
+            title={gameSfxOn ? '游戏音效已开启' : '游戏音效已关闭'}
+          >
+            {gameSfxOn
+              ? <Volume2 size={16} className="text-[var(--color-primary)]" />
+              : <VolumeX size={16} className="text-[var(--color-muted)]" />}
+          </button>
           <button
             onClick={() => setAutoPlayAudio((v) => !v)}
             className={`p-1.5 rounded-full ${autoPlayAudio ? 'bg-[var(--color-primary-light)]' : 'bg-[var(--color-background-secondary)]'}`}
@@ -551,8 +573,8 @@ export default function FlashcardPage() {
                 mnemonic={currentMnemonic}
                 mnemonicLoading={mnemonicLoading}
                 onFlip={handleFlip}
-                onSwipeKnow={() => void handleChoice('know')}
-                onSwipeUnknown={() => void handleChoice('unknown')}
+                onSwipeKnow={() => { playDragSound('right'); playCorrectSound(); void handleChoice('know') }}
+                onSwipeUnknown={() => { playDragSound('left'); playWrongSound(); void handleChoice('unknown') }}
               />
               {currentCard && (
                 <div className="mt-3 flex items-center justify-center">
