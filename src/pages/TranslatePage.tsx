@@ -21,13 +21,8 @@ import DesktopScreenshotTranslator from '../components/translate/DesktopScreensh
 
 const LANGUAGE_OPTIONS = [
   { value: '简体中文', code: 'zh-CN', shortLabel: '简中' },
-  { value: '繁體中文', code: 'zh-TW', shortLabel: '繁中' },
   { value: 'English', code: 'en', shortLabel: 'English' },
   { value: '日本語', code: 'ja', shortLabel: '日本語' },
-  { value: '한국어', code: 'ko', shortLabel: '한국어' },
-  { value: 'Français', code: 'fr', shortLabel: 'Français' },
-  { value: 'Deutsch', code: 'de', shortLabel: 'Deutsch' },
-  { value: 'Español', code: 'es', shortLabel: 'Español' },
 ] as const
 
 const TRANSLATION_MODE_OPTIONS: Array<{
@@ -89,48 +84,29 @@ const LANG_FROM_CODE_MAP = Object.fromEntries(
   LANGUAGE_OPTIONS.map((option) => [option.code, option.value])
 ) as Record<AppTranslateLanguageCode, AppTranslateLanguage>
 
-const HANGUL_RE = /[\uac00-\ud7af]/g
 const KANA_RE = /[\u3040-\u30ff]/g
 const HAN_RE = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/g
 const LATIN_RE = /[A-Za-z]/g
-const TRADITIONAL_HINT_RE = /[體學讀說譯這個們龍網頁點擊設置愛裡麼還讓與聽寫畫書開關詞彙後會電腦]/g
-const SIMPLIFIED_HINT_RE = /[体学读说译这个们龙网页点击设置爱里么还让与听写画书开关词汇后会电脑]/g
-const FRENCH_MARK_RE = /[àâæçéèêëîïôœùûüÿ]/gi
-const GERMAN_MARK_RE = /[äöüß]/gi
-const SPANISH_MARK_RE = /[áéíóúñ¿¡]/gi
 
 const LATIN_LANGUAGE_HINTS: Array<{
   language: AppTranslateLanguage
   pattern: RegExp
   weight: number
 }> = [
-  { language: 'Français', pattern: /\b(le|la|les|un|une|des|du|de|et|est|avec|pour|dans|bonjour|merci|être)\b/gi, weight: 2 },
-  { language: 'Deutsch', pattern: /\b(der|die|das|und|ist|nicht|mit|für|ein|eine|hallo|danke|ich|sie)\b/gi, weight: 2 },
-  { language: 'Español', pattern: /\b(el|la|los|las|un|una|de|que|con|por|para|hola|gracias|está|como|cómo)\b/gi, weight: 2 },
   { language: 'English', pattern: /\b(the|and|is|are|with|for|this|that|hello|thanks|you)\b/gi, weight: 1 },
 ]
 
 const AUTO_TARGET_FALLBACK_MAP: Record<AppTranslateLanguage, AppTranslateLanguage> = {
   English: '简体中文',
   简体中文: 'English',
-  繁體中文: 'English',
   日本語: 'English',
-  한국어: 'English',
-  Français: 'English',
-  Deutsch: 'English',
-  Español: 'English',
 }
 
 function normalizeLanguageCode(languageCode: string) {
   const value = String(languageCode || '').trim().toLowerCase()
   if (!value) return 'en'
   if (value === 'zh' || value === 'zh-cn' || value === 'zh-hans') return 'zh-CN'
-  if (value === 'zh-tw' || value === 'zh-hk' || value === 'zh-hant') return 'zh-TW'
   if (value === 'ja' || value === 'ja-jp') return 'ja'
-  if (value === 'ko' || value === 'ko-kr') return 'ko'
-  if (value === 'fr' || value === 'fr-fr') return 'fr'
-  if (value === 'de' || value === 'de-de') return 'de'
-  if (value === 'es' || value === 'es-es') return 'es'
   if (value === 'en' || value.startsWith('en-')) return 'en'
   return languageCode
 }
@@ -158,14 +134,6 @@ function detectLatinLanguage(text: string): AppTranslateLanguage | null {
     scoreMap.set(language, (scoreMap.get(language) || 0) + score)
   }
 
-  const frenchMarkScore = countMatches(normalized, FRENCH_MARK_RE)
-  const germanMarkScore = countMatches(normalized, GERMAN_MARK_RE)
-  const spanishMarkScore = countMatches(normalized, SPANISH_MARK_RE)
-
-  if (frenchMarkScore > 0) addScore('Français', frenchMarkScore * 3)
-  if (germanMarkScore > 0) addScore('Deutsch', germanMarkScore * 3)
-  if (spanishMarkScore > 0) addScore('Español', spanishMarkScore * 3)
-
   LATIN_LANGUAGE_HINTS.forEach(({ language, pattern, weight }) => {
     const matched = countMatches(normalized, pattern)
     if (matched > 0) addScore(language, matched * weight)
@@ -183,18 +151,14 @@ function detectInputLanguage(text: string): AppTranslateLanguage | null {
   const normalized = normalizeWhitespace(text)
   if (!normalized) return null
 
-  const hangulCount = countMatches(normalized, HANGUL_RE)
   const kanaCount = countMatches(normalized, KANA_RE)
   const hanCount = countMatches(normalized, HAN_RE)
   const latinCount = countMatches(normalized, LATIN_RE)
 
-  if (hangulCount > 0 && hangulCount >= hanCount) return '한국어'
   if (kanaCount > 0) return '日本語'
 
   if (hanCount > 0 && hanCount >= latinCount) {
-    const traditionalHints = countMatches(normalized, TRADITIONAL_HINT_RE)
-    const simplifiedHints = countMatches(normalized, SIMPLIFIED_HINT_RE)
-    return traditionalHints > simplifiedHints ? '繁體中文' : '简体中文'
+    return '简体中文'
   }
 
   if (latinCount > 0) return detectLatinLanguage(normalized)
