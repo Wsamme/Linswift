@@ -10,6 +10,16 @@ export const ACCENT_LABELS: Record<AccentType, string> = {
   'en-AU': '澳式英语',
 }
 
+const ACCENT_LABELS_I18N: Record<string, Record<AccentType, string>> = {
+  'zh-CN': { 'en-US': '美式英语', 'en-GB': '英式英语', 'en-AU': '澳式英语' },
+  en: { 'en-US': 'American English', 'en-GB': 'British English', 'en-AU': 'Australian English' },
+  ja: { 'en-US': 'アメリカ英語', 'en-GB': 'イギリス英語', 'en-AU': 'オーストラリア英語' },
+}
+
+export function getAccentLabel(accent: AccentType, lang: string = 'zh-CN'): string {
+  return ACCENT_LABELS_I18N[lang]?.[accent] || ACCENT_LABELS[accent]
+}
+
 export const ACCENT_FLAGS: Record<AccentType, string> = {
   'en-US': '🇺🇸',
   'en-GB': '🇬🇧',

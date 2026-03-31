@@ -15,7 +15,7 @@ import { ChevronLeft, Play } from 'lucide-react'
 import { useTTSSettings } from '../hooks/useTTSSettings'
 import {
   type AccentType,
-  ACCENT_LABELS,
+  getAccentLabel,
   ACCENT_FLAGS,
   SPEED_OPTIONS,
 } from '../lib/tts'
@@ -73,7 +73,7 @@ export default function PronunciationSettingsPage() {
             >
               <div className="flex items-center gap-3">
                 <span className="text-[20px]">{ACCENT_FLAGS[accent]}</span>
-                <span className="text-[14px] font-medium text-[var(--color-foreground)]">{ACCENT_LABELS[accent]}</span>
+                <span className="text-[14px] font-medium text-[var(--color-foreground)]">{getAccentLabel(accent, lang)}</span>
               </div>
               <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
                 isActive ? 'border-[var(--color-primary)] bg-[var(--color-primary)]' : 'border-[var(--color-border-dark)]'
@@ -165,7 +165,7 @@ export default function PronunciationSettingsPage() {
             <div className="glass-card-elevated rounded-[28px] p-6">
               <p className="text-[13px] font-semibold uppercase tracking-[0.16em] text-[var(--color-muted)]">Current Voice</p>
               <div className="mt-4 space-y-3">
-                <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">{t(lang,'pron_accent_label')}{ACCENT_LABELS[settings.accent]}</div>
+                <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">{t(lang,'pron_accent_label')}{getAccentLabel(settings.accent, lang)}</div>
                 <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">
                   {t(lang,'pron_voice_source')}{preferredVoice ? `${preferredVoice.name} · ${preferredVoice.lang}` : t(lang,'pron_voice_loading')}
                 </div>
@@ -241,7 +241,7 @@ export default function PronunciationSettingsPage() {
                     <div className="flex items-center gap-3">
                       <span className="text-[20px]">{ACCENT_FLAGS[accent]}</span>
                       <span className={`text-[14px] font-medium ${isActive ? 'text-[var(--color-foreground)]' : 'text-[var(--color-foreground)]'}`}>
-                        {ACCENT_LABELS[accent]}
+                        {getAccentLabel(accent, lang)}
                       </span>
                     </div>
 

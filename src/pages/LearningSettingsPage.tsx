@@ -17,7 +17,7 @@ import {
 } from 'lucide-react'
 import { useTTSSettings } from '../hooks/useTTSSettings'
 import { useThemeSettings } from '../hooks/useThemeSettings'
-import { ACCENT_LABELS, ACCENT_FLAGS, SPEED_OPTIONS, type AccentType } from '../lib/tts'
+import { getAccentLabel, ACCENT_FLAGS, SPEED_OPTIONS, type AccentType } from '../lib/tts'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { useLogicalBack } from '../hooks/useLogicalBack'
@@ -51,12 +51,12 @@ const languageOptions = [
 ]
 
 const themeColorOptions = [
-  { color: '#FF8400', label: '活力橙' },
-  { color: '#3B82F6', label: '蔚蓝' },
-  { color: '#8B5CF6', label: '梦幻紫' },
-  { color: '#22C55E', label: '清新绿' },
-  { color: '#EF4444', label: '热情红' },
-  { color: '#EC4899', label: '甜蜜粉' },
+  { color: '#FF8400', labelKey: 'color_orange' as const },
+  { color: '#3B82F6', labelKey: 'color_blue' as const },
+  { color: '#8B5CF6', labelKey: 'color_purple' as const },
+  { color: '#22C55E', labelKey: 'color_green' as const },
+  { color: '#EF4444', labelKey: 'color_red' as const },
+  { color: '#EC4899', labelKey: 'color_pink' as const },
 ]
 
 export default function LearningSettingsPage() {
@@ -172,9 +172,10 @@ export default function LearningSettingsPage() {
     : themeSettings.mode === 'dark'
       ? t(lang,'theme_dark')
       : t(lang,'theme_light')
-  const currentThemeColorLabel = themeColorOptions.find(
-    (item) => item.color === themeSettings.primaryColor
-  )?.label || '活力橙'
+  const currentThemeColorLabel = (() => {
+    const found = themeColorOptions.find((item) => item.color === themeSettings.primaryColor)
+    return found ? t(lang, found.labelKey) : t(lang, 'color_orange')
+  })()
   const currentSpeedLabel = SPEED_OPTIONS.find((item) => item.value === ttsSettings.rate)?.label || '1.0x'
   const currentFontSize = themeSettings.fontSize
   const prefersDark = typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches
@@ -612,7 +613,7 @@ export default function LearningSettingsPage() {
                             backgroundColor: color.color,
                             boxShadow: themeSettings.primaryColor === color.color ? '0 0 0 4px #2c241f' : 'none',
                           }}
-                          title={color.label}
+                          title={t(lang, color.labelKey)}
                         />
                       ))}
                     </div>
@@ -640,7 +641,7 @@ export default function LearningSettingsPage() {
                 <div className={`${desktopInsetPanelClass} p-4`}>
                   <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[var(--color-muted)]">{t(lang,'lsettings_current_status')}</p>
                   <div className="mt-3 space-y-2 text-[13px] font-semibold text-[var(--color-foreground)]/82">
-                    <p>{t(lang,'pron_accent_label')}{ACCENT_LABELS[ttsSettings.accent]}</p>
+                    <p>{t(lang,'pron_accent_label')}{getAccentLabel(ttsSettings.accent, lang)}</p>
                     <p>{t(lang,'pron_speed_label')}{currentSpeedLabel}</p>
                     <p>{t(lang,'pron_volume_label')}{Math.round(ttsSettings.volume * 100)}%</p>
                   </div>
@@ -669,7 +670,7 @@ export default function LearningSettingsPage() {
                           }`}
                         >
                           <span className="text-[14px] font-semibold text-[var(--color-foreground)]">
-                            {ACCENT_FLAGS[accent]} {ACCENT_LABELS[accent]}
+                            {ACCENT_FLAGS[accent]} {getAccentLabel(accent, lang)}
                           </span>
                           <span className={`h-[22px] w-[22px] rounded-full border-[3px] ${active ? 'border-[var(--color-primary)] bg-[var(--color-primary)]' : isDarkResolved ? 'border-[#4a505a]' : 'border-[#cfc5bb]'}`} />
                         </button>
