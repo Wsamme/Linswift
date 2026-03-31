@@ -13,7 +13,7 @@
 import { ChevronLeft } from 'lucide-react'
 import { useThemeSettings } from '../hooks/useThemeSettings'
 import type { ThemeSettings } from '../lib/theme'
-import { t, getLanguageLabel, useAppLanguage } from '../lib/i18n'
+import { t, useAppLanguage } from '../lib/i18n'
 import { useLogicalBack } from '../hooks/useLogicalBack'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import SettingsDesktopShell from '../components/settings/SettingsDesktopShell'
