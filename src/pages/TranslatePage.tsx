@@ -1178,7 +1178,8 @@ export default function TranslatePage() {
         </div>
       )}
 
-      {translationResultCard}
+      {/* Hide translation result when dictionary result is available (single word lookup) */}
+      {!(dictionaryDetail || dictionaryLoading || dictionaryLookupQuery) && translationResultCard}
 
       {(dictionaryLookupQuery || dictionaryLoading || dictionaryDetail || dictionaryError) && (
         <div
@@ -1324,17 +1325,7 @@ export default function TranslatePage() {
                 </div>
               </div>
 
-              {isFallbackDictionary ? (
-                <div className="mt-4 rounded-[18px] border border-[var(--color-border)] bg-[var(--color-card)] p-4">
-                  <div className="flex items-center gap-2">
-                    <Sparkles size={15} className="text-[var(--color-primary)]" />
-                    <h3 className="text-[14px] font-semibold text-[var(--color-foreground)]">词典增强暂不可用</h3>
-                  </div>
-                  <p className="mt-2 text-[13px] leading-6 text-[var(--color-muted)]">
-                    当前先保留基础查词卡片；如果 AI 词典暂时失败，不再用大块占位内容打断翻译流程。你可以先看上方译文，稍后再重试词典增强。
-                  </p>
-                </div>
-              ) : (
+              {isFallbackDictionary ? null : (
               <div className="mt-4 lg:grid lg:grid-cols-[minmax(0,1fr)_280px] lg:gap-5">
                 <div className="min-w-0">
                   <div className="flex items-center gap-5 overflow-x-auto border-b border-[var(--color-border)] pb-px">

@@ -263,50 +263,40 @@ let loopTimer: ReturnType<typeof setTimeout> | null = null
 
 function speakWithRetry(createUtterance: () => SpeechSynthesisUtterance) {
   const synth = window.speechSynthesis
-  let started = false
-  let retryScheduled = true
+  warmUpSpeech()
 
   // Chrome bug: after cancel(), speak() may fail silently.
-  // Small delay after cancel gives the engine time to reset.
-  const doSpeak = () => {
+  // Always add a small delay after cancel before speaking.
+  const trySpeak = (attempt = 0) => {
     const utterance = createUtterance()
+    let started = false
 
-    utterance.onstart = () => {
-      started = true
-      retryScheduled = false
-    }
-
-    utterance.onend = () => {
-      retryScheduled = false
-    }
-
+    utterance.onstart = () => { started = true }
     utterance.onerror = (e) => {
-      retryScheduled = false
-      // Chrome sometimes fires 'interrupted' error on rapid cancel+speak — retry once
-      if (e.error === 'interrupted' && !started) {
+      // Retry once on 'interrupted' (Chrome race after cancel)
+      if (!started && attempt === 0 && e.error === 'interrupted') {
         setTimeout(() => {
           synth.cancel()
-          synth.speak(createUtterance())
-        }, 100)
+          trySpeak(1)
+        }, 80)
       }
     }
 
     synth.speak(utterance)
+
+    // Fallback: if nothing happened after 400ms, retry
+    if (attempt === 0) {
+      setTimeout(() => {
+        if (!started && !synth.speaking && !synth.pending) {
+          synth.cancel()
+          trySpeak(1)
+        }
+      }, 400)
+    }
   }
 
-  // If synth was just cancelled, give it a moment
-  if (!synth.speaking && !synth.pending) {
-    doSpeak()
-  } else {
-    setTimeout(doSpeak, 50)
-  }
-
-  // Fallback retry if nothing happened after 300ms
-  setTimeout(() => {
-    if (!retryScheduled || started || synth.speaking || synth.pending) return
-    synth.cancel()
-    setTimeout(() => synth.speak(createUtterance()), 50)
-  }, 300)
+  // Small delay after cancel to let Chrome reset
+  setTimeout(trySpeak, 30)
 }
 
 export function speakEnglish(text: string, overrideRate?: number) {
@@ -415,6 +405,23 @@ export function speakAuto(text: string) {
   }
 
   speakEnglish(safeText)
+}
+
+// Warm up speech synthesis on first user interaction (required by some browsers)
+let speechWarmedUp = false
+function warmUpSpeech() {
+  if (speechWarmedUp || !('speechSynthesis' in window)) return
+  speechWarmedUp = true
+  const u = new SpeechSynthesisUtterance('')
+  u.volume = 0
+  window.speechSynthesis.speak(u)
+  window.speechSynthesis.cancel()
+}
+
+if (typeof window !== 'undefined') {
+  const warmUp = () => { warmUpSpeech(); window.removeEventListener('click', warmUp); window.removeEventListener('touchstart', warmUp) }
+  window.addEventListener('click', warmUp, { once: true })
+  window.addEventListener('touchstart', warmUp, { once: true })
 }
 
 export function stopSpeaking() {
