@@ -1174,7 +1174,6 @@ export default function VocabPage() {
 
         <div className={`mb-4 flex gap-3 ${isDesktop ? 'items-center justify-between' : 'flex-col'}`}>
           <p className="text-[12px] leading-5 text-[var(--color-muted)]">
-            全局默认只负责未分组词汇和新词本默认起点；真正的学习节奏在添加该词本时单独确定。
           </p>
           <button
             onClick={handleOpenWordbookPlan}
@@ -1402,7 +1401,6 @@ export default function VocabPage() {
           </div>
 
           <div className="glass-card-elevated mt-4 rounded-[18px] px-3 py-3 text-[12px] leading-5 text-[var(--color-muted)]">
-            全局默认 {dailyNewWordGoal}/天 只用于未分组词汇和新词本默认起点；添加后这本词本会按你现在设定的节奏进入今日计划。
           </div>
         </div>
 
@@ -1445,8 +1443,7 @@ export default function VocabPage() {
                       <div className={`${glassElevated} rounded-[22px] px-4 py-3`}>
                         <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--color-muted)]">Filtered</p>
                         <p className="mt-2 text-[28px] font-bold text-[var(--color-foreground)]">{filteredList.length}</p>
-                        <p className="mt-1 text-[12px] text-[var(--color-muted)]">按当前筛选展示</p>
-                      </div>
+                        </div>
                       <div className={`${glassElevated} rounded-[22px] px-4 py-3`}>
                         <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--color-muted)]">Mode</p>
                         <p className="mt-2 text-[17px] font-semibold text-[var(--color-foreground)]">{activeFilterLabel}</p>
@@ -1460,12 +1457,10 @@ export default function VocabPage() {
                       <div className={`${glassElevated} rounded-[22px] px-4 py-3`}>
                         <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--color-muted)]">Sets</p>
                         <p className="mt-2 text-[28px] font-bold text-[var(--color-foreground)]">{customSets.length}</p>
-                        <p className="mt-1 text-[12px] text-[var(--color-muted)]">独立学习节奏</p>
                       </div>
                       <div className={`${glassElevated} rounded-[22px] px-4 py-3`}>
                         <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--color-muted)]">Market</p>
                         <p className="mt-2 text-[28px] font-bold text-[var(--color-foreground)]">{publicWordbooks.length}</p>
-                        <p className="mt-1 text-[12px] text-[var(--color-muted)]">可添加公共词本</p>
                       </div>
                     </>
                   )}
@@ -1539,11 +1534,7 @@ export default function VocabPage() {
                     ))}
                   </div>
                 </div>
-              ) : (
-                <div className={`${glassElevated} rounded-[24px] px-5 py-4 text-[13px] leading-6 text-[var(--color-muted)]`}>
-                  词本加入后不会再一次性把所有单词挤进"不会"。现在"不会"只按各学习集的每日新词节奏释放，并叠加当天到期复习。
-                </div>
-              )}
+              ) : null}
             </div>
           </section>
 
@@ -1607,7 +1598,6 @@ export default function VocabPage() {
                         </p>
                       </div>
                       <div className={`${glassSoft} rounded-full px-3 py-1.5 text-[12px] text-[var(--color-muted)]`}>
-                        {activeFilter === 'today' ? '不会按今日计划释放' : '实时同步收藏与掌握状态'}
                       </div>
                     </div>
 
@@ -1730,7 +1720,6 @@ export default function VocabPage() {
                           </div>
                           <p className="text-[18px] font-semibold text-[var(--color-foreground)]">选一个单词开始</p>
                           <p className="mt-2 text-[13px] leading-6 text-[var(--color-muted)]">
-                            这里固定展示音标、例句、助记和 AI 解释；左侧"不会"只显示按今日计划释放出来的词。
                           </p>
                         </div>
                         <div className="space-y-2 border-t border-[var(--color-border)] pt-4 text-[13px] text-[var(--color-muted)]">
@@ -1799,7 +1788,6 @@ export default function VocabPage() {
                   <div className="mb-4 flex items-center justify-between">
                     <div>
                       <h3 className="text-[18px] font-semibold text-[var(--color-foreground)]">自定义学习集</h3>
-                      <p className="mt-1 text-[12px] leading-5 text-[var(--color-muted)]">把词组织进自己的复习节奏，再决定每天释放多少新词。</p>
                     </div>
                     <div className="flex items-center gap-1">
                       <button
@@ -1859,7 +1847,6 @@ export default function VocabPage() {
                     >
                       <div>
                         <p className="text-[14px] font-semibold text-[var(--color-foreground)]">新增学习集</p>
-                        <p className="mt-1 text-[12px] text-[var(--color-muted)]">快速创建一个新的词汇文件夹</p>
                       </div>
                       <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--color-primary)] text-white shadow-[0_12px_28px_rgba(255,132,0,0.22)]">
                         <Plus size={18} />
@@ -1876,7 +1863,6 @@ export default function VocabPage() {
 
                     {!setPanelLoading && customSets.length === 0 && (
                       <div className={`${glassSoft} rounded-[22px] px-4 py-5 text-[13px] leading-6 text-[var(--color-muted)]`}>
-                        还没有自定义学习集。先建一个，再把一批新词拖进自己的复习轨道。
                       </div>
                     )}
 
@@ -1943,27 +1929,20 @@ export default function VocabPage() {
                   <div className="flex h-full flex-col">
                     <div className="mb-4">
                       <p className="text-[12px] uppercase tracking-[0.18em] text-[var(--color-muted)]">Study Flow</p>
-                      <h3 className="mt-1 text-[22px] font-semibold text-[var(--color-foreground)]">学习集决定今天出现哪些"不会"</h3>
-                      <p className="mt-2 text-[13px] leading-6 text-[var(--color-muted)]">
-                        词本加入后先归到学习集里，只有按每日新词节奏释放出来的词，才会出现在词库"不会"视图中；不会再一上来全部塞进去。
-                      </p>
                     </div>
 
                     <div className="grid gap-3 md:grid-cols-3">
                       <div className={`${glassSoft} rounded-[22px] px-4 py-3`}>
                         <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--color-muted)]">学习集</p>
                         <p className="mt-2 text-[24px] font-bold text-[var(--color-foreground)]">{customSets.length}</p>
-                        <p className="mt-1 text-[12px] text-[var(--color-muted)]">独立节奏管理</p>
                       </div>
                       <div className={`${glassSoft} rounded-[22px] px-4 py-3`}>
                         <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--color-muted)]">全局默认</p>
                         <p className="mt-2 text-[24px] font-bold text-[var(--color-foreground)]">{dailyNewWordGoal}</p>
-                        <p className="mt-1 text-[12px] text-[var(--color-muted)]">未分组词汇 / 新词本起点</p>
                       </div>
                       <div className={`${glassSoft} rounded-[22px] px-4 py-3`}>
                         <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--color-muted)]">复习周期</p>
                         <p className="mt-2 text-[24px] font-bold text-[var(--color-foreground)]">{reviewCycleDays}</p>
-                        <p className="mt-1 text-[12px] text-[var(--color-muted)]">天制滚动复习</p>
                       </div>
                     </div>
 
@@ -2011,14 +1990,12 @@ export default function VocabPage() {
                           )}
 
                           <p className="mt-4 text-[13px] leading-6 text-[var(--color-muted)]">
-                            这个学习集里的单词不会全部挤进词库默认视图；词库里的"不会"只显示按计划释放的新词与当天到期复习。
                           </p>
                         </>
                       ) : (
                         <div className="flex h-full min-h-[220px] flex-col justify-center">
                           <p className="text-[18px] font-semibold text-[var(--color-foreground)]">先选一个学习集</p>
                           <p className="mt-2 text-[13px] leading-6 text-[var(--color-muted)]">
-                            选中后就能查看节奏、调整每天新词数量，或者直接进入该学习集的闪卡流程。
                           </p>
                         </div>
                       )}
