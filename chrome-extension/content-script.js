@@ -681,16 +681,17 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       }
 
       .linswift-tooltip-save {
-        width: 44px;
-        height: 44px;
+        width: 28px;
+        height: 28px;
         padding: 0;
         border: 0;
         background: transparent;
         color: #a1978d;
-        font-size: 34px;
+        font-size: 20px;
         line-height: 1;
         cursor: pointer;
         align-self: center;
+        flex-shrink: 0;
       }
 
       .linswift-tooltip-save[data-active="true"] {
