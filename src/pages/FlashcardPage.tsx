@@ -15,7 +15,7 @@ import { getVocabSetLearnSettings } from '../lib/vocabSetLearnSettings'
 import { buildTodayStudyQueue } from '../lib/vocabStudyQueue'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import MobileFlashcardThreeDeck from '../components/flashcard/MobileFlashcardThreeDeck'
-import { playFlipSound, playCorrectSound, playWrongSound, playVagueSound, playDragSound, playCompleteSound, isGameSfxEnabled, setGameSfxEnabled, GAME_SFX_KEY } from '../lib/gameSfx'
+import { playFlipSound, playCorrectSound, playWrongSound, playVagueSound, playDragSound, playCompleteSound, isGameSfxEnabled, setGameSfxEnabled } from '../lib/gameSfx'
 
 /**
  * 卡片学习页 —— 阅读器模块
