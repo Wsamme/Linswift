@@ -846,21 +846,42 @@ export async function getFlashcardMnemonic(word: string, meaning?: string): Prom
   if (inflight) return inflight
 
   const task = (async () => {
-    const detail = await getWordDetail(trimmedWord)
-    const existingMnemonic = normalizeComparableText(detail.mnemonic)
+    // If we already have a meaning from the caller, skip the slow getWordDetail call
+    const hasMeaning = !!normalizeComparableText(meaning || '')
+    let detailMeaning = meaning || ''
+    let existingMnemonic = ''
+
+    if (!hasMeaning) {
+      // Only fetch word detail if caller didn't provide a meaning
+      try {
+        const detail = await Promise.race([
+          getWordDetail(trimmedWord),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+        ])
+        if (detail) {
+          detailMeaning = detail.meaning || ''
+          existingMnemonic = normalizeComparableText(detail.mnemonic)
+        }
+      } catch {
+        // Word detail failed — continue with fallback
+      }
+    }
+
     const looksLikePlaceholder = !existingMnemonic
       || existingMnemonic.includes('AI 服务暂时不可用')
       || existingMnemonic.includes('公共英语词典结果加速展示')
 
-    if (!looksLikePlaceholder) {
-      flashcardMnemonicCache.set(cacheKey, detail.mnemonic)
-      return detail.mnemonic
+    if (!looksLikePlaceholder && existingMnemonic) {
+      flashcardMnemonicCache.set(cacheKey, existingMnemonic)
+      return existingMnemonic
     }
 
-    const prompt = `你是一个擅长“词汇卡片记忆法”的英语老师。请为这个英文单词生成一段适合卡片学习场景的中文助记提示。
+    const resolvedMeaning = normalizeComparableText(meaning || detailMeaning || '暂无释义')
+
+    const prompt = `你是一个擅长”词汇卡片记忆法”的英语老师。请为这个英文单词生成一段适合卡片学习场景的中文助记提示。
 
 单词：${trimmedWord}
-参考释义：${normalizeComparableText(meaning || detail.meaning || '暂无释义')}
+参考释义：${resolvedMeaning}
 
 要求：
 1. 一定要生动、有画面感，像在脑海里放一个小短片
@@ -871,7 +892,7 @@ export async function getFlashcardMnemonic(word: string, meaning?: string): Prom
 
     const raw = await callMoonshot([{ role: 'user', content: prompt }], undefined, { timeoutMs: 8000 })
     const mnemonic = normalizeComparableText(raw || '')
-    const finalMnemonic = mnemonic || fallbackFlashcardMnemonic(trimmedWord, meaning || detail.meaning)
+    const finalMnemonic = mnemonic || fallbackFlashcardMnemonic(trimmedWord, meaning || detailMeaning)
     flashcardMnemonicCache.set(cacheKey, finalMnemonic)
     return finalMnemonic
   })()

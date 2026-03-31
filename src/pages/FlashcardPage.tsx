@@ -254,6 +254,11 @@ export default function FlashcardPage() {
     speakAuto(currentCard.word)
   }, [autoPlayAudio, isFinished, currentCard, currentIndex, isFlipped])
 
+  const mnemonicMapRef = useRef(mnemonicMap)
+  mnemonicMapRef.current = mnemonicMap
+  const mnemonicLoadingMapRef = useRef(mnemonicLoadingMap)
+  mnemonicLoadingMapRef.current = mnemonicLoadingMap
+
   useEffect(() => {
     if (!currentCard) return
 
@@ -262,7 +267,7 @@ export default function FlashcardPage() {
 
     preloadCards.forEach((item) => {
       const key = `${item.id}:${item.word}`
-      if (mnemonicMap[key] || mnemonicLoadingMap[key]) return
+      if (mnemonicMapRef.current[key] || mnemonicLoadingMapRef.current[key]) return
 
       setMnemonicLoadingMap((prev) => ({ ...prev, [key]: true }))
 
@@ -271,7 +276,11 @@ export default function FlashcardPage() {
           if (disposed) return
           setMnemonicMap((prev) => ({ ...prev, [key]: mnemonic }))
         })
-        .catch(() => {})
+        .catch(() => {
+          // On failure, set a fallback so user isn't stuck on loading
+          if (disposed) return
+          setMnemonicMap((prev) => ({ ...prev, [key]: '' }))
+        })
         .finally(() => {
           if (disposed) return
           setMnemonicLoadingMap((prev) => ({ ...prev, [key]: false }))
@@ -281,7 +290,8 @@ export default function FlashcardPage() {
     return () => {
       disposed = true
     }
-  }, [currentCard, currentIndex, finalCards, mnemonicLoadingMap, mnemonicMap])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentCard?.id, currentIndex])
 
   const flushPendingReviews = useCallback(async () => {
     if (flushedRef.current || bookId) return
