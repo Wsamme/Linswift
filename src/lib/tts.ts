@@ -265,38 +265,30 @@ function speakWithRetry(createUtterance: () => SpeechSynthesisUtterance) {
   const synth = window.speechSynthesis
   warmUpSpeech()
 
-  // Chrome bug: after cancel(), speak() may fail silently.
-  // Always add a small delay after cancel before speaking.
-  const trySpeak = (attempt = 0) => {
-    const utterance = createUtterance()
-    let started = false
+  const utterance = createUtterance()
+  let started = false
 
-    utterance.onstart = () => { started = true }
-    utterance.onerror = (e) => {
-      // Retry once on 'interrupted' (Chrome race after cancel)
-      if (!started && attempt === 0 && e.error === 'interrupted') {
-        setTimeout(() => {
-          synth.cancel()
-          trySpeak(1)
-        }, 80)
-      }
-    }
-
-    synth.speak(utterance)
-
-    // Fallback: if nothing happened after 400ms, retry
-    if (attempt === 0) {
+  utterance.onstart = () => { started = true }
+  utterance.onerror = (e) => {
+    // Retry once on 'interrupted' (Chrome race after cancel)
+    if (!started && e.error === 'interrupted') {
       setTimeout(() => {
-        if (!started && !synth.speaking && !synth.pending) {
-          synth.cancel()
-          trySpeak(1)
-        }
-      }, 400)
+        synth.cancel()
+        synth.speak(createUtterance())
+      }, 80)
     }
   }
 
-  // Small delay after cancel to let Chrome reset
-  setTimeout(trySpeak, 30)
+  // Speak IMMEDIATELY — no setTimeout, preserves user gesture for Safari/iOS
+  synth.speak(utterance)
+
+  // Fallback: if nothing happened after 400ms, retry
+  setTimeout(() => {
+    if (!started && !synth.speaking && !synth.pending) {
+      synth.cancel()
+      synth.speak(createUtterance())
+    }
+  }, 400)
 }
 
 export function speakEnglish(text: string, overrideRate?: number) {

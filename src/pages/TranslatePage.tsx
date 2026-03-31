@@ -14,7 +14,7 @@ import { useVocabulary } from '../hooks/useVocabulary'
 import { useTranslations } from '../hooks/useTranslations'
 import { useStudyRecords } from '../hooks/useStudyRecords'
 import { useMediaQuery } from '../hooks/useMediaQuery'
-import { findPreferredVoiceByLang, speakEnglish, speakChinese, speakJapanese } from '../lib/tts'
+import { findPreferredVoiceByLang, speakEnglish, speakChinese, speakJapanese, speakAuto } from '../lib/tts'
 import { normalizeLookupKey } from '../lib/text'
 import { hasLatinText, normalizeWhitespace, shouldShowPhonetic } from '../lib/text'
 import DesktopScreenshotTranslator from '../components/translate/DesktopScreenshotTranslator'
@@ -1136,7 +1136,7 @@ export default function TranslatePage() {
 
         <div className="flex items-center justify-between border-t border-[var(--color-border)] pt-2">
           <div className="flex items-center gap-3">
-            <button className="p-1.5" onClick={() => speakByLanguage(inputText, sourceLang)}>
+            <button className="p-1.5" onClick={() => speakAuto(inputText)}>
               <Volume2 size={18} className="text-[var(--color-muted)]" />
             </button>
             <button
