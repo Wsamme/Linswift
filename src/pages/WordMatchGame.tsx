@@ -16,7 +16,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { useLogicalBack } from '../hooks/useLogicalBack'
 import { navigateSafely } from '../lib/navigation'
-import { playClickSound, playCorrectSound, playWrongSound, playCompleteSound, playComboSound, isGameSfxEnabled, setGameSfxEnabled } from '../lib/gameSfx'
+import { playClickSound, playWrongSound, playCompleteSound, playComboSound, isGameSfxEnabled, setGameSfxEnabled } from '../lib/gameSfx'
 
 /**
  * 单词连连看游戏
