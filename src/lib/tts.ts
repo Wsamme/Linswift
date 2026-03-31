@@ -132,9 +132,29 @@ export function saveTTSSettings(settings: Partial<TTSSettings>): TTSSettings {
   return merged
 }
 
+// Pre-cache voices on load so speak() can be synchronous from user gesture
+let cachedVoices: SpeechSynthesisVoice[] = []
+
+function refreshVoiceCache() {
+  if (!('speechSynthesis' in window)) return
+  cachedVoices = window.speechSynthesis.getVoices()
+}
+
+// Eagerly load voices
+if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+  refreshVoiceCache()
+  window.speechSynthesis.addEventListener('voiceschanged', refreshVoiceCache)
+}
+
 export function getAvailableVoices(): SpeechSynthesisVoice[] {
   if (!('speechSynthesis' in window)) return []
-  return window.speechSynthesis.getVoices()
+  // Always try fresh first, fall back to cache
+  const fresh = window.speechSynthesis.getVoices()
+  if (fresh.length > 0) {
+    cachedVoices = fresh
+    return fresh
+  }
+  return cachedVoices
 }
 
 export function waitForVoices(): Promise<SpeechSynthesisVoice[]> {
@@ -245,30 +265,48 @@ function speakWithRetry(createUtterance: () => SpeechSynthesisUtterance) {
   const synth = window.speechSynthesis
   let started = false
   let retryScheduled = true
-  const first = createUtterance()
 
-  first.onstart = () => {
-    started = true
-    retryScheduled = false
+  // Chrome bug: after cancel(), speak() may fail silently.
+  // Small delay after cancel gives the engine time to reset.
+  const doSpeak = () => {
+    const utterance = createUtterance()
+
+    utterance.onstart = () => {
+      started = true
+      retryScheduled = false
+    }
+
+    utterance.onend = () => {
+      retryScheduled = false
+    }
+
+    utterance.onerror = (e) => {
+      retryScheduled = false
+      // Chrome sometimes fires 'interrupted' error on rapid cancel+speak — retry once
+      if (e.error === 'interrupted' && !started) {
+        setTimeout(() => {
+          synth.cancel()
+          synth.speak(createUtterance())
+        }, 100)
+      }
+    }
+
+    synth.speak(utterance)
   }
 
-  first.onend = () => {
-    retryScheduled = false
+  // If synth was just cancelled, give it a moment
+  if (!synth.speaking && !synth.pending) {
+    doSpeak()
+  } else {
+    setTimeout(doSpeak, 50)
   }
 
-  first.onerror = () => {
-    retryScheduled = false
-  }
-
-  synth.speak(first)
-
-  // 某些浏览器首次 speak 会静默且不触发 onstart，自动补一次。
-  // 但如果浏览器已经进入 speaking/pending，就不要再次补播，否则 Chrome 会听起来像重复播放。
+  // Fallback retry if nothing happened after 300ms
   setTimeout(() => {
     if (!retryScheduled || started || synth.speaking || synth.pending) return
     synth.cancel()
-    synth.speak(createUtterance())
-  }, 280)
+    setTimeout(() => synth.speak(createUtterance()), 50)
+  }, 300)
 }
 
 export function speakEnglish(text: string, overrideRate?: number) {
@@ -308,11 +346,9 @@ export function speakEnglish(text: string, overrideRate?: number) {
     speakWithRetry(createUtterance)
   }
 
-  if (getAvailableVoices().length === 0) {
-    void waitForVoices().then(speakNow)
-  } else {
-    speakNow()
-  }
+  // Always speak immediately — don't defer to .then() which breaks mobile user gesture
+  // If voices aren't loaded yet, speak without voice selection (browser default)
+  speakNow()
 }
 
 export function speakChinese(text: string, rate?: number) {
@@ -323,27 +359,19 @@ export function speakChinese(text: string, rate?: number) {
 
   stopSpeaking()
 
-  const speakNow = () => {
-    const settings = loadTTSSettings()
-    const createUtterance = () => {
-      const utterance = new SpeechSynthesisUtterance(safeText)
-      utterance.lang = 'zh-CN'
-      utterance.rate = rate ?? settings.rate
-      utterance.volume = settings.volume
-      utterance.pitch = 1
-      const voice = findChineseVoice()
-      if (voice) utterance.voice = voice
-      return utterance
-    }
-
-    speakWithRetry(createUtterance)
+  const settings = loadTTSSettings()
+  const createUtterance = () => {
+    const utterance = new SpeechSynthesisUtterance(safeText)
+    utterance.lang = 'zh-CN'
+    utterance.rate = rate ?? settings.rate
+    utterance.volume = settings.volume
+    utterance.pitch = 1
+    const voice = findChineseVoice()
+    if (voice) utterance.voice = voice
+    return utterance
   }
 
-  if (getAvailableVoices().length === 0) {
-    void waitForVoices().then(speakNow)
-  } else {
-    speakNow()
-  }
+  speakWithRetry(createUtterance)
 }
 
 export function speakJapanese(text: string, rate?: number) {
@@ -354,27 +382,19 @@ export function speakJapanese(text: string, rate?: number) {
 
   stopSpeaking()
 
-  const speakNow = () => {
-    const settings = loadTTSSettings()
-    const createUtterance = () => {
-      const utterance = new SpeechSynthesisUtterance(safeText)
-      utterance.lang = 'ja-JP'
-      utterance.rate = rate ?? settings.rate
-      utterance.volume = settings.volume
-      utterance.pitch = 1
-      const voice = findJapaneseVoice()
-      if (voice) utterance.voice = voice
-      return utterance
-    }
-
-    speakWithRetry(createUtterance)
+  const settings = loadTTSSettings()
+  const createUtterance = () => {
+    const utterance = new SpeechSynthesisUtterance(safeText)
+    utterance.lang = 'ja-JP'
+    utterance.rate = rate ?? settings.rate
+    utterance.volume = settings.volume
+    utterance.pitch = 1
+    const voice = findJapaneseVoice()
+    if (voice) utterance.voice = voice
+    return utterance
   }
 
-  if (getAvailableVoices().length === 0) {
-    void waitForVoices().then(speakNow)
-  } else {
-    speakNow()
-  }
+  speakWithRetry(createUtterance)
 }
 
 export function speakAuto(text: string) {
