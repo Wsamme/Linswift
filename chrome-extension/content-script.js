@@ -681,16 +681,17 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
       }
 
       .linswift-tooltip-save {
-        width: 44px;
-        height: 44px;
+        width: 28px;
+        height: 28px;
         padding: 0;
         border: 0;
         background: transparent;
         color: #a1978d;
-        font-size: 34px;
+        font-size: 20px;
         line-height: 1;
         cursor: pointer;
         align-self: center;
+        flex-shrink: 0;
       }
 
       .linswift-tooltip-save[data-active="true"] {
@@ -2952,7 +2953,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
   }
 
   function ensureYouTubePageBridgeInjected() {
-    if (!panelState.youtube.enabled) return false
+    if (!panelState.youtube.enabled && !isYouTubeWatchPage()) return false
     if (document.getElementById(YOUTUBE_PAGE_BRIDGE_ID)) return true
 
     const host = document.head || document.documentElement
@@ -3713,6 +3714,7 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
 
     if (
       panelState.youtube.transcriptStatus === 'idle' ||
+      panelState.youtube.transcriptStatus === 'error' ||
       (panelState.youtube.transcriptStatus === 'ready' &&
         panelState.youtube.transcriptCues.length === 0 &&
         panelState.youtube.videoId)
@@ -7209,8 +7211,30 @@ if (!window.__LINSWIFT_CONTENT_SCRIPT__) {
 
   window.addEventListener('message', handleYouTubePageBridgeMessage)
   ensureYouTubePolling()
+
+  // Early transcript prefetch: inject bridge and fetch captions immediately on YouTube
+  // watch pages, before the panel is opened. This ensures captions are ready when the
+  // user first interacts with the extension.
+  if (isYouTubeWatchPage()) {
+    syncYouTubePageState()
+    if (panelState.youtube.enabled && panelState.youtube.videoId) {
+      ensureYouTubePageBridgeInjected()
+      // Small delay to let the bridge script load and YouTube's player data settle
+      setTimeout(() => {
+        void ensureYouTubeTranscriptPrefetch()
+      }, 1500)
+    }
+  }
+
   window.addEventListener('yt-navigate-finish', () => {
     syncYouTubePageState()
+    // Also prefetch on SPA navigation to a new video
+    if (panelState.youtube.enabled && panelState.youtube.videoId) {
+      ensureYouTubePageBridgeInjected()
+      setTimeout(() => {
+        void ensureYouTubeTranscriptPrefetch()
+      }, 1200)
+    }
     renderSummary()
   })
 

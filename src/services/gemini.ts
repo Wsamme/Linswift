@@ -163,17 +163,33 @@ interface RawLongSentenceAnalysis {
  */
 async function callMoonshot(
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
-  systemPrompt?: string
+  systemPrompt?: string,
+  options?: { timeoutMs?: number },
 ): Promise<string | null> {
-  return callMoonshotClient({
-    messages,
-    systemPrompt,
-    model: MODEL,
-    temperature: 0.7,
-    apiKey: API_KEY,
-    apiBase: API_BASE,
-    logLabel: 'Moonshot API',
-  })
+  const timeoutMs = options?.timeoutMs ?? 15_000
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    return await callMoonshotClient({
+      messages,
+      systemPrompt,
+      model: MODEL,
+      temperature: 0.7,
+      apiKey: API_KEY,
+      apiBase: API_BASE,
+      logLabel: 'Moonshot API',
+      signal: controller.signal,
+    })
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      console.warn('Moonshot API call timed out after', timeoutMs, 'ms')
+      return null
+    }
+    throw err
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /**
@@ -349,7 +365,7 @@ function normalizeWordDetailLookup(word: string) {
 }
 
 function isFastEnglishWordLookup(word: string) {
-  return /^[a-z][a-z'-]*$/i.test(String(word || '').trim())
+  return /^[a-z][a-z' -]*$/i.test(String(word || '').trim())
 }
 
 function buildWordLookupCandidates(word: string) {
@@ -361,6 +377,14 @@ function buildWordLookupCandidates(word: string) {
   }
 
   push(normalized)
+
+  // For multi-word phrases, also try individual words (longest first)
+  if (normalized.includes(' ')) {
+    const parts = normalized.split(/\s+/).filter(Boolean)
+    for (let i = parts.length - 1; i >= 0; i--) {
+      push(parts[i])
+    }
+  }
 
   if (normalized.endsWith('ies') && normalized.length > 4) push(`${normalized.slice(0, -3)}y`)
   if (normalized.endsWith('es') && normalized.length > 4) push(normalized.slice(0, -2))
@@ -830,21 +854,42 @@ export async function getFlashcardMnemonic(word: string, meaning?: string): Prom
   if (inflight) return inflight
 
   const task = (async () => {
-    const detail = await getWordDetail(trimmedWord)
-    const existingMnemonic = normalizeComparableText(detail.mnemonic)
+    // If we already have a meaning from the caller, skip the slow getWordDetail call
+    const hasMeaning = !!normalizeComparableText(meaning || '')
+    let detailMeaning = meaning || ''
+    let existingMnemonic = ''
+
+    if (!hasMeaning) {
+      // Only fetch word detail if caller didn't provide a meaning
+      try {
+        const detail = await Promise.race([
+          getWordDetail(trimmedWord),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+        ])
+        if (detail) {
+          detailMeaning = detail.meaning || ''
+          existingMnemonic = normalizeComparableText(detail.mnemonic)
+        }
+      } catch {
+        // Word detail failed — continue with fallback
+      }
+    }
+
     const looksLikePlaceholder = !existingMnemonic
       || existingMnemonic.includes('AI 服务暂时不可用')
       || existingMnemonic.includes('公共英语词典结果加速展示')
 
-    if (!looksLikePlaceholder) {
-      flashcardMnemonicCache.set(cacheKey, detail.mnemonic)
-      return detail.mnemonic
+    if (!looksLikePlaceholder && existingMnemonic) {
+      flashcardMnemonicCache.set(cacheKey, existingMnemonic)
+      return existingMnemonic
     }
 
-    const prompt = `你是一个擅长“词汇卡片记忆法”的英语老师。请为这个英文单词生成一段适合卡片学习场景的中文助记提示。
+    const resolvedMeaning = normalizeComparableText(meaning || detailMeaning || '暂无释义')
+
+    const prompt = `你是一个擅长”词汇卡片记忆法”的英语老师。请为这个英文单词生成一段适合卡片学习场景的中文助记提示。
 
 单词：${trimmedWord}
-参考释义：${normalizeComparableText(meaning || detail.meaning || '暂无释义')}
+参考释义：${resolvedMeaning}
 
 要求：
 1. 一定要生动、有画面感，像在脑海里放一个小短片
@@ -853,9 +898,9 @@ export async function getFlashcardMnemonic(word: string, meaning?: string): Prom
 4. 长度控制在 80-140 字
 5. 直接输出中文正文，不要 markdown，不要标题`
 
-    const raw = await callMoonshot([{ role: 'user', content: prompt }])
+    const raw = await callMoonshot([{ role: 'user', content: prompt }], undefined, { timeoutMs: 8000 })
     const mnemonic = normalizeComparableText(raw || '')
-    const finalMnemonic = mnemonic || fallbackFlashcardMnemonic(trimmedWord, meaning || detail.meaning)
+    const finalMnemonic = mnemonic || fallbackFlashcardMnemonic(trimmedWord, meaning || detailMeaning)
     flashcardMnemonicCache.set(cacheKey, finalMnemonic)
     return finalMnemonic
   })()

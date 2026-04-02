@@ -1635,6 +1635,18 @@ export function buildOverlayRegions(
     .filter((line) => line.text.length > 0 && boxWidth(line.bbox) > 0 && boxHeight(line.bbox) > 0)
   const normalizedLines = [...baseLines]
 
+  // Detect if this looks like a dense table/grid layout
+  // (many short lines with similar heights clustered in a grid pattern)
+  const avgLineWidth = normalizedLines.length > 0
+    ? normalizedLines.reduce((sum, l) => sum + boxWidth(l.bbox), 0) / normalizedLines.length
+    : imageWidth
+  const avgLineHeight = normalizedLines.length > 0
+    ? normalizedLines.reduce((sum, l) => sum + boxHeight(l.bbox), 0) / normalizedLines.length
+    : 20
+  const isDenseLayout = normalizedLines.length > 30
+    && avgLineWidth < imageWidth * 0.4
+    && avgLineHeight < imageHeight * 0.03
+
   const columns: Array<{ index: number; bbox: OCRBBox; lines: OverlayLineBox[] }> = []
   const sortedForColumns = [...normalizedLines].sort((a, b) => a.bbox.x0 - b.bbox.x0 || a.bbox.y0 - b.bbox.y0)
   for (const line of sortedForColumns) {
@@ -1642,6 +1654,11 @@ export function buildOverlayRegions(
       const horizontalOverlap = overlapX(column.bbox, line.bbox)
       const minWidth = Math.max(1, Math.min(boxWidth(column.bbox), boxWidth(line.bbox)))
       const centerDistance = Math.abs(centerX(column.bbox) - centerX(line.bbox))
+      if (isDenseLayout) {
+        // Strict mode for tables: require strong horizontal overlap
+        return horizontalOverlap / minWidth >= 0.45
+          || centerDistance <= Math.max(boxWidth(column.bbox), boxWidth(line.bbox)) * 0.2
+      }
       return horizontalOverlap / minWidth >= 0.16
         || centerDistance <= Math.max(48, Math.min(imageWidth * 0.1, Math.max(boxWidth(column.bbox), boxWidth(line.bbox)) * 0.42))
     })
@@ -1680,6 +1697,11 @@ export function buildOverlayRegions(
         const overlapBottom = Math.min(row.bbox.y1, line.bbox.y1)
         const overlap = Math.max(0, overlapBottom - overlapTop)
         const minHeight = Math.max(1, Math.min(boxHeight(row.bbox), boxHeight(line.bbox)))
+        if (isDenseLayout) {
+          // Strict: only merge lines that genuinely overlap vertically
+          return overlap / minHeight >= 0.5
+            || Math.abs(centerY(row.bbox) - centerY(line.bbox)) <= Math.max(boxHeight(row.bbox), boxHeight(line.bbox)) * 0.25
+        }
         return overlap / minHeight >= 0.24
           || Math.abs(centerY(row.bbox) - centerY(line.bbox)) <= Math.max(boxHeight(row.bbox), boxHeight(line.bbox)) * 0.55
       })
@@ -1740,11 +1762,15 @@ export function buildOverlayRegions(
           }
 
           const gap = word.bbox.x0 - previous.bbox.x1
-          const mergeGap = Math.min(8, Math.max(boxHeight(previous.bbox), boxHeight(word.bbox)) * 0.35)
+          const maxWordH = Math.max(boxHeight(previous.bbox), boxHeight(word.bbox))
+          const mergeGap = isDenseLayout
+            ? Math.min(4, maxWordH * 0.15)
+            : Math.min(8, maxWordH * 0.35)
           const verticalOverlap = overlapY(previous.bbox, word.bbox)
           const minHeight = Math.max(1, Math.min(boxHeight(previous.bbox), boxHeight(word.bbox)))
+          const overlapThreshold = isDenseLayout ? 0.7 : 0.58
 
-          if (gap <= mergeGap && verticalOverlap / minHeight >= 0.58) {
+          if (gap <= mergeGap && verticalOverlap / minHeight >= overlapThreshold) {
             previous.text = `${previous.text}${gap > 1 ? ' ' : ''}${word.text}`.trim()
             previous.bbox = clampBBox(mergeBBoxes([previous.bbox, word.bbox]), imageWidth, imageHeight)
             previous.confidence = (previous.confidence + word.confidence) / 2
@@ -1880,12 +1906,16 @@ export function buildOverlayRegions(
           || anchorDelta <= Math.max(72, averageWidth * 0.38)
         const groupHeight = region.bbox.y1 - currentGroup[0].bbox.y0
         const currentTextLength = currentGroup.reduce((sum, item) => sum + getTextLength(item.text), 0)
-        const canMerge = currentGroup.length < 6
-          && currentTextLength <= 360
+        const maxGroupSize = isDenseLayout ? 3 : 6
+        const maxGroupChars = isDenseLayout ? 120 : 360
+        const maxGapFactor = isDenseLayout ? 0.5 : 1.12
+        const maxGroupHeightFactor = isDenseLayout ? 3.0 : 6.4
+        const canMerge = currentGroup.length < maxGroupSize
+          && currentTextLength <= maxGroupChars
           && verticalGap >= -Math.max(6, averageHeight * 0.28)
-          && verticalGap <= Math.max(26, averageHeight * 1.12)
+          && verticalGap <= Math.max(isDenseLayout ? 8 : 26, averageHeight * maxGapFactor)
           && similarColumn
-          && groupHeight <= Math.max(260, averageHeight * 6.4)
+          && groupHeight <= Math.max(isDenseLayout ? 80 : 260, averageHeight * maxGroupHeightFactor)
 
         if (canMerge) {
           currentGroup.push(region)

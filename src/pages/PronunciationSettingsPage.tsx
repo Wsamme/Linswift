@@ -15,18 +15,20 @@ import { ChevronLeft, Play } from 'lucide-react'
 import { useTTSSettings } from '../hooks/useTTSSettings'
 import {
   type AccentType,
-  ACCENT_LABELS,
+  getAccentLabel,
   ACCENT_FLAGS,
   SPEED_OPTIONS,
 } from '../lib/tts'
 import { useLogicalBack } from '../hooks/useLogicalBack'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import SettingsDesktopShell from '../components/settings/SettingsDesktopShell'
+import { t, useAppLanguage } from '../lib/i18n'
 
 // 所有可选的口音
 const accentOptions: AccentType[] = ['en-US', 'en-GB', 'en-AU']
 
 export default function PronunciationSettingsPage() {
+  const lang = useAppLanguage()
   const goBack = useLogicalBack('/learning-settings')
   const isDesktop = useMediaQuery('(min-width: 768px)')
   const {
@@ -45,14 +47,14 @@ export default function PronunciationSettingsPage() {
       className={`flex items-center gap-1.5 rounded-full bg-[var(--color-primary)] text-white active:scale-95 transition-transform ${isDesktop ? 'px-5 py-3 shadow-[0_16px_34px_rgba(255,132,0,0.24)]' : 'ml-auto px-3 py-1.5'}`}
     >
       <Play size={14} className="fill-white" />
-      <span className={`${isDesktop ? 'text-[14px]' : 'text-[13px]'} font-medium`}>试听</span>
+      <span className={`${isDesktop ? 'text-[14px]' : 'text-[13px]'} font-medium`}>{t(lang,'pron_listen')}</span>
     </button>
   )
 
   const accentCard = (
     <div className={`${isDesktop ? 'glass-card-strong rounded-[30px] p-6' : 'bg-[var(--color-card)] rounded-[var(--radius-lg)] p-5'} space-y-3`} style={isDesktop ? undefined : { boxShadow: 'var(--shadow-card)' }}>
-      <h2 className={`${isDesktop ? 'text-[20px]' : 'text-[16px]'} font-semibold text-[var(--color-foreground)]`}>发音类型</h2>
-      <p className="text-[12px] text-[var(--color-muted-light)]">选择你偏好的英语发音口音</p>
+      <h2 className={`${isDesktop ? 'text-[20px]' : 'text-[16px]'} font-semibold text-[var(--color-foreground)]`}>{t(lang,'pron_accent')}</h2>
+      <p className="text-[12px] text-[var(--color-muted-light)]">{t(lang,'pron_accent_desc')}</p>
       <div className="space-y-2.5">
         {accentOptions.map(accent => {
           const isActive = settings.accent === accent
@@ -71,7 +73,7 @@ export default function PronunciationSettingsPage() {
             >
               <div className="flex items-center gap-3">
                 <span className="text-[20px]">{ACCENT_FLAGS[accent]}</span>
-                <span className="text-[14px] font-medium text-[var(--color-foreground)]">{ACCENT_LABELS[accent]}</span>
+                <span className="text-[14px] font-medium text-[var(--color-foreground)]">{getAccentLabel(accent, lang)}</span>
               </div>
               <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
                 isActive ? 'border-[var(--color-primary)] bg-[var(--color-primary)]' : 'border-[var(--color-border-dark)]'
@@ -87,8 +89,8 @@ export default function PronunciationSettingsPage() {
 
   const speedCard = (
     <div className={`${isDesktop ? 'glass-card-strong rounded-[30px] p-6' : 'bg-[var(--color-card)] rounded-[var(--radius-lg)] p-5'} space-y-3`} style={isDesktop ? undefined : { boxShadow: 'var(--shadow-card)' }}>
-      <h2 className={`${isDesktop ? 'text-[20px]' : 'text-[16px]'} font-semibold text-[var(--color-foreground)]`}>朗读速度</h2>
-      <p className="text-[12px] text-[var(--color-muted-light)]">调节单词和例句的朗读语速</p>
+      <h2 className={`${isDesktop ? 'text-[20px]' : 'text-[16px]'} font-semibold text-[var(--color-foreground)]`}>{t(lang,'pron_speed')}</h2>
+      <p className="text-[12px] text-[var(--color-muted-light)]">{t(lang,'pron_speed_desc')}</p>
       <div className="grid grid-cols-4 gap-2">
         {SPEED_OPTIONS.map(opt => {
           const isActive = settings.rate === opt.value
@@ -115,15 +117,15 @@ export default function PronunciationSettingsPage() {
 
   const toggleCard = (
     <div className={`${isDesktop ? 'glass-card-strong rounded-[30px] overflow-hidden' : 'bg-[var(--color-card)] rounded-[var(--radius-lg)] overflow-hidden'}`} style={isDesktop ? undefined : { boxShadow: 'var(--shadow-card)' }}>
-      <ToggleRow label="🔊 自动播放发音" desc="翻页时自动朗读单词" value={settings.autoPlay} onChange={() => toggleSetting('autoPlay')} desktop={isDesktop} />
+      <ToggleRow label={`🔊 ${t(lang,'pron_auto_play')}`} desc={t(lang,'pron_auto_desc')} value={settings.autoPlay} onChange={() => toggleSetting('autoPlay')} desktop={isDesktop} />
       <div className="h-px bg-[var(--color-border)] mx-4" />
-      <ToggleRow label="💬 例句发音" desc="学习时朗读例句" value={settings.sentencePronounce} onChange={() => toggleSetting('sentencePronounce')} desktop={isDesktop} />
+      <ToggleRow label={`💬 ${t(lang,'pron_sentence')}`} desc={t(lang,'pron_sentence_desc')} value={settings.sentencePronounce} onChange={() => toggleSetting('sentencePronounce')} desktop={isDesktop} />
     </div>
   )
 
   const volumeCard = (
     <div className={`${isDesktop ? 'glass-card-strong rounded-[30px] p-6' : 'bg-[var(--color-card)] rounded-[var(--radius-lg)] p-5'} space-y-3`} style={isDesktop ? undefined : { boxShadow: 'var(--shadow-card)' }}>
-      <h2 className={`${isDesktop ? 'text-[20px]' : 'text-[16px]'} font-semibold text-[var(--color-foreground)]`}>音量调节</h2>
+      <h2 className={`${isDesktop ? 'text-[20px]' : 'text-[16px]'} font-semibold text-[var(--color-foreground)]`}>{t(lang,'pron_volume')}</h2>
       <div className="flex items-center gap-3">
         <span className="text-[16px]">🔈</span>
         <input
@@ -152,27 +154,27 @@ export default function PronunciationSettingsPage() {
   if (isDesktop) {
     return (
       <SettingsDesktopShell
-        title="发音设置"
-        description="把口音、语速、开关和音量拆成桌面控制台，试听按钮始终停在右上角。"
+        title={t(lang,'pron_title')}
+        description={t(lang,'pron_desktop_desc')}
         onBack={goBack}
         sideTitle="Voice Preview"
-        sideDescription="切换口音或语速后会自动试听，你也可以手动再次播放，快速比较不同朗读方案。"
+        sideDescription={t(lang,'pron_side_desc')}
         actions={previewButton}
         sideContent={
           <div className="space-y-6">
             <div className="glass-card-elevated rounded-[28px] p-6">
               <p className="text-[13px] font-semibold uppercase tracking-[0.16em] text-[var(--color-muted)]">Current Voice</p>
               <div className="mt-4 space-y-3">
-                <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">口音：{ACCENT_LABELS[settings.accent]}</div>
+                <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">{t(lang,'pron_accent_label')}{getAccentLabel(settings.accent, lang)}</div>
                 <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">
-                  音源：{preferredVoice ? `${preferredVoice.name} · ${preferredVoice.lang}` : '等待系统语音加载'}
+                  {t(lang,'pron_voice_source')}{preferredVoice ? `${preferredVoice.name} · ${preferredVoice.lang}` : t(lang,'pron_voice_loading')}
                 </div>
-                <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">语速：{SPEED_OPTIONS.find((item) => item.value === settings.rate)?.label}</div>
-                <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">音量：{Math.round(settings.volume * 100)}%</div>
+                <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">{t(lang,'pron_speed_label')}{SPEED_OPTIONS.find((item) => item.value === settings.rate)?.label}</div>
+                <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">{t(lang,'pron_volume_label')}{Math.round(settings.volume * 100)}%</div>
               </div>
             </div>
             <div className="glass-card-elevated rounded-[28px] p-6 text-[14px] leading-6 text-[var(--color-foreground)]/78">
-              使用 HTML5 SpeechSynthesis API，本地朗读，无需额外网络请求。
+              {t(lang,'pron_html5_note')}
             </div>
           </div>
         }
@@ -203,7 +205,7 @@ export default function PronunciationSettingsPage() {
             <ChevronLeft size={20} className="text-[var(--color-foreground)]" />
           </button>
           <h1 className="text-[18px] font-bold text-[var(--color-foreground)] font-secondary">
-            发音设置
+            {t(lang,'pron_title')}
           </h1>
 
           {/* 试听按钮（右侧） */}
@@ -215,8 +217,8 @@ export default function PronunciationSettingsPage() {
 
           {/* ----- 口音选择 ----- */}
           <div className="bg-[var(--color-card)] rounded-[var(--radius-lg)] p-5 space-y-3" style={{ boxShadow: 'var(--shadow-card)' }}>
-            <h2 className="text-[16px] font-semibold text-[var(--color-foreground)]">发音类型</h2>
-            <p className="text-[12px] text-[var(--color-muted-light)]">选择你偏好的英语发音口音</p>
+            <h2 className="text-[16px] font-semibold text-[var(--color-foreground)]">{t(lang,'pron_accent')}</h2>
+            <p className="text-[12px] text-[var(--color-muted-light)]">{t(lang,'pron_accent_desc')}</p>
 
             <div className="space-y-2.5">
               {accentOptions.map(accent => {
@@ -239,7 +241,7 @@ export default function PronunciationSettingsPage() {
                     <div className="flex items-center gap-3">
                       <span className="text-[20px]">{ACCENT_FLAGS[accent]}</span>
                       <span className={`text-[14px] font-medium ${isActive ? 'text-[var(--color-foreground)]' : 'text-[var(--color-foreground)]'}`}>
-                        {ACCENT_LABELS[accent]}
+                        {getAccentLabel(accent, lang)}
                       </span>
                     </div>
 
@@ -257,8 +259,8 @@ export default function PronunciationSettingsPage() {
 
           {/* ----- 朗读速度 ----- */}
           <div className="bg-[var(--color-card)] rounded-[var(--radius-lg)] p-5 space-y-3" style={{ boxShadow: 'var(--shadow-card)' }}>
-            <h2 className="text-[16px] font-semibold text-[var(--color-foreground)]">朗读速度</h2>
-            <p className="text-[12px] text-[var(--color-muted-light)]">调节单词和例句的朗读语速</p>
+            <h2 className="text-[16px] font-semibold text-[var(--color-foreground)]">{t(lang,'pron_speed')}</h2>
+            <p className="text-[12px] text-[var(--color-muted-light)]">{t(lang,'pron_speed_desc')}</p>
 
             <div className="flex gap-2">
               {SPEED_OPTIONS.map(opt => {
@@ -287,15 +289,15 @@ export default function PronunciationSettingsPage() {
           {/* ----- 功能开关 ----- */}
           <div className="bg-[var(--color-card)] rounded-[var(--radius-lg)] overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
             <ToggleRow
-              label="🔊 自动播放发音"
-              desc="翻页时自动朗读单词"
+              label={`🔊 ${t(lang,'pron_auto_play')}`}
+              desc={t(lang,'pron_auto_desc')}
               value={settings.autoPlay}
               onChange={() => toggleSetting('autoPlay')}
             />
             <div className="h-px bg-[var(--color-border)] mx-4" />
             <ToggleRow
-              label="💬 例句发音"
-              desc="学习时朗读例句"
+              label={`💬 ${t(lang,'pron_sentence')}`}
+              desc={t(lang,'pron_sentence_desc')}
               value={settings.sentencePronounce}
               onChange={() => toggleSetting('sentencePronounce')}
             />
@@ -303,7 +305,7 @@ export default function PronunciationSettingsPage() {
 
           {/* ----- 音量调节 ----- */}
           <div className="bg-[var(--color-card)] rounded-[var(--radius-lg)] p-5 space-y-3" style={{ boxShadow: 'var(--shadow-card)' }}>
-            <h2 className="text-[16px] font-semibold text-[var(--color-foreground)]">音量调节</h2>
+            <h2 className="text-[16px] font-semibold text-[var(--color-foreground)]">{t(lang,'pron_volume')}</h2>
             <div className="flex items-center gap-3">
               <span className="text-[16px]">🔈</span>
               {/* HTML5 range 滑块 */}
@@ -333,7 +335,7 @@ export default function PronunciationSettingsPage() {
           {/* ----- 技术说明（小提示） ----- */}
           <div className="text-center py-2">
             <p className="text-[11px] text-[var(--color-muted-light)]">
-              使用 HTML5 SpeechSynthesis API · 无需联网 · 零费用
+              {t(lang,'pron_html5_footer')}
             </p>
           </div>
         </div>

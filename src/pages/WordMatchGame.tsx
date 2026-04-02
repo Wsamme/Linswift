@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  ChevronLeft, RotateCcw, Trophy, Clock, Zap,
+  ChevronLeft, RotateCcw, Trophy, Clock, Zap, Volume2, VolumeX,
 } from 'lucide-react'
 import { useVocabulary } from '../hooks/useVocabulary'
 import {
@@ -16,6 +16,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { useLogicalBack } from '../hooks/useLogicalBack'
 import { navigateSafely } from '../lib/navigation'
+import { playClickSound, playWrongSound, playCompleteSound, playComboSound, isGameSfxEnabled, setGameSfxEnabled } from '../lib/gameSfx'
 
 /**
  * 单词连连看游戏
@@ -48,6 +49,8 @@ export default function WordMatchGame() {
   const goBack = useLogicalBack('/vocab-game')
   const { user } = useAuth()
   const { vocabulary, fetchVocabulary, loading: vocabLoading } = useVocabulary()
+
+  const [gameSfxOn, setGameSfxOn] = useState(isGameSfxEnabled)
 
   // ===== 游戏状态 =====
   const [status, setStatus] = useState<'loading' | 'playing' | 'finished' | 'empty'>('loading')
@@ -176,6 +179,7 @@ export default function WordMatchGame() {
     if (left.pairId === right.pairId) {
       // ✅ 配对成功
       const newCombo = combo + 1
+      playComboSound(newCombo)
       const points = calcCorrectScore(newCombo)
       setScore(prev => prev + points)
       setCombo(newCombo)
@@ -185,6 +189,7 @@ export default function WordMatchGame() {
         // 全部配对完成 → 结算
         if (next >= totalPairs) {
           if (timerRef.current) clearInterval(timerRef.current)
+          playCompleteSound()
           setTimeout(() => setStatus('finished'), 500)
         }
         return next
@@ -195,6 +200,7 @@ export default function WordMatchGame() {
       setRightCards(prev => prev.map(c => c.id === rightId ? { ...c, matched: true } : c))
     } else {
       // ❌ 配对失败
+      playWrongSound()
       setScore(prev => Math.max(0, prev + calcWrongPenalty()))
       setCombo(0)
 
@@ -226,12 +232,14 @@ export default function WordMatchGame() {
   // ===== 点击左列卡片 =====
   const handleLeftClick = (card: Card) => {
     if (card.matched || status !== 'playing') return
+    playClickSound()
     setSelectedLeft(card.id)
   }
 
   // ===== 点击右列卡片 =====
   const handleRightClick = (card: Card) => {
     if (card.matched || status !== 'playing') return
+    playClickSound()
     setSelectedRight(card.id)
   }
 
@@ -353,7 +361,20 @@ export default function WordMatchGame() {
           <ChevronLeft size={24} className="text-[var(--color-foreground)]" />
         </button>
         <h1 className="text-[18px] font-bold text-[var(--color-foreground)] font-secondary">单词连连看</h1>
-        <span className="text-[13px] text-[var(--color-muted)]">{matchedCount}/{totalPairs}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-[13px] text-[var(--color-muted)]">{matchedCount}/{totalPairs}</span>
+          <button
+            onClick={() => {
+              const next = !gameSfxOn
+              setGameSfxOn(next)
+              setGameSfxEnabled(next)
+            }}
+            className={`p-1.5 rounded-full ${gameSfxOn ? 'bg-[var(--color-primary-light)]' : 'bg-[var(--color-background-secondary)]'}`}
+            title={gameSfxOn ? '游戏音效已开启' : '游戏音效已关闭'}
+          >
+            {gameSfxOn ? <Volume2 size={16} className="text-[var(--color-primary)]" /> : <VolumeX size={16} className="text-[var(--color-muted)]" />}
+          </button>
+        </div>
       </div>
 
       {/* 状态栏：分数、连击、时间 */}

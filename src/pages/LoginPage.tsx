@@ -12,10 +12,12 @@ import { useAuth } from '../contexts/AuthContext'
 import Particles from '../components/reactbits/Particles'
 import BrandLogo from '../components/common/BrandLogo'
 import { navigateSafely } from '../lib/navigation'
+import { t, useAppLanguage } from '../lib/i18n'
 
 export default function LoginPage() {
   const navigate = useNavigate()
   const { user, signIn, signInWithGoogle, signInWithApple, loading: authLoading } = useAuth()
+  const lang = useAppLanguage()
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -31,8 +33,8 @@ export default function LoginPage() {
 
   const handleLogin = async () => {
     setError('')
-    if (!email.trim()) return setError('请输入邮箱')
-    if (!password.trim()) return setError('请输入密码')
+    if (!email.trim()) return setError(t(lang, 'auth_email_required'))
+    if (!password.trim()) return setError(t(lang, 'auth_password_required'))
 
     setLoading(true)
     const { error: signInError } = await signIn(email, password)
@@ -71,7 +73,7 @@ export default function LoginPage() {
           <button onClick={() => navigate('/')}
             className="absolute top-8 left-8 flex items-center gap-2 text-[#999] hover:text-[#1A1A1A] text-[14px] transition-colors">
             <ArrowLeft size={16} />
-            返回官网
+            {t(lang, 'auth_back_home')}
           </button>
 
         <BrandLogo
@@ -81,17 +83,18 @@ export default function LoginPage() {
         />
 
         <h2 className="text-[36px] xl:text-[42px] font-extrabold leading-[1.15] mb-4 text-[#1A1A1A]">
-          AI 驱动的<br />智能英语学习
+          {t(lang, 'auth_brand_headline').split('\n').map((line, i, arr) => (
+            <span key={i}>{line}{i < arr.length - 1 && <br />}</span>
+          ))}
         </h2>
         <p className="text-[16px] text-[#666] leading-relaxed max-w-[380px]">
-          翻译、阅读、听力、口语、语法、游戏化记忆，
-          多维度覆盖英语学习全链路，让你效率提升 3 倍。
+          {t(lang, 'auth_brand_subheadline')}
         </p>
 
         <div className="flex gap-10 mt-10">
           {[
-            { num: '50K+', label: '活跃用户' },
-            { num: '4.9', label: 'App 评分' },
+            { num: '50K+', label: t(lang, 'auth_stat_users') },
+            { num: '4.9', label: t(lang, 'auth_stat_rating') },
           ].map(s => (
             <div key={s.label}>
               <div className="text-[28px] font-extrabold text-[#FF8400]">{s.num}</div>
@@ -107,11 +110,11 @@ export default function LoginPage() {
           <button onClick={() => navigate('/')}
             className="flex items-center gap-2 text-[#999] hover:text-[#1A1A1A] text-[14px] mb-8 transition-colors">
             <ArrowLeft size={16} />
-            返回官网
+            {t(lang, 'auth_back_home')}
           </button>
 
-          <h2 className="text-[28px] font-bold mb-1 text-[#1A1A1A]">欢迎回来</h2>
-          <p className="text-[14px] text-[#888] mb-6">登录你的 Linswift 账号继续学习之旅</p>
+          <h2 className="text-[28px] font-bold mb-1 text-[#1A1A1A]">{t(lang, 'auth_welcome')}</h2>
+          <p className="text-[14px] text-[#888] mb-6">{t(lang, 'auth_welcome_desc')}</p>
 
           {error && (
             <div className="mb-4 px-4 py-2.5 bg-red-500/10 border border-red-500/20 rounded-xl">
@@ -121,14 +124,14 @@ export default function LoginPage() {
 
           <div className={`${glassInput} flex items-center gap-3 rounded-xl px-4 py-3.5 mb-3`}>
             <Mail size={18} className="text-[#999] shrink-0" />
-            <input type="email" placeholder="邮箱" value={email}
+            <input type="email" placeholder={t(lang, 'auth_email')} value={email}
               onChange={e => setEmail(e.target.value)}
               className="flex-1 bg-transparent text-[14px] text-[#1A1A1A] placeholder:text-[#bbb] outline-none" />
           </div>
 
           <div className={`${glassInput} flex items-center gap-3 rounded-xl px-4 py-3.5 mb-5`}>
             <Lock size={18} className="text-[#999] shrink-0" />
-            <input type={showPassword ? 'text' : 'password'} placeholder="密码"
+            <input type={showPassword ? 'text' : 'password'} placeholder={t(lang, 'auth_password')}
               value={password} onChange={e => setPassword(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleLogin()}
               className="flex-1 bg-transparent text-[14px] text-[#1A1A1A] placeholder:text-[#bbb] outline-none" />
@@ -142,12 +145,12 @@ export default function LoginPage() {
           <button onClick={handleLogin} disabled={loading}
             className="w-full py-3.5 bg-[#FF8400] hover:bg-[#E87600] text-white text-[15px] font-semibold rounded-xl active:scale-[0.98] transition-all disabled:opacity-60 flex items-center justify-center gap-2">
             {loading && <Loader2 size={16} className="animate-spin" />}
-            {loading ? '登录中...' : '登录'}
+            {loading ? t(lang, 'auth_logging_in') : t(lang, 'auth_login')}
           </button>
 
           <div className="flex items-center gap-3 mt-6 mb-4">
             <div className="flex-1 h-px bg-black/10" />
-            <span className="text-[12px] text-[#999]">其他方式登录</span>
+            <span className="text-[12px] text-[#999]">{t(lang, 'auth_other_methods')}</span>
             <div className="flex-1 h-px bg-black/10" />
           </div>
 
@@ -173,9 +176,9 @@ export default function LoginPage() {
           </div>
 
             <p className="text-center text-[13px] text-[#999] mt-5">
-              还没有账号？
+              {t(lang, 'auth_no_account')}
               <span onClick={() => navigateSafely(navigate, '/register')}
-                className="text-[#FF8400] font-semibold ml-1 cursor-pointer hover:underline">注册</span>
+                className="text-[#FF8400] font-semibold ml-1 cursor-pointer hover:underline">{t(lang, 'auth_register')}</span>
           </p>
         </div>
         </div>
@@ -205,7 +208,7 @@ export default function LoginPage() {
               showText={false}
             />
             <h1 className="text-[#1A1A1A] text-[28px] font-bold tracking-tight">Linswift</h1>
-            <p className="text-[#888] text-[14px] mt-2">AI 驱动的智能英语学习</p>
+            <p className="text-[#888] text-[14px] mt-2">{t(lang, 'auth_brand_tagline')}</p>
           </div>
         </div>
 
@@ -213,8 +216,8 @@ export default function LoginPage() {
         <div className="backdrop-blur-xl bg-white/70 border-t border-white/50 rounded-t-[28px] px-7 pt-8 pb-10 shadow-[0_-8px_32px_rgba(0,0,0,0.1)] -mt-7 relative z-10"
           style={{ WebkitBackdropFilter: 'blur(24px) saturate(1.8)', backdropFilter: 'blur(24px) saturate(1.8)' }}>
           <div className="w-full max-w-[400px] mx-auto">
-            <h2 className="text-[#1A1A1A] text-[24px] font-bold mb-1">欢迎回来</h2>
-            <p className="text-[#888] text-[13px] mb-6">登录你的 Linswift 账号继续学习之旅</p>
+            <h2 className="text-[#1A1A1A] text-[24px] font-bold mb-1">{t(lang, 'auth_welcome')}</h2>
+            <p className="text-[#888] text-[13px] mb-6">{t(lang, 'auth_welcome_desc')}</p>
 
             {error && (
               <div className="mb-4 px-4 py-2.5 bg-red-500/10 border border-red-500/20 rounded-xl">
@@ -224,14 +227,14 @@ export default function LoginPage() {
 
             <div className={`${glassInput} flex items-center gap-3 rounded-xl px-4 py-3.5 mb-3`}>
               <Mail size={18} className="text-[#999] shrink-0" />
-              <input type="email" placeholder="邮箱" value={email}
+              <input type="email" placeholder={t(lang, 'auth_email')} value={email}
                 onChange={e => setEmail(e.target.value)}
                 className="flex-1 bg-transparent text-[14px] text-[#1A1A1A] placeholder:text-[#bbb] outline-none" />
             </div>
 
             <div className={`${glassInput} flex items-center gap-3 rounded-xl px-4 py-3.5 mb-5`}>
               <Lock size={18} className="text-[#999] shrink-0" />
-              <input type={showPassword ? 'text' : 'password'} placeholder="密码"
+              <input type={showPassword ? 'text' : 'password'} placeholder={t(lang, 'auth_password')}
                 value={password} onChange={e => setPassword(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleLogin()}
                 className="flex-1 bg-transparent text-[14px] text-[#1A1A1A] placeholder:text-[#bbb] outline-none" />
@@ -245,12 +248,12 @@ export default function LoginPage() {
             <button onClick={handleLogin} disabled={loading}
               className="w-full py-3.5 bg-[#FF8400] hover:bg-[#E87600] text-white text-[15px] font-semibold rounded-xl active:scale-[0.98] transition-all disabled:opacity-60 flex items-center justify-center gap-2">
               {loading && <Loader2 size={16} className="animate-spin" />}
-              {loading ? '登录中...' : '登录'}
+              {loading ? t(lang, 'auth_logging_in') : t(lang, 'auth_login')}
             </button>
 
             <div className="flex items-center gap-3 mt-6 mb-4">
               <div className="flex-1 h-px bg-black/10" />
-              <span className="text-[12px] text-[#999]">其他方式登录</span>
+              <span className="text-[12px] text-[#999]">{t(lang, 'auth_other_methods')}</span>
               <div className="flex-1 h-px bg-black/10" />
             </div>
 
@@ -276,9 +279,9 @@ export default function LoginPage() {
             </div>
 
             <p className="text-center text-[13px] text-[#999] mt-5">
-              还没有账号？
+              {t(lang, 'auth_no_account')}
               <span onClick={() => navigateSafely(navigate, '/register')}
-                className="text-[#FF8400] font-semibold ml-1 cursor-pointer hover:underline">注册</span>
+                className="text-[#FF8400] font-semibold ml-1 cursor-pointer hover:underline">{t(lang, 'auth_register')}</span>
             </p>
           </div>
         </div>

@@ -15,6 +15,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useRef,
   useState,
   useCallback,
   type ReactNode,
@@ -56,7 +57,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * 不再依赖数据库触发器，改为应用代码主动创建
    * 使用 upsert 保证幂等（多次调用不会出错）
    */
+  const ensuredUserIds = useRef(new Set<string>())
+
   const ensureProfile = useCallback(async (u: User) => {
+    if (ensuredUserIds.current.has(u.id)) return
+    ensuredUserIds.current.add(u.id)
     try {
       const username = u.user_metadata?.username || u.email?.split('@')[0] || 'User'
       // 用 upsert 保证幂等：如果已存在则不操作
@@ -70,6 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       )
     } catch {
       // profile 创建失败不阻塞用户使用（降级运行）
+      ensuredUserIds.current.delete(u.id)
       console.warn('ensureProfile 失败，降级运行')
     }
   }, [])

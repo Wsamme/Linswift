@@ -13,88 +13,38 @@
 import { ChevronLeft } from 'lucide-react'
 import { useThemeSettings } from '../hooks/useThemeSettings'
 import type { ThemeSettings } from '../lib/theme'
-import { getLanguageLabel, useAppLanguage } from '../lib/i18n'
+import { t, useAppLanguage } from '../lib/i18n'
 import { useLogicalBack } from '../hooks/useLogicalBack'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import SettingsDesktopShell from '../components/settings/SettingsDesktopShell'
 
-const pageText = {
-  'zh-CN': {
-    title: '主题设置',
-    modeTitle: '外观模式',
-    modeDesc: '选择你喜欢的界面外观',
-    fontTitle: '字体大小',
-    fontDesc: '调整应用内的文字显示大小（全局生效）',
-    fontSmall: '小',
-    fontNormal: '标准',
-    fontLarge: '大',
-    languageTitle: '界面语言',
-    colorTitle: '主题色',
-    preview: '这是预览文字 This is preview text',
-    modeLight: '浅色',
-    modeDark: '深色',
-    modeSystem: '跟随浏览器',
-  },
-  en: {
-    title: 'Theme Settings',
-    modeTitle: 'Appearance',
-    modeDesc: 'Choose your preferred appearance',
-    fontTitle: 'Font Size',
-    fontDesc: 'Adjust app text size globally',
-    fontSmall: 'Small',
-    fontNormal: 'Normal',
-    fontLarge: 'Large',
-    languageTitle: 'Language',
-    colorTitle: 'Theme Color',
-    preview: 'This is preview text 这是预览文字',
-    modeLight: 'Light',
-    modeDark: 'Dark',
-    modeSystem: 'Follow Browser',
-  },
-  ja: {
-    title: 'テーマ設定',
-    modeTitle: '表示モード',
-    modeDesc: '好みの表示を選択してください',
-    fontTitle: '文字サイズ',
-    fontDesc: 'アプリ全体の文字サイズを変更します',
-    fontSmall: '小',
-    fontNormal: '標準',
-    fontLarge: '大',
-    languageTitle: '言語',
-    colorTitle: 'テーマカラー',
-    preview: 'これはプレビュー文字です This is preview text',
-    modeLight: 'ライト',
-    modeDark: 'ダーク',
-    modeSystem: 'ブラウザに従う',
-  },
-} as const
-type PageTextKey = keyof (typeof pageText)['zh-CN']
+type I18nKey = Parameters<typeof t>[1]
 
-const modeOptions: { key: ThemeSettings['mode']; icon: string; labelKey: 'modeLight' | 'modeDark' | 'modeSystem' }[] = [
-  { key: 'light', icon: '☀️', labelKey: 'modeLight' },
-  { key: 'dark', icon: '🌙', labelKey: 'modeDark' },
-  { key: 'system', icon: '📱', labelKey: 'modeSystem' },
+const modeOptions: { key: ThemeSettings['mode']; icon: string; labelKey: I18nKey }[] = [
+  { key: 'light', icon: '☀️', labelKey: 'theme_light' },
+  { key: 'dark', icon: '🌙', labelKey: 'theme_dark' },
+  { key: 'system', icon: '📱', labelKey: 'theme_system' },
 ]
 
-const fontSizeOptions: Array<{ labelKey: PageTextKey; value: number; previewSize: number }> = [
-  { labelKey: 'fontSmall', value: 0, previewSize: 13 },
-  { labelKey: 'fontNormal', value: 1, previewSize: 16 },
-  { labelKey: 'fontLarge', value: 2, previewSize: 18 },
+const fontSizeOptions: Array<{ labelKey: I18nKey; value: number; previewSize: number }> = [
+  { labelKey: 'theme_font_small', value: 0, previewSize: 13 },
+  { labelKey: 'theme_font_standard', value: 1, previewSize: 16 },
+  { labelKey: 'theme_font_large', value: 2, previewSize: 18 },
 ]
 
-const languageOptions: Array<{ value: ThemeSettings['language']; label: string }> = [
-  { value: 'zh-CN', label: '简体中文' },
-  { value: 'en', label: 'English' },
-  { value: 'ja', label: '日本語' },
+const languageOptionKeys: Array<{ value: ThemeSettings['language']; labelKey: 'lang_zh_CN' | 'lang_en' | 'lang_ja' }> = [
+  { value: 'zh-CN', labelKey: 'lang_zh_CN' },
+  { value: 'en', labelKey: 'lang_en' },
+  { value: 'ja', labelKey: 'lang_ja' },
 ]
 
-const colorOptions = [
-  { color: '#FF8400', label: '活力橙' },
-  { color: '#3B82F6', label: '蔚蓝' },
-  { color: '#8B5CF6', label: '梦幻紫' },
-  { color: '#22C55E', label: '清新绿' },
-  { color: '#EF4444', label: '热情红' },
-  { color: '#EC4899', label: '甜蜜粉' },
+const colorOptions: Array<{ color: string; labelKey: I18nKey }> = [
+  { color: '#FF8400', labelKey: 'color_orange' },
+  { color: '#3B82F6', labelKey: 'color_blue' },
+  { color: '#8B5CF6', labelKey: 'color_purple' },
+  { color: '#22C55E', labelKey: 'color_green' },
+  { color: '#EF4444', labelKey: 'color_red' },
+  { color: '#EC4899', labelKey: 'color_pink' },
 ]
 
 export default function ThemeSettingsPage() {
@@ -102,7 +52,6 @@ export default function ThemeSettingsPage() {
   const lang = useAppLanguage()
   const { settings, updateSettings } = useThemeSettings()
   const isDesktop = useMediaQuery('(min-width: 768px)')
-  const text = pageText[lang]
 
   const update = (partial: Partial<ThemeSettings>) => {
     updateSettings(partial)
@@ -112,8 +61,8 @@ export default function ThemeSettingsPage() {
 
   const appearanceCard = (
     <div className={`${isDesktop ? 'glass-card-strong rounded-[30px] p-6' : 'bg-[var(--color-card)] rounded-[var(--radius-lg)] p-5'} space-y-3`} style={isDesktop ? undefined : { boxShadow: 'var(--shadow-card)' }}>
-      <h2 className={`${isDesktop ? 'text-[20px]' : 'text-[16px]'} font-semibold text-[var(--color-foreground)]`}>{text.modeTitle}</h2>
-      <p className="text-[12px] text-[var(--color-muted-light)]">{text.modeDesc}</p>
+      <h2 className={`${isDesktop ? 'text-[20px]' : 'text-[16px]'} font-semibold text-[var(--color-foreground)]`}>{t(lang, 'theme_appearance')}</h2>
+      <p className="text-[12px] text-[var(--color-muted-light)]">{t(lang, 'theme_appearance_desc')}</p>
       <div className="grid grid-cols-3 gap-3">
         {modeOptions.map((m) => (
           <button
@@ -127,7 +76,7 @@ export default function ThemeSettingsPage() {
           >
             <span className="text-[24px]">{m.icon}</span>
             <span className={`text-[12px] font-medium ${settings.mode === m.key ? 'text-[var(--color-primary)] font-semibold' : 'text-[var(--color-muted)]'}`}>
-              {text[m.labelKey]}
+              {t(lang, m.labelKey)}
             </span>
           </button>
         ))}
@@ -137,8 +86,8 @@ export default function ThemeSettingsPage() {
 
   const fontCard = (
     <div className={`${isDesktop ? 'glass-card-strong rounded-[30px] p-6' : 'bg-[var(--color-card)] rounded-[var(--radius-lg)] p-5'} space-y-3`} style={isDesktop ? undefined : { boxShadow: 'var(--shadow-card)' }}>
-      <h2 className={`${isDesktop ? 'text-[20px]' : 'text-[16px]'} font-semibold text-[var(--color-foreground)]`}>{text.fontTitle}</h2>
-      <p className="text-[12px] text-[var(--color-muted-light)]">{text.fontDesc}</p>
+      <h2 className={`${isDesktop ? 'text-[20px]' : 'text-[16px]'} font-semibold text-[var(--color-foreground)]`}>{t(lang, 'theme_font_size')}</h2>
+      <p className="text-[12px] text-[var(--color-muted-light)]">{t(lang, 'theme_font_desc')}</p>
       <div className="flex items-center gap-3">
         <span className="text-[12px] text-[var(--color-muted)]">A</span>
         <div className="relative flex h-6 flex-1 items-center">
@@ -174,13 +123,13 @@ export default function ThemeSettingsPage() {
             onClick={() => update({ fontSize: f.value })}
             className={`text-[11px] ${settings.fontSize === f.value ? 'text-[var(--color-primary)] font-bold' : 'text-[var(--color-muted)]'}`}
           >
-            {text[f.labelKey]}
+            {t(lang, f.labelKey)}
           </button>
         ))}
       </div>
       <div className="border-t border-[var(--color-border)] pt-2">
         <p className="leading-relaxed text-[var(--color-foreground)] transition-all" style={{ fontSize: `${currentPreviewSize}px` }}>
-          {text.preview}
+          {t(lang, 'theme_preview')}
         </p>
       </div>
     </div>
@@ -191,12 +140,12 @@ export default function ThemeSettingsPage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-[18px]">🌐</span>
-          <span className={`${isDesktop ? 'text-[16px]' : 'text-[15px]'} text-[var(--color-foreground)]`}>{text.languageTitle}</span>
+          <span className={`${isDesktop ? 'text-[16px]' : 'text-[15px]'} text-[var(--color-foreground)]`}>{t(lang, 'theme_language')}</span>
         </div>
-        <span className="text-[13px] text-[var(--color-primary)]">{getLanguageLabel(settings.language)}</span>
+        <span className="text-[13px] text-[var(--color-primary)]">{t(lang, settings.language === 'zh-CN' ? 'lang_zh_CN' : settings.language === 'ja' ? 'lang_ja' : 'lang_en')}</span>
       </div>
       <div className="flex flex-wrap gap-2">
-        {languageOptions.map((langOption) => (
+        {languageOptionKeys.map((langOption) => (
           <button
             key={langOption.value}
             onClick={() => update({ language: langOption.value })}
@@ -206,7 +155,7 @@ export default function ThemeSettingsPage() {
                 : `${isDesktop ? 'glass-card-elevated' : 'bg-[var(--color-background-secondary)]'} text-[var(--color-muted)]`
             }`}
           >
-            {langOption.label}
+            {t(lang, langOption.labelKey)}
           </button>
         ))}
       </div>
@@ -217,7 +166,7 @@ export default function ThemeSettingsPage() {
     <div className={`${isDesktop ? 'glass-card-strong rounded-[30px] p-6' : 'bg-[var(--color-card)] rounded-[var(--radius-lg)] p-5'} space-y-3`} style={isDesktop ? undefined : { boxShadow: 'var(--shadow-card)' }}>
       <div className="flex items-center gap-2">
         <span className="text-[18px]">🎨</span>
-        <span className={`${isDesktop ? 'text-[16px]' : 'text-[15px]'} text-[var(--color-foreground)]`}>{text.colorTitle}</span>
+        <span className={`${isDesktop ? 'text-[16px]' : 'text-[15px]'} text-[var(--color-foreground)]`}>{t(lang, 'theme_color')}</span>
       </div>
       <div className="flex flex-wrap justify-center gap-3">
         {colorOptions.map((c) => (
@@ -228,7 +177,7 @@ export default function ThemeSettingsPage() {
               settings.primaryColor === c.color ? 'ring-2 ring-[var(--color-foreground)] ring-offset-2 scale-110' : ''
             }`}
             style={{ backgroundColor: c.color }}
-            title={c.label}
+            title={t(lang, c.labelKey)}
           />
         ))}
       </div>
@@ -238,19 +187,19 @@ export default function ThemeSettingsPage() {
   if (isDesktop) {
     return (
       <SettingsDesktopShell
-        title={text.title}
-        description="桌面端主题设置改成双列工作台，让外观、字体、语言和主题色不再挤在手机宽度里。"
+        title={t(lang, 'theme_title')}
+        description={t(lang, 'theme_desktop_desc')}
         onBack={goBack}
         sideTitle="Theme Snapshot"
-        sideDescription="当前主题状态会全局生效，切换语言与主题色后可以立即在整个应用中看到变化。"
+        sideDescription={t(lang, 'theme_side_desc')}
         sideContent={
           <div className="space-y-6">
             <div className="glass-card-elevated rounded-[28px] p-6">
               <p className="text-[13px] font-semibold uppercase tracking-[0.16em] text-[var(--color-muted)]">Current</p>
               <div className="mt-4 space-y-3">
-                <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">{text.modeTitle}：{text[modeOptions.find((m) => m.key === settings.mode)?.labelKey || 'modeSystem']}</div>
-                <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">{text.languageTitle}：{getLanguageLabel(settings.language)}</div>
-                <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">{text.colorTitle}：{colorOptions.find((item) => item.color === settings.primaryColor)?.label || '活力橙'}</div>
+                <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">{t(lang, 'theme_appearance')}：{t(lang, modeOptions.find((m) => m.key === settings.mode)?.labelKey || 'theme_system')}</div>
+                <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">{t(lang, 'theme_language')}：{t(lang, settings.language === 'zh-CN' ? 'lang_zh_CN' : settings.language === 'ja' ? 'lang_ja' : 'lang_en')}</div>
+                <div className="rounded-[18px] bg-white/50 px-4 py-3 text-[14px] text-[var(--color-foreground)]/82">{t(lang, 'theme_color')}：{t(lang, colorOptions.find((item) => item.color === settings.primaryColor)?.labelKey || 'color_orange')}</div>
               </div>
             </div>
           </div>
@@ -280,13 +229,13 @@ export default function ThemeSettingsPage() {
           >
             <ChevronLeft size={20} className="text-[var(--color-foreground)]" />
           </button>
-          <h1 className="text-[18px] font-bold text-[var(--color-foreground)] font-secondary">{text.title}</h1>
+          <h1 className="text-[18px] font-bold text-[var(--color-foreground)] font-secondary">{t(lang, 'theme_title')}</h1>
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 pb-8 space-y-4">
           <div className="bg-[var(--color-card)] rounded-[var(--radius-lg)] p-5 space-y-3" style={{ boxShadow: 'var(--shadow-card)' }}>
-            <h2 className="text-[16px] font-semibold text-[var(--color-foreground)]">{text.modeTitle}</h2>
-            <p className="text-[12px] text-[var(--color-muted-light)]">{text.modeDesc}</p>
+            <h2 className="text-[16px] font-semibold text-[var(--color-foreground)]">{t(lang, 'theme_appearance')}</h2>
+            <p className="text-[12px] text-[var(--color-muted-light)]">{t(lang, 'theme_appearance_desc')}</p>
             <div className="flex gap-2.5">
               {modeOptions.map((m) => (
                 <button
@@ -300,7 +249,7 @@ export default function ThemeSettingsPage() {
                 >
                   <span className="text-[24px]">{m.icon}</span>
                   <span className={`text-[12px] font-medium ${settings.mode === m.key ? 'text-[var(--color-primary)] font-semibold' : 'text-[var(--color-muted)]'}`}>
-                    {text[m.labelKey]}
+                    {t(lang, m.labelKey)}
                   </span>
                 </button>
               ))}
@@ -308,8 +257,8 @@ export default function ThemeSettingsPage() {
           </div>
 
           <div className="bg-[var(--color-card)] rounded-[var(--radius-lg)] p-5 space-y-3" style={{ boxShadow: 'var(--shadow-card)' }}>
-            <h2 className="text-[16px] font-semibold text-[var(--color-foreground)]">{text.fontTitle}</h2>
-            <p className="text-[12px] text-[var(--color-muted-light)]">{text.fontDesc}</p>
+            <h2 className="text-[16px] font-semibold text-[var(--color-foreground)]">{t(lang, 'theme_font_size')}</h2>
+            <p className="text-[12px] text-[var(--color-muted-light)]">{t(lang, 'theme_font_desc')}</p>
 
             <div className="flex items-center gap-3">
               <span className="text-[12px] text-[var(--color-muted)]">A</span>
@@ -349,14 +298,14 @@ export default function ThemeSettingsPage() {
                   onClick={() => update({ fontSize: f.value })}
                   className={`text-[11px] ${settings.fontSize === f.value ? 'text-[var(--color-primary)] font-bold' : 'text-[var(--color-muted)]'}`}
                 >
-                  {text[f.labelKey]}
+                  {t(lang, f.labelKey)}
                 </button>
               ))}
             </div>
 
             <div className="pt-2 border-t border-[var(--color-border)]">
               <p className="text-[var(--color-foreground)] leading-relaxed transition-all" style={{ fontSize: `${currentPreviewSize}px` }}>
-                {text.preview}
+                {t(lang, 'theme_preview')}
               </p>
             </div>
           </div>
@@ -365,22 +314,22 @@ export default function ThemeSettingsPage() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="text-[18px]">🌐</span>
-                <span className="text-[15px] text-[var(--color-foreground)]">{text.languageTitle}</span>
+                <span className="text-[15px] text-[var(--color-foreground)]">{t(lang, 'theme_language')}</span>
               </div>
-              <span className="text-[13px] text-[var(--color-primary)]">{getLanguageLabel(settings.language)}</span>
+              <span className="text-[13px] text-[var(--color-primary)]">{t(lang, settings.language === 'zh-CN' ? 'lang_zh_CN' : settings.language === 'ja' ? 'lang_ja' : 'lang_en')}</span>
             </div>
             <div className="flex gap-2 flex-wrap">
-              {languageOptions.map((lang) => (
+              {languageOptionKeys.map((langOpt) => (
                 <button
-                  key={lang.value}
-                  onClick={() => update({ language: lang.value })}
+                  key={langOpt.value}
+                  onClick={() => update({ language: langOpt.value })}
                   className={`px-3 py-1.5 rounded-full text-[12px] ${
-                    settings.language === lang.value
+                    settings.language === langOpt.value
                       ? 'bg-[var(--color-primary)] text-white'
                       : 'bg-[var(--color-background-secondary)] text-[var(--color-muted)]'
                   }`}
                 >
-                  {lang.label}
+                  {t(lang, langOpt.labelKey)}
                 </button>
               ))}
             </div>
@@ -389,7 +338,7 @@ export default function ThemeSettingsPage() {
           <div className="bg-[var(--color-card)] rounded-[var(--radius-lg)] p-5 space-y-3" style={{ boxShadow: 'var(--shadow-card)' }}>
             <div className="flex items-center gap-2">
               <span className="text-[18px]">🎨</span>
-              <span className="text-[15px] text-[var(--color-foreground)]">{text.colorTitle}</span>
+              <span className="text-[15px] text-[var(--color-foreground)]">{t(lang, 'theme_color')}</span>
             </div>
             <div className="flex gap-3 justify-center flex-wrap">
               {colorOptions.map((c) => (
@@ -400,7 +349,7 @@ export default function ThemeSettingsPage() {
                     settings.primaryColor === c.color ? 'ring-2 ring-offset-2 ring-[var(--color-foreground)] scale-110' : ''
                   }`}
                   style={{ backgroundColor: c.color }}
-                  title={c.label}
+                  title={t(lang, c.labelKey)}
                 />
               ))}
             </div>

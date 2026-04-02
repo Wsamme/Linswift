@@ -847,9 +847,8 @@ export async function fetchLinswiftWordDetail(
   const language = resolveTranslationLanguage(targetLanguage)
   const mode = resolveTranslationMode(translationMode)
 
-  if (!shouldUseContextualAi(apiKey, context, mode)) {
-    return fetchDictionaryWordDetail(word, targetLanguage, context, mode)
-  }
+  // Always try AI first for word detail — single word lookups are cheap via proxy.
+  // Falls back to dictionary-only if AI completely fails (lines 892, 918).
 
   const prompt = `你是 Linswift 英语学习 APP 的单词老师。请为这个英文单词生成学习卡片。
 

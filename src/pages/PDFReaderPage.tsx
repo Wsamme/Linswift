@@ -1761,25 +1761,34 @@ export default function PDFReaderPage() {
                       ))
                     }
 
-                    return coverEntries.map((box) => (
-                      <span
-                        key={box.key}
-                        className="ocr-overlay-word"
-                        style={{
-                          position: 'absolute',
-                          left: box.left,
-                          top: box.top,
-                          width: box.width,
-                          height: box.height,
-                          fontSize: Math.max(10, box.height * 0.72),
-                          lineHeight: 1,
-                          userSelect: 'text',
-                          WebkitUserSelect: 'text',
-                        }}
-                      >
-                        {box.text}
-                      </span>
-                    ))
+                    return coverEntries.map((box) => {
+                      // Fit font size to box: estimate char width and scale down if needed
+                      const charCount = Math.max(1, box.text.length)
+                      const heightBasedSize = Math.max(8, box.height * 0.72)
+                      const widthBasedSize = charCount > 0 ? Math.max(8, (box.width / charCount) * 1.6) : heightBasedSize
+                      const fontSize = Math.min(heightBasedSize, widthBasedSize)
+
+                      return (
+                        <span
+                          key={box.key}
+                          className="ocr-overlay-word"
+                          style={{
+                            position: 'absolute',
+                            left: box.left,
+                            top: box.top,
+                            width: box.width,
+                            height: box.height,
+                            fontSize,
+                            lineHeight: 1,
+                            userSelect: 'text',
+                            WebkitUserSelect: 'text',
+                            textOverflow: 'clip',
+                          }}
+                        >
+                          {box.text}
+                        </span>
+                      )
+                    })
                   })()}
                 </div>
               )}

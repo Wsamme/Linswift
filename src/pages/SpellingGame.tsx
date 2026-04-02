@@ -21,6 +21,10 @@ import {
   KEYBOARD_SFX_STORAGE_KEY,
   playKeyboardSuccessSound,
   playKeyboardTapSound,
+  getSfxType,
+  setSfxType,
+  SFX_OPTIONS,
+  type SfxType,
 } from '../lib/keyboardSfx'
 
 /**
@@ -80,6 +84,8 @@ export default function SpellingGame() {
     const raw = localStorage.getItem(KEYBOARD_SFX_STORAGE_KEY)
     return raw === null ? true : raw === '1'
   })
+  const [sfxType, setSfxTypeState] = useState<SfxType>(getSfxType)
+  const [showSfxPicker, setShowSfxPicker] = useState(false)
 
   // 计时器
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -457,17 +463,49 @@ export default function SpellingGame() {
           <ChevronLeft size={24} className="text-[var(--color-foreground)]" />
         </button>
         <h1 className="text-[18px] font-bold text-[var(--color-foreground)] font-secondary">拼写挑战</h1>
-        <div className="flex items-center gap-2">
+        <div className="relative flex items-center gap-2">
           <button
             onClick={() => setSoundEnabled((prev) => !prev)}
             className={`p-1.5 rounded-full ${soundEnabled ? 'bg-[var(--color-primary-light)]' : 'bg-[var(--color-background-secondary)]'}`}
-            title={soundEnabled ? '音效与朗读已开启' : '音效与朗读已关闭'}
+            title={soundEnabled ? '音效已开启' : '音效已关闭'}
           >
             {soundEnabled
               ? <Volume2 size={16} className="text-[var(--color-primary)]" />
               : <VolumeX size={16} className="text-[var(--color-muted)]" />}
           </button>
+          {soundEnabled && (
+            <button
+              onClick={() => setShowSfxPicker(p => !p)}
+              className="rounded-full bg-[var(--color-primary)] px-2 py-1 text-[10px] text-white"
+              title="切换音色"
+            >
+              {SFX_OPTIONS.find(o => o.value === sfxType)?.emoji?.slice(0, 2) || '🎹'}
+            </button>
+          )}
           <span className="text-[13px] text-[var(--color-muted)]">{currentIndex + 1}/{words.length}</span>
+          {showSfxPicker && soundEnabled && (
+            <div className="absolute right-0 top-full z-50 mt-2 w-36 rounded-2xl border border-[var(--color-border)] bg-[var(--color-background)] p-1.5 shadow-xl">
+              {SFX_OPTIONS.map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => {
+                    setSfxTypeState(opt.value)
+                    setSfxType(opt.value)
+                    setShowSfxPicker(false)
+                    playKeyboardTapSound('e', 0)
+                  }}
+                  className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-[13px] transition-colors ${
+                    sfxType === opt.value
+                      ? 'bg-[var(--color-primary-light)] font-semibold text-[var(--color-primary)]'
+                      : 'text-[var(--color-foreground)] hover:bg-[var(--color-background-secondary)]'
+                  }`}
+                >
+                  <span>{opt.emoji}</span>
+                  <span>{opt.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

@@ -11,6 +11,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { navigateSafely } from '../lib/navigation'
 import { useLogicalBack } from '../hooks/useLogicalBack'
+import { t, useAppLanguage } from '../lib/i18n'
 import BrandLogo from '../components/common/BrandLogo'
 
 interface MenuItem {
@@ -23,6 +24,7 @@ interface MenuItem {
 
 export default function AboutPage() {
   const navigate = useNavigate()
+  const lang = useAppLanguage()
   const goBack = useLogicalBack('/app/profile')
 
   const openMailto = (email: string, subject: string) => {
@@ -34,12 +36,12 @@ export default function AboutPage() {
   }
 
   const menuItems: MenuItem[] = [
-    { icon: '🔄', label: '检查更新', value: '已是最新版', valueColor: 'text-[var(--color-success)]' },
-    { icon: '📄', label: '用户协议', action: () => navigateSafely(navigate, '/legal/user-agreement') },
-    { icon: '🔒', label: '隐私政策', action: () => navigateSafely(navigate, '/legal/privacy-policy') },
-    { icon: '💬', label: '帮助与反馈', action: () => openMailto('aw@linswift.com', 'Linswift 帮助与反馈') },
-    { icon: '⭐', label: '给我们评分', action: () => openMailto('aw@linswift.com', 'Linswift 产品评分与建议') },
-    { icon: '📧', label: '联系我们', action: () => openExternal('mailto:aw@linswift.com') },
+    { icon: '🔄', label: t(lang, 'about_check_update'), value: t(lang, 'about_up_to_date'), valueColor: 'text-[var(--color-success)]' },
+    { icon: '📄', label: t(lang, 'about_user_agreement'), action: () => navigateSafely(navigate, '/legal/user-agreement') },
+    { icon: '🔒', label: t(lang, 'about_privacy'), action: () => navigateSafely(navigate, '/legal/privacy-policy') },
+    { icon: '💬', label: t(lang, 'about_help'), action: () => openMailto('aw@linswift.com', 'Linswift Help & Feedback') },
+    { icon: '⭐', label: t(lang, 'about_rate'), action: () => openMailto('aw@linswift.com', 'Linswift Rating & Suggestions') },
+    { icon: '📧', label: t(lang, 'about_contact'), action: () => openExternal('mailto:aw@linswift.com') },
   ]
 
   return (
@@ -54,7 +56,7 @@ export default function AboutPage() {
             <ChevronLeft size={20} className="text-[var(--color-foreground)]" />
           </button>
           <h1 className="text-[18px] font-bold text-[var(--color-foreground)] font-secondary">
-            关于我们
+            {t(lang, 'about_title')}
           </h1>
         </div>
 
@@ -68,9 +70,9 @@ export default function AboutPage() {
             {/* App 名称 */}
             <h2 className="text-[20px] font-bold text-[var(--color-foreground)]">Linswift</h2>
             {/* 版本号 */}
-            <p className="text-[13px] text-[var(--color-muted-light)]">版本 2.1.0 (Build 2026)</p>
+            <p className="text-[13px] text-[var(--color-muted-light)]">{t(lang, 'about_version')} 2.1.0 (Build 2026)</p>
             {/* 标语 */}
-            <p className="text-[13px] text-[var(--color-muted)]">智能语言学习，让世界触手可及</p>
+            <p className="text-[13px] text-[var(--color-muted)]">{t(lang, 'about_tagline')}</p>
           </div>
 
           {/* ----- 菜单列表 ----- */}

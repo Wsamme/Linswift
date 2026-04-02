@@ -10,6 +10,16 @@ export const ACCENT_LABELS: Record<AccentType, string> = {
   'en-AU': '澳式英语',
 }
 
+const ACCENT_LABELS_I18N: Record<string, Record<AccentType, string>> = {
+  'zh-CN': { 'en-US': '美式英语', 'en-GB': '英式英语', 'en-AU': '澳式英语' },
+  en: { 'en-US': 'American English', 'en-GB': 'British English', 'en-AU': 'Australian English' },
+  ja: { 'en-US': 'アメリカ英語', 'en-GB': 'イギリス英語', 'en-AU': 'オーストラリア英語' },
+}
+
+export function getAccentLabel(accent: AccentType, lang: string = 'zh-CN'): string {
+  return ACCENT_LABELS_I18N[lang]?.[accent] || ACCENT_LABELS[accent]
+}
+
 export const ACCENT_FLAGS: Record<AccentType, string> = {
   'en-US': '🇺🇸',
   'en-GB': '🇬🇧',
@@ -122,9 +132,29 @@ export function saveTTSSettings(settings: Partial<TTSSettings>): TTSSettings {
   return merged
 }
 
+// Pre-cache voices on load so speak() can be synchronous from user gesture
+let cachedVoices: SpeechSynthesisVoice[] = []
+
+function refreshVoiceCache() {
+  if (!('speechSynthesis' in window)) return
+  cachedVoices = window.speechSynthesis.getVoices()
+}
+
+// Eagerly load voices
+if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+  refreshVoiceCache()
+  window.speechSynthesis.addEventListener('voiceschanged', refreshVoiceCache)
+}
+
 export function getAvailableVoices(): SpeechSynthesisVoice[] {
   if (!('speechSynthesis' in window)) return []
-  return window.speechSynthesis.getVoices()
+  // Always try fresh first, fall back to cache
+  const fresh = window.speechSynthesis.getVoices()
+  if (fresh.length > 0) {
+    cachedVoices = fresh
+    return fresh
+  }
+  return cachedVoices
 }
 
 export function waitForVoices(): Promise<SpeechSynthesisVoice[]> {
@@ -148,8 +178,17 @@ function scoreEnglishVoice(voice: SpeechSynthesisVoice, accent: AccentType): num
   const preferredNames = PREFERRED_ENGLISH_VOICE_NAMES[accent]
   let score = 0
 
-  if (voice.lang === accent) score += 500
-  else if (voice.lang.startsWith(accent.split('-')[0])) score += 180
+  if (voice.lang === accent) {
+    // Exact region match (e.g. en-GB voice for en-GB accent)
+    score += 500
+  } else if (voice.lang.startsWith('en-') && voice.lang !== accent) {
+    // Wrong English region (e.g. en-US voice when en-GB is wanted)
+    // Still usable but heavily penalized so correct region wins
+    score -= 200
+  } else if (voice.lang === 'en') {
+    // Generic 'en' without region — neutral, slight bonus
+    score += 100
+  }
 
   if (voice.localService) score += 60
   if (voice.default) score += 20
@@ -224,32 +263,32 @@ let loopTimer: ReturnType<typeof setTimeout> | null = null
 
 function speakWithRetry(createUtterance: () => SpeechSynthesisUtterance) {
   const synth = window.speechSynthesis
+  warmUpSpeech()
+
+  const utterance = createUtterance()
   let started = false
-  let retryScheduled = true
-  const first = createUtterance()
 
-  first.onstart = () => {
-    started = true
-    retryScheduled = false
+  utterance.onstart = () => { started = true }
+  utterance.onerror = (e) => {
+    // Retry once on 'interrupted' (Chrome race after cancel)
+    if (!started && e.error === 'interrupted') {
+      setTimeout(() => {
+        synth.cancel()
+        synth.speak(createUtterance())
+      }, 80)
+    }
   }
 
-  first.onend = () => {
-    retryScheduled = false
-  }
+  // Speak IMMEDIATELY — no setTimeout, preserves user gesture for Safari/iOS
+  synth.speak(utterance)
 
-  first.onerror = () => {
-    retryScheduled = false
-  }
-
-  synth.speak(first)
-
-  // 某些浏览器首次 speak 会静默且不触发 onstart，自动补一次。
-  // 但如果浏览器已经进入 speaking/pending，就不要再次补播，否则 Chrome 会听起来像重复播放。
+  // Fallback: if nothing happened after 400ms, retry
   setTimeout(() => {
-    if (!retryScheduled || started || synth.speaking || synth.pending) return
-    synth.cancel()
-    synth.speak(createUtterance())
-  }, 280)
+    if (!started && !synth.speaking && !synth.pending) {
+      synth.cancel()
+      synth.speak(createUtterance())
+    }
+  }, 400)
 }
 
 export function speakEnglish(text: string, overrideRate?: number) {
@@ -289,11 +328,9 @@ export function speakEnglish(text: string, overrideRate?: number) {
     speakWithRetry(createUtterance)
   }
 
-  if (getAvailableVoices().length === 0) {
-    void waitForVoices().then(speakNow)
-  } else {
-    speakNow()
-  }
+  // Always speak immediately — don't defer to .then() which breaks mobile user gesture
+  // If voices aren't loaded yet, speak without voice selection (browser default)
+  speakNow()
 }
 
 export function speakChinese(text: string, rate?: number) {
@@ -304,27 +341,19 @@ export function speakChinese(text: string, rate?: number) {
 
   stopSpeaking()
 
-  const speakNow = () => {
-    const settings = loadTTSSettings()
-    const createUtterance = () => {
-      const utterance = new SpeechSynthesisUtterance(safeText)
-      utterance.lang = 'zh-CN'
-      utterance.rate = rate ?? settings.rate
-      utterance.volume = settings.volume
-      utterance.pitch = 1
-      const voice = findChineseVoice()
-      if (voice) utterance.voice = voice
-      return utterance
-    }
-
-    speakWithRetry(createUtterance)
+  const settings = loadTTSSettings()
+  const createUtterance = () => {
+    const utterance = new SpeechSynthesisUtterance(safeText)
+    utterance.lang = 'zh-CN'
+    utterance.rate = rate ?? settings.rate
+    utterance.volume = settings.volume
+    utterance.pitch = 1
+    const voice = findChineseVoice()
+    if (voice) utterance.voice = voice
+    return utterance
   }
 
-  if (getAvailableVoices().length === 0) {
-    void waitForVoices().then(speakNow)
-  } else {
-    speakNow()
-  }
+  speakWithRetry(createUtterance)
 }
 
 export function speakJapanese(text: string, rate?: number) {
@@ -335,27 +364,19 @@ export function speakJapanese(text: string, rate?: number) {
 
   stopSpeaking()
 
-  const speakNow = () => {
-    const settings = loadTTSSettings()
-    const createUtterance = () => {
-      const utterance = new SpeechSynthesisUtterance(safeText)
-      utterance.lang = 'ja-JP'
-      utterance.rate = rate ?? settings.rate
-      utterance.volume = settings.volume
-      utterance.pitch = 1
-      const voice = findJapaneseVoice()
-      if (voice) utterance.voice = voice
-      return utterance
-    }
-
-    speakWithRetry(createUtterance)
+  const settings = loadTTSSettings()
+  const createUtterance = () => {
+    const utterance = new SpeechSynthesisUtterance(safeText)
+    utterance.lang = 'ja-JP'
+    utterance.rate = rate ?? settings.rate
+    utterance.volume = settings.volume
+    utterance.pitch = 1
+    const voice = findJapaneseVoice()
+    if (voice) utterance.voice = voice
+    return utterance
   }
 
-  if (getAvailableVoices().length === 0) {
-    void waitForVoices().then(speakNow)
-  } else {
-    speakNow()
-  }
+  speakWithRetry(createUtterance)
 }
 
 export function speakAuto(text: string) {
@@ -376,6 +397,23 @@ export function speakAuto(text: string) {
   }
 
   speakEnglish(safeText)
+}
+
+// Warm up speech synthesis on first user interaction (required by some browsers)
+let speechWarmedUp = false
+function warmUpSpeech() {
+  if (speechWarmedUp || !('speechSynthesis' in window)) return
+  speechWarmedUp = true
+  const u = new SpeechSynthesisUtterance('')
+  u.volume = 0
+  window.speechSynthesis.speak(u)
+  window.speechSynthesis.cancel()
+}
+
+if (typeof window !== 'undefined') {
+  const warmUp = () => { warmUpSpeech(); window.removeEventListener('click', warmUp); window.removeEventListener('touchstart', warmUp) }
+  window.addEventListener('click', warmUp, { once: true })
+  window.addEventListener('touchstart', warmUp, { once: true })
 }
 
 export function stopSpeaking() {

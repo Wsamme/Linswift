@@ -9,6 +9,7 @@ import { calculateNextReview, getReviewCycleDaysFromLocalStorage } from '../lib/
 import { speakEnglish } from '../lib/tts'
 import { useLogicalBack } from '../hooks/useLogicalBack'
 import { navigateSafely } from '../lib/navigation'
+import { playClickSound, playWrongSound, playCompleteSound, playComboSound, isGameSfxEnabled, setGameSfxEnabled } from '../lib/gameSfx'
 
 const TOTAL_SECONDS = 30
 const REQUIRED_CORRECT_PER_WORD = 2
@@ -62,6 +63,7 @@ export default function LightningGame() {
   const [pickedWord, setPickedWord] = useState<string | null>(null)
   const [lastCorrect, setLastCorrect] = useState<boolean | null>(null)
   const [masteryMap, setMasteryMap] = useState<Record<string, number>>({})
+  const [gameSfxOn, setGameSfxOn] = useState(isGameSfxEnabled)
   const [autoPlayAudio, setAutoPlayAudio] = useState<boolean>(() => {
     const raw = localStorage.getItem(AUTO_AUDIO_KEY)
     return raw === null ? true : raw === '1'
@@ -150,6 +152,7 @@ export default function LightningGame() {
       setTimeLeft(prev => {
         if (prev <= 1) {
           if (timerRef.current) clearInterval(timerRef.current)
+          playCompleteSound()
           setStatus('finished')
           return 0
         }
@@ -183,6 +186,7 @@ export default function LightningGame() {
 
   const handlePick = useCallback((option: WordPair) => {
     if (status !== 'playing' || !question || lockRef.current || timeLeft <= 0) return
+    playClickSound()
     lockRef.current = true
 
     const correct = normalizeWord(option.english) === normalizeWord(question.target.english)
@@ -215,16 +219,19 @@ export default function LightningGame() {
       setCombo(nextCombo)
       setMaxCombo(prev => Math.max(prev, nextCombo))
       setScore(prev => prev + Math.max(60, Math.floor(calcCorrectScore(nextCombo) * 0.8)))
+      playComboSound(nextCombo)
     } else {
       setWrongCount(prev => prev + 1)
       setCombo(0)
       setScore(prev => Math.max(0, prev - 10))
+      playWrongSound()
     }
 
     window.setTimeout(() => {
       const nextQuestion = createQuestion(pool, nextMasteryMap)
       if (!nextQuestion) {
         if (timerRef.current) clearInterval(timerRef.current)
+        playCompleteSound()
         setStatus('finished')
         setTimeLeft(0)
       } else {
@@ -312,13 +319,26 @@ export default function LightningGame() {
       <div className="flex items-center justify-between px-5 py-4">
         <button onClick={goBack} className="p-1"><ChevronLeft size={24} className="text-[var(--color-foreground)]" /></button>
         <h1 className="text-[18px] font-bold text-[var(--color-foreground)] font-secondary">限时闪电</h1>
-        <button
-          onClick={() => setAutoPlayAudio(v => !v)}
-          className={`p-1.5 rounded-full ${autoPlayAudio ? 'bg-[var(--color-primary-light)]' : 'bg-[var(--color-background-secondary)]'}`}
-          title={autoPlayAudio ? '自动发音已开启' : '自动发音已关闭'}
-        >
-          {autoPlayAudio ? <Volume2 size={16} className="text-[var(--color-primary)]" /> : <VolumeX size={16} className="text-[var(--color-muted)]" />}
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => {
+              const next = !gameSfxOn
+              setGameSfxOn(next)
+              setGameSfxEnabled(next)
+            }}
+            className={`p-1.5 rounded-full ${gameSfxOn ? 'bg-[var(--color-primary-light)]' : 'bg-[var(--color-background-secondary)]'}`}
+            title={gameSfxOn ? '游戏音效已开启' : '游戏音效已关闭'}
+          >
+            {gameSfxOn ? <Zap size={14} className="text-[var(--color-primary)]" /> : <VolumeX size={14} className="text-[var(--color-muted)]" />}
+          </button>
+          <button
+            onClick={() => setAutoPlayAudio(v => !v)}
+            className={`p-1.5 rounded-full ${autoPlayAudio ? 'bg-[var(--color-primary-light)]' : 'bg-[var(--color-background-secondary)]'}`}
+            title={autoPlayAudio ? '自动发音已开启' : '自动发音已关闭'}
+          >
+            {autoPlayAudio ? <Volume2 size={16} className="text-[var(--color-primary)]" /> : <VolumeX size={16} className="text-[var(--color-muted)]" />}
+          </button>
+        </div>
       </div>
 
       <div className="mx-5 mb-4 p-3 rounded-[var(--radius-md)] bg-[var(--color-card)] flex items-center gap-3" style={{ boxShadow: 'var(--shadow-card)' }}>

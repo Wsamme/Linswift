@@ -27,9 +27,9 @@ import { VOCAB_LEVEL_TARGETS } from '../data/vocab-test/openSourceVocab'
 // 设置菜单项 —— 学习设置已集成到 PDF 阅读器中
 // 系统后台仅通过直接 URL /admin/overview 访问，不对普通用户展示
 const menuItems = [
-  { icon: '🔔', label: '提醒通知', desc: '推送通知管理', path: '/notification-settings' },
-  { icon: '🎨', label: '主题设置', desc: '外观、字体、语言', path: '/theme-settings' },
-  { icon: 'ℹ️', label: '关于我们', desc: 'Linswift v2.1.0', path: '/about' },
+  { icon: '🔔', path: '/notification-settings' },
+  { icon: '🎨', path: '/theme-settings' },
+  { icon: 'ℹ️', path: '/about' },
 ]
 
 export default function ProfilePage() {
@@ -44,10 +44,10 @@ export default function ProfilePage() {
   const [streakDays, setStreakDays] = useState(0)
 
   const themeDesc = settings.mode === 'system'
-    ? (lang === 'en' ? 'Follow Browser' : lang === 'ja' ? 'ブラウザに従う' : '跟随浏览器')
+    ? t(lang, 'theme_system')
     : settings.mode === 'dark'
-      ? (lang === 'en' ? 'Dark' : lang === 'ja' ? 'ダーク' : '深色模式')
-      : (lang === 'en' ? 'Light' : lang === 'ja' ? 'ライト' : '浅色模式')
+      ? t(lang, 'theme_dark')
+      : t(lang, 'theme_light')
 
   // ===== 页面挂载 + 每次聚焦时刷新数据（确保头像同步） =====
   useEffect(() => {
@@ -156,14 +156,14 @@ export default function ProfilePage() {
 
       {/* ===== 学习统计 ===== */}
       <div className="grid grid-cols-3 gap-2.5 mx-5 mb-5">
-        <StatCard value={String(streakDays)} label={t(lang, 'profile_days')} color="#FF8400" bgColor="#FFF5EB" />
-        <StatCard value={vocabulary.length.toLocaleString()} label={t(lang, 'profile_words')} color="#8B5CF6" bgColor="#F5F3FF" />
+        <StatCard value={String(streakDays)} label={t(lang, 'profile_days')} color="#FF8400" bgColor="rgba(255,132,0,0.1)" />
+        <StatCard value={vocabulary.length.toLocaleString()} label={t(lang, 'profile_words')} color="#8B5CF6" bgColor="rgba(139,92,246,0.1)" />
         <StatCard
           value={vocabularyLevelRecord.value}
           label={t(lang, 'profile_vocab_level')}
           helper={vocabularyLevelRecord.helper}
           color="#3B82F6"
-          bgColor="#EFF6FF"
+          bgColor="rgba(59,130,246,0.1)"
           onClick={() => navigate('/vocab-test')}
         />
       </div>

@@ -621,3 +621,39 @@ export function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
+
+/**
+ * Render the first page of a PDF as a JPEG thumbnail data URL.
+ * Returns a small base64 string suitable for storing as a cover image.
+ */
+export async function generatePDFThumbnail(
+  file: File,
+  options?: { maxWidth?: number; maxHeight?: number; quality?: number },
+): Promise<string | null> {
+  const maxW = options?.maxWidth ?? 180
+  const maxH = options?.maxHeight ?? 240
+  const quality = options?.quality ?? 0.6
+
+  try {
+    const pdf = await loadPDFDocument(file)
+    const page = await pdf.getPage(1)
+
+    // Calculate scale to fit within maxW × maxH
+    const unscaled = page.getViewport({ scale: 1 })
+    const scale = Math.min(maxW / unscaled.width, maxH / unscaled.height)
+    const viewport = page.getViewport({ scale })
+
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.round(viewport.width)
+    canvas.height = Math.round(viewport.height)
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+
+    await page.render({ canvasContext: ctx, viewport, canvas } as any).promise
+    const dataUrl = canvas.toDataURL('image/jpeg', quality)
+    pdf.destroy()
+    return dataUrl
+  } catch {
+    return null
+  }
+}
